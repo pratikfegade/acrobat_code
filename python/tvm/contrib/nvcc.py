@@ -29,7 +29,7 @@ from . import utils
 from .._ffi.base import py_str
 
 
-def compile_cuda(code, target_format="ptx", arch=None, options=None, path_target=None):
+def compile_cuda(code, target_format="ptx", arch="sm_52", options=None, path_target=None):
     """Compile cuda code with NVCC from env.
 
     Parameters

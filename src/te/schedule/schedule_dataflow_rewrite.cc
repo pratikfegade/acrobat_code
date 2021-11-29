@@ -473,13 +473,13 @@ void RebaseNonZeroMinLoop(ScheduleNode* sch) {
     for (IterVar iv : root_iter_vars) {
       size_t idx = FindNodeRef(leaf_vars, iv);
       auto it = s->iter_var_attrs.find(iv);
-      // don;t need to rebase path that are binded.
-      if (it != s->iter_var_attrs.end() && (*it).second->bind_thread.defined()) {
-        continue;
-      }
+      // don't need to rebase path that are binded.
+      // if (it != s->iter_var_attrs.end() && (*it).second->bind_thread.defined()) {
+      // continue;
+      // }
       if (idx < leaf_vars->size()) {
         // insert rebase
-        IterVar rebased = IterVar(Range(), iv->var.copy_with_suffix(""), iv->iter_type);
+        IterVar rebased = IterVar(Range(), iv->var.copy_with_suffix(".r"), iv->iter_type);
         s->relations.push_back(te::Rebase(iv, rebased));
         if (s->iter_var_attrs.count(iv)) {
           s->iter_var_attrs.Set(rebased, s->iter_var_attrs.at(iv));

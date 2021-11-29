@@ -38,11 +38,11 @@ void Update(std::unordered_map<IterVar, Range>* p_state, const IterVar& iv, Rang
     (*p_state)[iv] = r;
     analyzer->Bind(iv->var, r);
   } else {
-    bool match =
-        is_zero(it->second->min) && analyzer->CanProve(r->extent - it->second->extent == 0);
+    // bool match =
+    // is_zero(it->second->min) && analyzer->CanProve(r->extent - it->second->extent == 0);
+    bool match = analyzer->CanProve(r->extent - it->second->extent == 0);
     ICHECK(match) << iv << " domain already inferred,"
-                  << " cannot prove their extents are the same " << it->second->extent << " vs "
-                  << r->extent;
+                  << " cannot prove their extents are the same " << it->second << " vs " << r;
   }
 }
 
