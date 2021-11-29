@@ -82,7 +82,7 @@ std::string NVRTCCompile(const std::string& code, bool include_path = false) {
   std::vector<std::string> compile_params;
   std::vector<const char*> param_cstrings{};
   nvrtcProgram prog;
-  std::string cc = "30";
+  std::string cc = "52";
   int major, minor;
   cudaError_t e1 = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0);
   cudaError_t e2 = cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0);
@@ -91,7 +91,7 @@ std::string NVRTCCompile(const std::string& code, bool include_path = false) {
     cc = std::to_string(major) + std::to_string(minor);
   } else {
     LOG(WARNING) << "cannot detect compute capability from your device, "
-                 << "fall back to compute_30.";
+                 << "fall back to compute_52.";
   }
 
   compile_params.push_back("-arch=compute_" + cc);
