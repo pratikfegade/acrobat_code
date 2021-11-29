@@ -22,18 +22,13 @@ import pytest
 
 import tvm.target.target
 from tvm.micro import project
-from tvm import micro, relay
+from tvm import relay
+from tvm.relay.backend import Executor, Runtime
 
-TEMPLATE_PROJECT_DIR = (
-    pathlib.Path(__file__).parent
-    / ".."
-    / ".."
-    / ".."
-    / "apps"
-    / "microtvm"
-    / "arduino"
-    / "template_project"
-).resolve()
+TEMPLATE_PROJECT_DIR = pathlib.Path(tvm.micro.get_microtvm_template_projects("arduino"))
+
+
+BOARDS = TEMPLATE_PROJECT_DIR / "boards.json"
 
 BOARDS = TEMPLATE_PROJECT_DIR / "boards.json"
 
@@ -145,12 +140,12 @@ def make_kws_project(board, arduino_cli_cmd, tvm_debug, workspace_dir):
         tflite_model = tflite.Model.GetRootAsModel(tflite_model_buf, 0)
 
     mod, params = relay.frontend.from_tflite(tflite_model)
-    target = tvm.target.target.micro(
-        model, options=["--link-params=1", "--unpacked-api=1", "--executor=aot"]
-    )
+    target = tvm.target.target.micro(model)
+    runtime = Runtime("crt")
+    executor = Executor("aot", {"unpacked-api": True})
 
     with tvm.transform.PassContext(opt_level=3, config={"tir.disable_vectorize": True}):
-        mod = relay.build(mod, target, params=params)
+        mod = relay.build(mod, target, runtime=runtime, executor=executor, params=params)
 
     return tvm.micro.generate_project(
         str(TEMPLATE_PROJECT_DIR),
