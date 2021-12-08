@@ -37,6 +37,7 @@ from .transform import build_config
 from . import debug
 from . import param_dict
 from .backend import vm
+from . import testing
 
 # Root operators
 from .op import nn

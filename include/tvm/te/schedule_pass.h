@@ -105,7 +105,8 @@ Stmt ScheduleOps(Schedule s, Map<IterVar, Range> dom_map, bool debug_keep_trivia
  * \param bindings potential Tensor to Buffer bindings for the Tensors in the body.
  */
 PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
-                                    Optional<Map<Tensor, Buffer>> bindings);
+                                    Optional<Map<Tensor, Buffer>> bindings,
+				    Optional<Map<Var, Buffer>> scatter_bindings);
 
 }  // namespace te
 }  // namespace tvm

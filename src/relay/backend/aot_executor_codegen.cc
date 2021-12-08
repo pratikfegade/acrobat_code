@@ -662,7 +662,7 @@ class AOTExecutorCodegen : public MixedModeVisitor {
 
     // Make the PrimFunc
     return tir::PrimFunc(main_signature_, final_body, VoidType(), Map<tir::Var, tir::Buffer>(),
-                         DictAttrs(dict_attrs));
+			 Map<tir::Var, tir::Buffer>(), DictAttrs(dict_attrs));
   }
 
  protected:

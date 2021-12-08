@@ -37,6 +37,11 @@ void ExprVisitor::VisitExpr_(const AnyNode* op) {}
 void ExprVisitor::VisitExpr_(const LoadNode* op) {
   this->VisitExpr(op->index);
   this->VisitExpr(op->predicate);
+
+  if (op->scatter_batch_index.defined()) {
+    this->VisitExpr(op->scatter_batch_index);
+    this->VisitExpr(op->scatter_elem_index);
+  }
 }
 
 void ExprVisitor::VisitExpr_(const BufferLoadNode* op) {
@@ -129,10 +134,22 @@ PrimExpr ExprMutator::VisitExpr_(const AnyNode* op) { return GetRef<PrimExpr>(op
 PrimExpr ExprMutator::VisitExpr_(const LoadNode* op) {
   PrimExpr index = this->VisitExpr(op->index);
   PrimExpr predicate = this->VisitExpr(op->predicate);
-  if (index.same_as(op->index) && predicate.same_as(op->predicate)) {
+
+  PrimExpr scatter_batch_index = NullValue<PrimExpr>();
+  PrimExpr scatter_elem_index = NullValue<PrimExpr>();
+
+  if (op->scatter_elem_index.defined()) {
+    scatter_batch_index = this->VisitExpr(op->scatter_elem_index);
+    scatter_elem_index = this->VisitExpr(op->scatter_batch_index);
+  }
+
+  if (index.same_as(op->index) && predicate.same_as(op->predicate) &&
+      scatter_batch_index.same_as(op->scatter_batch_index) &&
+      scatter_elem_index.same_as(op->scatter_elem_index)) {
     return GetRef<PrimExpr>(op);
   } else {
-    return Load(op->dtype, op->buffer_var, index, predicate);
+    return Load(op->dtype, op->buffer_var, index, predicate, op->scatter_buffer_var,
+		op->scatter_batch_index, op->scatter_elem_index);
   }
 }
 

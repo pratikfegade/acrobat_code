@@ -51,27 +51,33 @@ using tvm::transform::Pass;
  * device and host code.
  * \param mixed_mod The original mixed module.
  * \param target The device Target.
+ * \param print_after_passes Passes to dump the IR after, for debugging purposes.
  * \return The composite Pass for the fused module.
 //  */
-TVM_DLL transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target);
+TVM_DLL transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target,
+						     const Array<String>& print_after_passes = {});
 
 /*!
  * \brief Configures and returns the composite Pass for the device Target after device/host from
  * mixed module.
  * \param mixed_mod The optimized mixed module.
  * \param target The device Target.
+ * \param print_after_passes = {} Passes to dump the IR after, for debugging purposes.
  * \return The composite Pass for the device module.
  */
-TVM_DLL transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target);
+TVM_DLL transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target,
+						      const Array<String>& print_after_passes = {});
 
 /*!
  * \brief Configures and returns the composite Pass for the host Target after device/host from mixed
  * module.
  * \param mixed_mod The optimized mixed module.
  * \param target_host The host Target.
+ * \param print_after_passes = {} Passes to dump the IR after, for debugging purposes.
  * \return The composite Pass for the host module.
  */
-TVM_DLL transform::Sequential HostModulePassManager(IRModule mixed_mod, Target target_host);
+TVM_DLL transform::Sequential HostModulePassManager(IRModule mixed_mod, Target target_host,
+						    const Array<String>& print_after_passes = {});
 
 /*!
  * \brief Lower an IRModule (optimize with it with the pass list defined in CreatePassList)
@@ -106,7 +112,9 @@ TVM_DLL IRModule LowerPrimFunc(tvm::tir::PrimFunc func, const std::string& name,
 TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args,
                                const std::string& name,
                                const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                               bool simple_mode = false);
+			       const Map<te::Tensor, tir::Buffer>& scatter_buffers = {},
+                               bool simple_mode = false,
+			       const Array<String>& print_after_passes = {});
 
 /*!
  * \brief Build an IRModule given a TE schedule, args and binds. This function also applies
@@ -121,7 +129,9 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args,
 TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args,
                                const std::string& name,
                                const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                               bool simple_mode = false);
+			       const Map<te::Tensor, tir::Buffer>& scatter_buffers = {},
+                               bool simple_mode = false,
+			       const Array<String>& print_after_passes = {});
 
 /*!
  * \brief Create an IRModule out of a TE Schedule. It does not apply lowering passes. If you want
@@ -133,7 +143,8 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args,
  * \return The result module.
  */
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
-                          const std::unordered_map<te::Tensor, tir::Buffer>& binds);
+                          const std::unordered_map<te::Tensor, tir::Buffer>& binds,
+			  const Map<te::Tensor, tir::Buffer>& scatter_buffers);
 /*!
  * \brief Build a device and host module for a specific target from an IRModule.
  * \param funcs The functions to be built.

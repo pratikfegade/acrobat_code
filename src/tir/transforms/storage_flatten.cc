@@ -1085,16 +1085,18 @@ class StorageFlattener : public StmtExprMutator {
       bound_analyzer(func->body);
 
       auto fptr = func.CopyOnWrite();
-      fptr->body = StorageFlattener(fptr->buffer_map, cache_line_size, create_bound_attributes,
-                                    &bound_analyzer)(std::move(fptr->body));
+      fptr->body = StorageFlattener(fptr->buffer_map, fptr->scatter_buffer_map, cache_line_size,
+				    create_bound_attributes, &bound_analyzer)(std::move(fptr->body));
       return func;
     };
     return transform::CreatePrimFuncPass(pass_func, 0, "tir.StorageFlattener", {});
   }
 
-  explicit StorageFlattener(const Map<Var, Buffer>& extern_buffer_map, int cache_line_size,
+  explicit StorageFlattener(const Map<Var, Buffer>& extern_buffer_map,
+			    const Map<Var, Buffer>& scatter_buffer_map, int cache_line_size,
                             bool create_bound_attributes, IRVisitorWithAnalyzer* bound_analyzer)
-      : bound_analyzer_(bound_analyzer), create_bound_attributes_(create_bound_attributes) {
+    : bound_analyzer_(bound_analyzer), create_bound_attributes_(create_bound_attributes),
+      scatter_buffer_map_(scatter_buffer_map) {
     for (auto kv : extern_buffer_map) {
       BufferEntry e;
       e.buffer = kv.second;
@@ -1269,8 +1271,15 @@ class StorageFlattener : public StmtExprMutator {
   PrimExpr VisitExpr_(const BufferLoadNode* op) final {
     PrimExpr expr = StmtExprMutator::VisitExpr_(op);
     op = expr.as<BufferLoadNode>();
+    std::cout << "[SF] Lowering " << GetRef<PrimExpr>(op) << std::endl;
 
     const auto& key = op->buffer;
+
+    Buffer scatter_buffer;
+    if (scatter_buffer_map_.count(key->data)) {
+      std::cout << "[SF]  Has a scatter mapping " << scatter_buffer_map_.count(key->data) << std::endl;
+      scatter_buffer = scatter_buffer_map_.at(key->data);
+    }
 
     auto it = buf_map_.find(key);
     ICHECK(it != buf_map_.end()) << "Cannot find allocated buffer for " << key;
@@ -1280,7 +1289,7 @@ class StorageFlattener : public StmtExprMutator {
     if (create_bound_attributes_ && ShapeIsValid(e.buffer->shape)) {
       shape_collector_.push_back(std::make_pair(e.buffer->data, e.buffer->shape));
     }
-    return e.buffer.vload(op->indices, e.buffer->dtype);
+    return e.buffer.vload(op->indices, e.buffer->dtype, scatter_buffer);
   }
 
   Stmt VisitStmt_(const PrefetchNode* op) final {
@@ -1406,6 +1415,8 @@ class StorageFlattener : public StmtExprMutator {
   int cache_line_size_;
   // Whether to mark load/store with theirs bounds.
   bool create_bound_attributes_{false};
+  // Mapping from tensors to their scattered underlying storage.
+  const Map<Var, Buffer>& scatter_buffer_map_;
 };
 
 /*!
@@ -1483,7 +1494,7 @@ class AssertSimplifier : public StmtMutator {
 //
 // We do support a few relaxed case, such as binding a
 // region with shape [1, 1, n, m] to buffer with shape [n, m]
-PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_attributes) {
+  PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_attributes) {
   // Only apply this pass to TIR from TE schedules.  Because this is a
   // per-function attribute, we can't just check it once for the
   // entire module and apply the Sequential transform.
@@ -1502,7 +1513,9 @@ PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_at
     GlobalVar dummy_func_name("dummy_func");
     IRModule mod(Map<GlobalVar, BaseFunc>({{dummy_func_name, func}}));
     mod = seq(mod);
-    return Downcast<PrimFunc>(mod->Lookup(dummy_func_name));
+    auto transformed = Downcast<PrimFunc>(mod->Lookup(dummy_func_name));
+    // std::cout << "After flattening " << transformed << std::endl;
+    return transformed;
   } else {
     return func;
   }
@@ -1511,7 +1524,7 @@ PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_at
 namespace transform {
 
 // TODO(tvm-team): consolidate configs to the PassContext
-Pass StorageFlatten(int cache_line_size, bool create_bound_attributes) {
+  Pass StorageFlatten(int cache_line_size, bool create_bound_attributes) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     return StorageFlatten(std::move(f), cache_line_size, create_bound_attributes);
   };

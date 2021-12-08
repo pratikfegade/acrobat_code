@@ -455,6 +455,16 @@ class Array : public ObjectRef {
   }
 
   /*!
+   * \brief Insert an element into the given position
+   * \param position An iterator pointing to the insertion point
+   * \param val The element to insert
+   */
+  bool exists(const T& val) const {
+    ICHECK(data_ != nullptr) << "ValueError: cannot check a null array";
+    return (std::find(begin(), end(), val) != end());
+  }
+
+  /*!
    * \brief Insert a range of elements into the given position
    * \param position An iterator pointing to the insertion point
    * \param first The begin iterator of the range

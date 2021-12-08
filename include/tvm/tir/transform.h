@@ -479,6 +479,15 @@ TVM_DLL Pass MergeDynamicSharedMemoryAllocations();
  */
 TVM_DLL Pass ConvertForLoopsToSerial();
 
+/*!
+ * \brief Debugging pass to print the current state of the IR
+ *
+ * \param previous_pass the name of the pass before this one.
+ *
+ * \return The Pass
+ */
+TVM_DLL Pass PrintCurrentIR(String previous_pass);
+
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm

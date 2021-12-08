@@ -60,8 +60,17 @@ PrimExpr UpdatePointerStorageScope::VisitExpr_(const VarNode* op) {
 
 PrimExpr UpdatePointerStorageScope::VisitExpr_(const LoadNode* op) {
   auto remapped = StmtExprMutator::VisitExpr(op->buffer_var);
+  PrimExpr scatter_remapped = op->scatter_buffer_var;
+  PrimExpr scatter_batch_index = op->scatter_batch_index;
+  PrimExpr scatter_elem_index = op->scatter_elem_index;
+  if (scatter_remapped.defined()) {
+    scatter_remapped = StmtExprMutator::VisitExpr(scatter_remapped);
+    scatter_batch_index = StmtExprMutator::VisitExpr(scatter_batch_index);
+    scatter_elem_index = StmtExprMutator::VisitExpr(scatter_elem_index);
+  }
   return Load(op->dtype, Downcast<Var>(remapped), StmtExprMutator::VisitExpr(op->index),
-              StmtExprMutator::VisitExpr(op->predicate));
+              StmtExprMutator::VisitExpr(op->predicate), Downcast<Var>(scatter_remapped),
+	      scatter_batch_index, scatter_elem_index);
 }
 
 Stmt UpdatePointerStorageScope::VisitStmt_(const AllocateNode* op) {

@@ -62,6 +62,7 @@ namespace tir {
 
 // Var
 Var::Var(String name_hint, DataType dtype, Span span) {
+  // std::cout << "VV0 " << name_hint << std::endl;
   auto n = make_object<VarNode>();
   n->name_hint = std::move(name_hint);
   n->dtype = std::move(dtype);
@@ -70,6 +71,7 @@ Var::Var(String name_hint, DataType dtype, Span span) {
 }
 
 Var::Var(String name_hint, Type type_annotation, Span span) {
+  // std::cout << "VV1 " << name_hint << std::endl;
   auto n = make_object<VarNode>();
   n->name_hint = std::move(name_hint);
   n->dtype = GetRuntimeDataType(type_annotation);
@@ -87,6 +89,7 @@ Var Var::copy_with_suffix(const String& suffix) const {
     new_ptr = make_object<VarNode>(*node);
   }
   new_ptr->name_hint = new_ptr->name_hint + suffix;
+  // std::cout << "VV2 " << new_ptr->name_hint << std::endl;
   return Var(new_ptr);
 }
 
@@ -624,7 +627,8 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     });
 
 // Load
-Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, Span span) {
+Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, Var scatter_buffer_var,
+	     PrimExpr scatter_batch_index, PrimExpr scatter_elem_index, Span span) {
   ICHECK(buffer_var.defined());
   ICHECK(predicate.defined());
   ICHECK(index.defined());
@@ -665,10 +669,15 @@ Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, S
   ICHECK((dtype.lanes() == element_lanes * predicate.dtype().lanes()) ||
          (dtype.lanes() == index.dtype().lanes()));
 
+  // std::cout << "Making load " << buffer_var << std::endl;
+
   ObjectPtr<LoadNode> node = make_object<LoadNode>();
   node->dtype = dtype;
   node->buffer_var = std::move(buffer_var);
   node->index = std::move(index);
+  node->scatter_buffer_var = std::move(scatter_buffer_var);
+  node->scatter_batch_index = std::move(scatter_batch_index);
+  node->scatter_elem_index = std::move(scatter_elem_index);
   node->predicate = std::move(predicate);
   node->span = std::move(span);
 
@@ -678,11 +687,14 @@ Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, S
 TVM_REGISTER_GLOBAL("tir.Load").set_body([](TVMArgs args, TVMRetValue* ret) {
   DataType t = args[0];
   if (args.size() == 3) {
-    *ret = Load(t, args[1], args[2], const_true(t.lanes()), Span());
+    *ret = Load(t, args[1], args[2], const_true(t.lanes()), NullValue<Var>(),
+		NullValue<PrimExpr>(), NullValue<PrimExpr>(), Span());
   } else if (args.size() == 4) {
-    *ret = Load(t, args[1], args[2], args[3], Span());
+    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(),
+		NullValue<PrimExpr>(), NullValue<PrimExpr>(), Span());
   } else {
-    *ret = Load(t, args[1], args[2], args[3], args[4]);
+    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(),
+		NullValue<PrimExpr>(), NullValue<PrimExpr>(), args[4]);
   }
 });
 
@@ -691,7 +703,14 @@ TVM_REGISTER_NODE_TYPE(LoadNode);
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<LoadNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const LoadNode*>(node.get());
-      p->stream << op->buffer_var << "[";
+      if (op->buffer_var->name_hint == "I_2") {
+	std::cout << "Where did you come from?" << std::endl;
+      }
+      p->stream << op->buffer_var;
+      if (op->scatter_buffer_var.defined()) {
+	p->stream << "(S)";
+      }
+      p->stream << "[";
       p->Print(op->index);
       p->stream << "]";
       if (!is_one(op->predicate)) {

@@ -291,18 +291,36 @@ inline PrimExpr BufferOffset(const BufferNode* n, Array<PrimExpr> index, DataTyp
   }
 }
 
-PrimExpr Buffer::vload(Array<PrimExpr> begin, DataType dtype) const {
+  PrimExpr Buffer::vload(Array<PrimExpr> begin, DataType dtype, Buffer scatter_buffer) const {
   // specially handle bool, stored as DataType::Int(8)
   const BufferNode* n = operator->();
   ICHECK(n != nullptr);
   ICHECK(dtype.element_of() == n->dtype.element_of() && dtype.lanes() % n->dtype.lanes() == 0)
       << "Cannot load " << dtype << " from buffer of " << n->dtype;
   if (dtype == DataType::Bool()) {
+    ICHECK(!scatter_buffer.defined()) << "Scatter buffers not yet supported for boolean buffers";
     return tir::Cast(DataType::Bool(),
                      tir::Load(DataType::Int(8), n->data, BufferOffset(n, begin, DataType::Int(8)),
                                const_true()));
   } else {
-    return tir::Load(dtype, n->data, BufferOffset(n, begin, dtype), const_true(dtype.lanes()));
+    if (scatter_buffer.defined()) {
+      Array<PrimExpr> scatter_begin;
+      scatter_begin.push_back(0);
+      for (size_t i = 1; i < begin.size(); ++i) {
+	scatter_begin.push_back(begin[i]);
+      }
+      PrimExpr scatter_batch_offset = begin[0];
+      PrimExpr scatter_elem_offset = BufferOffset(n, scatter_begin, dtype);
+      PrimExpr combined_offset = BufferOffset(n, begin, dtype);
+      std::cout << "[VL] Offsets" << std::endl;
+      std::cout << "[VL]  Batch " << scatter_batch_offset << std::endl;
+      std::cout << "[VL]  Elem " << scatter_elem_offset << std::endl;
+      std::cout << "[VL]  Combined " << combined_offset << std::endl;
+      return tir::Load(dtype, n->data, combined_offset, const_true(dtype.lanes()),
+		       scatter_buffer->data, scatter_batch_offset, scatter_elem_offset);
+    } else {
+      return tir::Load(dtype, n->data, BufferOffset(n, begin, dtype), const_true(dtype.lanes()));
+    }
   }
 }
 

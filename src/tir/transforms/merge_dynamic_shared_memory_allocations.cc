@@ -297,7 +297,8 @@ class DynamicSharedMemoryRewriter : public StmtExprMutator {
     if (IsDynamicSharedMemory(op->buffer_var)) {
       PrimExpr offset = GetBufferOffset(op->buffer_var, op->dtype);
       PrimExpr index = StmtExprMutator::VisitExpr(op->index);
-      return Load(op->dtype, merged_buf_var_, offset + index, op->predicate, op->span);
+      return Load(op->dtype, merged_buf_var_, offset + index, op->predicate, op->scatter_buffer_var,
+		  op->scatter_batch_index, op->scatter_elem_index, op->span);
     }
     return StmtExprMutator::VisitExpr_(op);
   }

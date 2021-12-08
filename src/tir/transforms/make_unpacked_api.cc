@@ -105,6 +105,7 @@ namespace transform {
 
 Pass MakeUnpackedAPI() {
   auto pass_func = [](IRModule m, PassContext ctx) {
+    // std::cout << "[OLA1]" << std::endl;
     IRModuleNode* mptr = m.CopyOnWrite();
     std::vector<std::pair<GlobalVar, PrimFunc>> updates;
 

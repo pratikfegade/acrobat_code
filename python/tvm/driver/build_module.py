@@ -96,6 +96,8 @@ def lower(
     name: str = "main",
     binds: Optional[Mapping[tensor.Tensor, Buffer]] = None,
     simple_mode: bool = False,
+    scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]] = None,
+    print_after_passes: Optional[List[str]] = []
 ) -> IRModule:
     """Lowering step before build into target.
 
@@ -130,7 +132,7 @@ def lower(
     if isinstance(inp, PrimFunc):
         return ffi.lower_primfunc(inp, name, simple_mode)
     if isinstance(inp, schedule.Schedule):
-        return ffi.lower_schedule(inp, args, name, binds, simple_mode)
+        return ffi.lower_schedule(inp, args, name, binds, simple_mode, scatter_buffers, print_after_passes)
     raise ValueError("Expected input to be an IRModule, PrimFunc or Schedule, but got, ", type(inp))
 
 
@@ -144,6 +146,8 @@ def build(
     ] = None,  # Type is annotated this way to avoid cyclic dependency
     name: Optional[str] = "default_function",
     binds: Optional[Mapping[tensor.Tensor, Buffer]] = None,
+    scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]] = None,
+    print_after_passes = Optional[List[str]]
 ):
     """Build a function with arguments as signature. Code will be generated
     for devices coupled with target information.
@@ -222,7 +226,8 @@ def build(
     if isinstance(inputs, schedule.Schedule):
         if args is None:
             raise ValueError("args must be given for build from schedule")
-        input_mod = lower(inputs, args, name=name, binds=binds)
+        input_mod = lower(inputs, args, name=name, binds=binds, scatter_buffers=scatter_buffers,
+                          print_after_passes=print_after_passes)
     elif isinstance(inputs, (list, tuple, container.Array)):
         merged_mod = tvm.IRModule({})
         for x in inputs:
@@ -260,7 +265,6 @@ def build(
         annotated_mods[tar] = mod.with_attr("runtime", runtime)
 
     annotated_mods, target_host = Target.check_and_update_host_consist(annotated_mods, target_host)
-
     if not target_host:
         for tar, mod in annotated_mods.items():
             tar = Target(tar)
@@ -273,7 +277,7 @@ def build(
 
     annotated_mods, target_host = Target.check_and_update_host_consist(annotated_mods, target_host)
 
-    rt_mod_host = _driver_ffi.preprocess_module(annotated_mods, target_host)
+    rt_mod_host = _driver_ffi.preprocess_module(annotated_mods, target_host, print_after_passes)
 
     annotated_mods, target_host = Target.check_and_update_host_consist(annotated_mods, target_host)
 

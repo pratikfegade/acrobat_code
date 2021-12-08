@@ -303,6 +303,7 @@ namespace transform {
 Pass MakePackedAPI(int num_unpacked_args) {
   // packed arguments anyway while `num_unpacked_args` is -1
   auto pass_func = [num_unpacked_args](IRModule m, PassContext ctx) {
+    // std::cout << "[OLA2]" << std::endl;
     IRModuleNode* mptr = m.CopyOnWrite();
     std::vector<std::pair<GlobalVar, PrimFunc> > updates;
 

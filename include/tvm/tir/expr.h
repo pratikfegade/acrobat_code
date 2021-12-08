@@ -26,6 +26,7 @@
 #define TVM_TIR_EXPR_H_
 
 #include <tvm/ir/expr.h>
+#include <tvm/ir/attrs.h>
 #include <tvm/node/functor.h>
 #include <tvm/node/node.h>
 #include <tvm/runtime/c_runtime_api.h>
@@ -716,23 +717,40 @@ class LoadNode : public PrimExprNode {
   /*! \brief The predicate to mask which lanes would be loaded. */
   PrimExpr predicate;
 
+  // Fields useful for scatter loads
+  /*! \brief The buffer variable. */
+  Var scatter_buffer_var;
+  /*! \brief The batch index locations to be loaded. */
+  PrimExpr scatter_batch_index;
+  /*! \brief The element index locations to be loaded. */
+  PrimExpr scatter_elem_index;
+
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("dtype", &dtype);
     v->Visit("buffer_var", &buffer_var);
     v->Visit("index", &index);
+    v->Visit("scatter_buffer_var", &buffer_var);
+    v->Visit("scatter_batch_index", &index);
+    v->Visit("scatter_elem_index", &index);
     v->Visit("predicate", &predicate);
     v->Visit("span", &span);
   }
 
   bool SEqualReduce(const LoadNode* other, SEqualReducer equal) const {
     return equal(dtype, other->dtype) && equal(buffer_var, other->buffer_var) &&
-           equal(index, other->index) && equal(predicate, other->predicate);
+      equal(index, other->index) && equal(predicate, other->predicate) &&
+      equal(scatter_buffer_var, other->scatter_buffer_var) &&
+      equal(scatter_batch_index, other->scatter_batch_index) &&
+      equal(scatter_elem_index, other->scatter_elem_index);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(dtype);
     hash_reduce(buffer_var);
     hash_reduce(index);
+    hash_reduce(scatter_buffer_var);
+    hash_reduce(scatter_batch_index);
+    hash_reduce(scatter_elem_index);
     hash_reduce(predicate);
   }
 
@@ -747,6 +765,9 @@ class LoadNode : public PrimExprNode {
 class Load : public PrimExpr {
  public:
   TVM_DLL Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate,
+	       Var scatter_buffer_var = NullValue<Var>(),
+	       PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
+	       PrimExpr scatter_elem_index = NullValue<PrimExpr>(),
                Span span = Span());
   TVM_DEFINE_OBJECT_REF_METHODS(Load, PrimExpr, LoadNode);
 };

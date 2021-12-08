@@ -139,7 +139,8 @@ class TensorToBufferMapper : public StmtExprMutator {
 };
 
 PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
-                                    Optional<Map<Tensor, Buffer>> extern_buffer_opt) {
+                                    Optional<Map<Tensor, Buffer>> extern_buffer_opt,
+				    Optional<Map<Var, Buffer>> scatter_buffer_opt) {
   std::unordered_map<Tensor, Buffer> extern_buffer;
 
   if (extern_buffer_opt.defined()) {
@@ -172,8 +173,8 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
 
   body = TensorToBufferMapper(std::move(extern_buffer))(std::move(body));
   // We mark this PrimFunc as coming from a TE schedule
-  return WithAttr(tir::PrimFunc(params, body, VoidType(), buffer_map), "from_legacy_te_schedule",
-                  Bool(true));
+  return WithAttr(tir::PrimFunc(params, body, VoidType(), buffer_map, scatter_buffer_opt.value()),
+		  "from_legacy_te_schedule", Bool(true));
 }
 
 TVM_REGISTER_GLOBAL("schedule.SchedulePostProcToPrimFunc")

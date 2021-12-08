@@ -484,6 +484,7 @@ IRModule SequentialNode::operator()(IRModule mod, const PassContext& pass_ctx) c
     for (const auto& it : pass_info->required) {
       mod = GetPass(it)(std::move(mod), pass_ctx);
     }
+    // std::cout << "[SEP] Pass " << pass->Info()->name << std::endl;
     mod = pass(std::move(mod), pass_ctx);
   }
   return mod;

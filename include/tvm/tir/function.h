@@ -91,11 +91,14 @@ class PrimFuncNode : public BaseFuncNode {
    */
   Map<tir::Var, Buffer> buffer_map;
 
+  Map<tir::Var, Buffer> scatter_buffer_map;
+
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("params", &params);
     v->Visit("body", &body);
     v->Visit("ret_type", &ret_type);
     v->Visit("buffer_map", &buffer_map);
+    v->Visit("scatter_buffer_map", &scatter_buffer_map);
     v->Visit("attrs", &attrs);
     v->Visit("span", &span);
     v->Visit("_checked_type_", &checked_type_);
@@ -104,13 +107,15 @@ class PrimFuncNode : public BaseFuncNode {
   bool SEqualReduce(const PrimFuncNode* other, SEqualReducer equal) const {
     // visit params and buffer_map first as they contains defs.
     return equal.DefEqual(params, other->params) && equal(buffer_map, other->buffer_map) &&
-           equal(ret_type, other->ret_type) && equal(body, other->body) &&
-           equal(attrs, other->attrs);
+      equal(scatter_buffer_map, other->scatter_buffer_map) &&
+      equal(ret_type, other->ret_type) && equal(body, other->body) &&
+      equal(attrs, other->attrs);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce.DefHash(params);
     hash_reduce(buffer_map);
+    hash_reduce(scatter_buffer_map);
     hash_reduce(ret_type);
     hash_reduce(body);
     hash_reduce(attrs);
@@ -145,6 +150,7 @@ class PrimFunc : public BaseFunc {
    */
   TVM_DLL PrimFunc(Array<tir::Var> params, Stmt body, Type ret_type = VoidType(),
                    Map<tir::Var, Buffer> buffer_map = Map<tir::Var, Buffer>(),
+                   Map<tir::Var, Buffer> scatter_buffer_map = Map<tir::Var, Buffer>(),
                    DictAttrs attrs = NullValue<DictAttrs>(), Span span = Span());
 
   TVM_DEFINE_OBJECT_REF_METHODS(PrimFunc, BaseFunc, PrimFuncNode);

@@ -702,6 +702,9 @@ void CodeGenC::PrintVecBinaryOp(const std::string& op, DataType t, PrimExpr lhs,
 }
 
 void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
+  if (op->scatter_buffer_var.defined()) {
+    std::cout << "[CC] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+  }
   int lanes = op->dtype.lanes();
   // delcare type.
   if (op->dtype.lanes() == 1) {
