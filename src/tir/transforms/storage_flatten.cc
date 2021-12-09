@@ -1271,13 +1271,13 @@ class StorageFlattener : public StmtExprMutator {
   PrimExpr VisitExpr_(const BufferLoadNode* op) final {
     PrimExpr expr = StmtExprMutator::VisitExpr_(op);
     op = expr.as<BufferLoadNode>();
-    std::cout << "[SF] Lowering " << GetRef<PrimExpr>(op) << std::endl;
+    // std::cout << "[SF] Lowering " << GetRef<PrimExpr>(op) << std::endl;
 
     const auto& key = op->buffer;
 
     Buffer scatter_buffer;
     if (scatter_buffer_map_.count(key->data)) {
-      std::cout << "[SF]  Has a scatter mapping " << scatter_buffer_map_.count(key->data) << std::endl;
+      // std::cout << "[SF]  Has a scatter mapping " << scatter_buffer_map_.count(key->data) << std::endl;
       scatter_buffer = scatter_buffer_map_.at(key->data);
     }
 

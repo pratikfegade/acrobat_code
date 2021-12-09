@@ -72,6 +72,12 @@ class CodeGenSourceBase {
    */
   std::string AllocVarID(const tir::VarNode* v);
   /*!
+   * \brief Get or allocate a variable name for a newly defined var.
+   * \param v The variable.
+   * \return the variable name.
+   */
+  std::string GetOrAllocVarID(const tir::VarNode* v);
+  /*!
    * \brief Get a variable name.
    * \param v The variable.
    * \return the variable name.

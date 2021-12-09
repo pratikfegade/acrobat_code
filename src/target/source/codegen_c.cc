@@ -72,6 +72,8 @@ void CodeGenC::ReserveKeywordsAsUnique() {
 }
 
 void CodeGenC::AddFunction(const PrimFunc& f) {
+  std::cout << "Genning for " << f << std::endl;
+
   // clear previous generated state.
   this->InitFuncState(f);
   // reserve keywords
@@ -86,8 +88,16 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   this->PrintExtraAttrs(f);
   this->stream << " " << static_cast<std::string>(global_symbol.value()) << "(";
 
+  std::unordered_set<const VarNode*> scatter_buffer_vars;
+  for (auto it: f->scatter_buffer_map) {
+    std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint << std::endl;
+    scatter_buffer_vars.insert(it.second->data.get());
+  }
+
   for (size_t i = 0; i < f->params.size(); ++i) {
     tir::Var v = f->params[i];
+    std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " " <<
+      scatter_buffer_vars.count(v.get()) << std::endl;
     std::string vid = AllocVarID(v.get());
     if (i != 0) stream << ", ";
     if (v.dtype().is_handle()) {
@@ -156,9 +166,15 @@ void CodeGenC::PrintSSAAssign(const std::string& target, const std::string& src,
 }
 
 // Print a reference expression to a buffer.
-std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr index) {
+std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr index,
+				     const VarNode* scatter_buffer, PrimExpr scatter_batch_index,
+				     PrimExpr scatter_elem_index) {
   std::ostringstream os;
   std::string vid = GetVarID(buffer);
+  std::string scatter_vid;
+  if (scatter_buffer) {
+    scatter_vid = GetOrAllocVarID(scatter_buffer);
+  }
   std::string scope;
   if (alloc_storage_scope_.count(buffer)) {
     scope = alloc_storage_scope_.at(buffer);
@@ -166,6 +182,10 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
   bool is_vol = IsVolatile(buffer);
   if (t.lanes() == 1) {
     if (!HandleTypeMatch(buffer, t) || is_vol) {
+      ICHECK(!scatter_buffer)
+	<< "Volatile gather loads or gather loads with "
+	<< "type mismatch not supported yet";
+
       os << "((";
       if (is_vol) {
         os << "volatile ";
@@ -177,16 +197,28 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
       PrintType(t, os);
       os << "*)" << vid << ')';
     } else {
-      os << vid;
+      if (scatter_buffer) {
+	os << scatter_vid;
+	os << "[(";
+	PrintExpr(scatter_batch_index, os);
+	os << ")]";
+      } else {
+	os << vid;
+      }
     }
     os << "[(";
-    PrintExpr(index, os);
+    if (scatter_buffer) {
+      PrintExpr(scatter_elem_index, os);
+    } else {
+      PrintExpr(index, os);
+    }
     os << ")";
     if (t.bits() == 4 || (t.bits() == 1 && t.is_int())) {
       os << " / " << (32 / t.bits());
     }
     os << ']';
   } else {
+    ICHECK(!scatter_buffer) << "Vectorized gather loads not supported yet";
     // Buffer declared as vector type.
     // optimize for case where it is in register,
     if (HandleTypeMatch(buffer, t) && !is_vol) {
@@ -702,16 +734,25 @@ void CodeGenC::PrintVecBinaryOp(const std::string& op, DataType t, PrimExpr lhs,
 }
 
 void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
-  if (op->scatter_buffer_var.defined()) {
+  bool has_scatter = op->scatter_buffer_var.defined();
+  if (has_scatter) {
     std::cout << "[CC] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
   }
   int lanes = op->dtype.lanes();
-  // delcare type.
+  // declare type.
   if (op->dtype.lanes() == 1) {
-    std::string ref = GetBufferRef(op->dtype, op->buffer_var.get(), op->index);
+    const VarNode* scatter_buffer_var_ptr = nullptr;
+    PrimExpr scatter_batch_index = op->scatter_batch_index;
+    PrimExpr scatter_elem_index = op->scatter_elem_index;
+    if (op->scatter_buffer_var.defined()) {
+      scatter_buffer_var_ptr = op->scatter_buffer_var.get();
+    }
+
+    std::string ref = GetBufferRef(op->dtype, op->buffer_var.get(), op->index,
+				   scatter_buffer_var_ptr, scatter_batch_index, scatter_elem_index);
     HandleVolatileLoads(ref, op, os);
   } else {
-    ICHECK(is_one(op->predicate)) << "predicated load is not supported";
+    ICHECK(is_one(op->predicate)) << "predicated vectorized load is not supported";
 
     arith::PVar<PrimExpr> base;
     if (arith::ramp(base, 1, op->dtype.lanes()).Match(op->index)) {

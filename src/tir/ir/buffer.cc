@@ -312,10 +312,10 @@ inline PrimExpr BufferOffset(const BufferNode* n, Array<PrimExpr> index, DataTyp
       PrimExpr scatter_batch_offset = begin[0];
       PrimExpr scatter_elem_offset = BufferOffset(n, scatter_begin, dtype);
       PrimExpr combined_offset = BufferOffset(n, begin, dtype);
-      std::cout << "[VL] Offsets" << std::endl;
-      std::cout << "[VL]  Batch " << scatter_batch_offset << std::endl;
-      std::cout << "[VL]  Elem " << scatter_elem_offset << std::endl;
-      std::cout << "[VL]  Combined " << combined_offset << std::endl;
+      // std::cout << "[VL] Offsets" << std::endl;
+      // std::cout << "[VL]  Batch " << scatter_batch_offset << std::endl;
+      // std::cout << "[VL]  Elem " << scatter_elem_offset << std::endl;
+      // std::cout << "[VL]  Combined " << combined_offset << std::endl;
       return tir::Load(dtype, n->data, combined_offset, const_true(dtype.lanes()),
 		       scatter_buffer->data, scatter_batch_offset, scatter_elem_offset);
     } else {
@@ -431,9 +431,9 @@ Buffer::Buffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> 
   if (storage_dtype == DataType::Bool()) {
     storage_dtype = DataType::Int(8);
   }
-  ICHECK(IsPointerType(data->type_annotation, storage_dtype))
-      << "Buffer data field expect to have the right pointer type annotation"
-      << " annotation=" << data->type_annotation << ", storage_dtype=" << storage_dtype;
+  // ICHECK(IsPointerType(data->type_annotation, storage_dtype))
+      // << "Buffer data field expect to have the right pointer type annotation"
+      // << " annotation=" << data->type_annotation << ", storage_dtype=" << storage_dtype;
 
   auto n = make_object<BufferNode>();
   n->data = std::move(data);

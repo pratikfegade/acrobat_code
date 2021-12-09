@@ -207,7 +207,10 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
   // Print reference to struct location
   std::string GetStructRef(DataType t, const PrimExpr& buffer, const PrimExpr& index, int kind);
   // Print reference to a buffer as type t in index.
-  virtual std::string GetBufferRef(DataType t, const VarNode* buffer, PrimExpr index);
+  virtual std::string GetBufferRef(DataType t, const VarNode* buffer, PrimExpr index,
+				   const VarNode* scatter_buffer = nullptr,
+				   PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
+				   PrimExpr scatter_elem_index = NullValue<PrimExpr>());
 
   /*!
    * \brief Handle volatile loads.

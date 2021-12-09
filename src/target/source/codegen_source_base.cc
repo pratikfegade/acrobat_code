@@ -69,6 +69,14 @@ std::string CodeGenSourceBase::SSAGetID(std::string src, DataType t) {
   return e.vid;
 }
 
+std::string CodeGenSourceBase::GetOrAllocVarID(const tir::VarNode* v) {
+  if (!var_idmap_.count(v)) {
+    return AllocVarID(v);
+  } else {
+    return GetVarID(v);
+  }
+}
+
 std::string CodeGenSourceBase::AllocVarID(const tir::VarNode* v) {
   ICHECK(!var_idmap_.count(v)) << "Need input to be in SSA form dup " << v->name_hint;
   std::string key = v->name_hint;

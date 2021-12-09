@@ -156,6 +156,9 @@ class VarUseDefAnalysis : public StmtExprMutator {
 
   PrimExpr VisitExpr_(const LoadNode* op) final {
     this->HandleUse(op->buffer_var);
+    if (op->scatter_buffer_var.defined()) {
+      this->HandleUse(op->scatter_buffer_var);
+    }
     return StmtExprMutator::VisitExpr_(op);
   }
 

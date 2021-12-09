@@ -453,6 +453,8 @@ std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target&
   IRModule host_mod = ApplyPasses(mod_mixed, HostModulePassManager(mod_mixed, target_host, print_after_passes));
 
   IRModule device_mod = ApplyPasses(mod_mixed, DeviceModulePassManager(mod_mixed, target, print_after_passes));
+  // exit(0);
+  // return {};
 
   auto keys = target->GetKeys();
 
