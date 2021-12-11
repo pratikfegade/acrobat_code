@@ -72,8 +72,6 @@ void CodeGenC::ReserveKeywordsAsUnique() {
 }
 
 void CodeGenC::AddFunction(const PrimFunc& f) {
-  std::cout << "Genning for " << f << std::endl;
-
   // clear previous generated state.
   this->InitFuncState(f);
   // reserve keywords
@@ -88,16 +86,17 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   this->PrintExtraAttrs(f);
   this->stream << " " << static_cast<std::string>(global_symbol.value()) << "(";
 
-  std::unordered_set<const VarNode*> scatter_buffer_vars;
-  for (auto it: f->scatter_buffer_map) {
-    std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint << std::endl;
-    scatter_buffer_vars.insert(it.second->data.get());
+  std::unordered_map<const VarNode*, Var> scatter_buffer_vars;
+  for (auto it : f->scatter_buffer_map) {
+    std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint
+              << " " << it.first << std::endl;
+    scatter_buffer_vars[it.second->data.get()] = it.first;
   }
 
   for (size_t i = 0; i < f->params.size(); ++i) {
     tir::Var v = f->params[i];
-    std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " " <<
-      scatter_buffer_vars.count(v.get()) << std::endl;
+    std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " "
+              << scatter_buffer_vars.count(v.get()) << std::endl;
     std::string vid = AllocVarID(v.get());
     if (i != 0) stream << ", ";
     if (v.dtype().is_handle()) {
@@ -113,6 +112,14 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
       if (auto* ptr = v->type_annotation.as<PointerTypeNode>()) {
         if (auto* prim = ptr->element_type.as<PrimTypeNode>()) {
           RegisterHandleType(v.get(), prim->dtype);
+        }
+      }
+      if (scatter_buffer_vars.count(v.get())) {
+        auto orig_buf = scatter_buffer_vars.at(v.get());
+        if (auto* ptr = orig_buf->type_annotation.as<PointerTypeNode>()) {
+          if (auto* prim = ptr->element_type.as<PrimTypeNode>()) {
+            RegisterHandleType(orig_buf.get(), prim->dtype);
+          }
         }
       }
 
@@ -167,13 +174,15 @@ void CodeGenC::PrintSSAAssign(const std::string& target, const std::string& src,
 
 // Print a reference expression to a buffer.
 std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr index,
-				     const VarNode* scatter_buffer, PrimExpr scatter_batch_index,
-				     PrimExpr scatter_elem_index) {
+                                   const VarNode* scatter_buffer, PrimExpr scatter_batch_index,
+                                   PrimExpr scatter_elem_index) {
   std::ostringstream os;
-  std::string vid = GetVarID(buffer);
+  std::string vid;
   std::string scatter_vid;
   if (scatter_buffer) {
     scatter_vid = GetOrAllocVarID(scatter_buffer);
+  } else {
+    vid = GetVarID(buffer);
   }
   std::string scope;
   if (alloc_storage_scope_.count(buffer)) {
@@ -182,9 +191,8 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
   bool is_vol = IsVolatile(buffer);
   if (t.lanes() == 1) {
     if (!HandleTypeMatch(buffer, t) || is_vol) {
-      ICHECK(!scatter_buffer)
-	<< "Volatile gather loads or gather loads with "
-	<< "type mismatch not supported yet";
+      ICHECK(!scatter_buffer) << "Volatile gather loads or gather loads with "
+                              << "type mismatch not supported yet";
 
       os << "((";
       if (is_vol) {
@@ -198,12 +206,12 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
       os << "*)" << vid << ')';
     } else {
       if (scatter_buffer) {
-	os << scatter_vid;
-	os << "[(";
-	PrintExpr(scatter_batch_index, os);
-	os << ")]";
+        os << scatter_vid;
+        os << "[(";
+        PrintExpr(scatter_batch_index, os);
+        os << ")]";
       } else {
-	os << vid;
+        os << vid;
       }
     }
     os << "[(";
@@ -749,7 +757,7 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
     }
 
     std::string ref = GetBufferRef(op->dtype, op->buffer_var.get(), op->index,
-				   scatter_buffer_var_ptr, scatter_batch_index, scatter_elem_index);
+                                   scatter_buffer_var_ptr, scatter_batch_index, scatter_elem_index);
     HandleVolatileLoads(ref, op, os);
   } else {
     ICHECK(is_one(op->predicate)) << "predicated vectorized load is not supported";

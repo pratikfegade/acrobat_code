@@ -155,9 +155,10 @@ class VarUseDefAnalysis : public StmtExprMutator {
   }
 
   PrimExpr VisitExpr_(const LoadNode* op) final {
-    this->HandleUse(op->buffer_var);
     if (op->scatter_buffer_var.defined()) {
       this->HandleUse(op->scatter_buffer_var);
+    } else {
+      this->HandleUse(op->buffer_var);
     }
     return StmtExprMutator::VisitExpr_(op);
   }
@@ -221,8 +222,12 @@ Array<Var> UndefinedVars(const PrimExpr& expr) {
 
 class HostDeviceSplitter : public StmtMutator {
  public:
-  explicit HostDeviceSplitter(IRModule* device_mod, Target device_target, std::string name_prefix)
-      : device_mod_(device_mod), device_target_(device_target), name_prefix_(name_prefix) {}
+  explicit HostDeviceSplitter(IRModule* device_mod, Target device_target, std::string name_prefix,
+                              const PrimFunc& func)
+      : device_mod_(device_mod),
+        device_target_(device_target),
+        name_prefix_(name_prefix),
+        func_(func) {}
 
   Stmt VisitStmt_(const AllocateNode* op) final {
     handle_data_type_[op->buffer_var.get()] = make_const(op->dtype, 0);
@@ -273,7 +278,9 @@ class HostDeviceSplitter : public StmtMutator {
         arguments.push_back(var);
       }
     }
-    PrimFunc device_func(params, Substitute(body, remap_vars));
+    PrimFunc device_func(params, Substitute(body, remap_vars), VoidType(), Map<tir::Var, Buffer>(),
+                         func_->scatter_buffer_map, NullValue<DictAttrs>(), Span());
+
     device_func = WithAttr(std::move(device_func), tir::attr::kDeviceThreadAxis, m.thread_axis_);
     device_func = WithAttr(std::move(device_func), tvm::attr::kCallingConv,
                            Integer(CallingConv::kDeviceKernelLaunch));
@@ -309,6 +316,8 @@ class HostDeviceSplitter : public StmtMutator {
   Target device_target_;
   // function name hint
   std::string name_prefix_;
+  // initial PrimFunc that we are splitting
+  const PrimFunc& func_;
   // Number of device functions.
   int device_func_counter_{0};
   std::unordered_map<const VarNode*, PrimExpr> handle_data_type_;
@@ -322,7 +331,7 @@ PrimFunc SplitHostDevice(PrimFunc&& func, IRModule* device_mod) {
       << "SplitHostDevice: Expect PrimFunc to have the global_symbol attribute";
 
   HostDeviceSplitter splitter(device_mod, target.value(),
-                              static_cast<std::string>(global_symbol.value()));
+                              static_cast<std::string>(global_symbol.value()), func);
 
   auto* n = func.CopyOnWrite();
   n->body = splitter(std::move(n->body));
