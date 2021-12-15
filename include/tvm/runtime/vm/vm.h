@@ -31,6 +31,7 @@
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/vm/bytecode.h>
 #include <tvm/runtime/vm/executable.h>
+#include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/memory_manager.h>
 
 #include <memory>
@@ -316,6 +317,15 @@ class VirtualMachine : public runtime::ModuleNode {
    * object to avoid rellocation of constants during inference.
    */
   std::vector<ObjectRef> const_pool_;
+  /*!
+   * \brief A lazy executor which maintains a computational graph of
+   * all the packed funcs executed.
+   */
+  LazyExecutor lazy_executor_;
+  /*!
+   * \brief Whether to execute tensor ops lazily.
+   */
+  bool lazy_execution_ = false;
 };
 
 }  // namespace vm

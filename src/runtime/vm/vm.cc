@@ -36,6 +36,7 @@
 #include <vector>
 
 #include "../file_utils.h"
+#include "vm_utils.h"
 
 using namespace tvm::runtime;
 
@@ -233,7 +234,8 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset) {
   const auto& vm_func = exec_->functions[func_index];
   const auto& param_names = vm_func.params;
   ICHECK_EQ(args.size() - offset, param_names.size())
-      << "The number of provided parameters doesn't match the number of arguments";
+      << "The number of provided parameters doesn't match the number of arguments " << args.size()
+      << " " << offset << " " << param_names.size();
   ICHECK_EQ(param_names.size(), vm_func.param_device_indexes.size())
       << "The number of provided parameters doesn't match the number of assigned devices";
   std::vector<ObjectRef> func_args(param_names.size());
@@ -322,46 +324,10 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
 
 void VirtualMachine::InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
                                   Index output_size, const std::vector<ObjectRef>& args) {
-  size_t arity = 0;
-  for (Index i = 0; i < arg_count; i++) {
-    if (const auto* obj = args[i].as<ADTObj>()) {
-      arity += obj->size;
-    } else {
-      ++arity;
-    }
-  }
-
-  std::vector<TVMValue> values(arity);
-  std::vector<int> codes(arity);
-  runtime::TVMArgsSetter setter(values.data(), codes.data());
-  int idx = 0;
-  bool is_empty_output = false;
-  for (Index i = 0; i < arg_count; i++) {
-    if (const auto* dt_cell = args[i].as<ADTObj>()) {
-      for (size_t fi = 0; fi < dt_cell->size; ++fi) {
-        auto obj = (*dt_cell)[fi];
-        auto nd_array = Downcast<NDArray>(obj);
-        setter(idx++, nd_array);
-      }
-    } else {
-      auto nd_array = Downcast<NDArray>(args[i]);
-      // We can safely skip CallPacked if there is only one
-      // output and it is empty.
-      if (i == arg_count - 1 && output_size == 1) {
-        for (const auto& dim : nd_array.Shape()) {
-          if (!dim) {
-            is_empty_output = true;
-            break;
-          }
-        }
-      }
-      setter(idx++, nd_array);
-    }
-  }
-
-  if (!is_empty_output) {
-    TVMRetValue rv;
-    func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
+  if (lazy_execution_) {
+    lazy_executor_.AddPackedCall(func, arg_count, output_size, args);
+  } else {
+    InvokePackedFn(func, arg_count, output_size, args);
   }
 }
 
@@ -465,6 +431,7 @@ void VirtualMachine::RunLoop() {
   main_loop:
     auto const& instr = code_[this->pc_];
     VLOG(2) << "Executing(" << pc_ << "): " << instr;
+    // std::cout << "Executing(" << pc_ << "): " << instr << std::endl;
 
     switch (instr.op) {
       case Opcode::Move: {
@@ -692,6 +659,9 @@ void VirtualMachine::RunLoop() {
         auto caller_return_register = frames_.back().caller_return_register;
 
         if (PopFrame() == frame_start) {
+          if (lazy_execution_) {
+            lazy_executor_.Execute();
+          }
           return;
           // Otherwise we are just returning from a local call.
         } else {

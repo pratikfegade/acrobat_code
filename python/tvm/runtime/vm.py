@@ -423,6 +423,7 @@ class VirtualMachine(object):
             # kwargs is a super set of the required function parameters. We
             # only find the ones that are needed.
             func_params = self._exec.get_function_params(func_name)
+            print(func_params)
             new_args = [None] * len(func_params)
             cnt = 0
             for k in kwargs:

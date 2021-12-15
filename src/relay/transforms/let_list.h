@@ -50,7 +50,9 @@ namespace relay {
 class LetList {
  public:
   ~LetList() {
-    if (lets_.size() > 0 && !used_) {
+    static bool warned = false;
+    if (lets_.size() > 0 && !used_ && !warned) {
+      warned = true;
       LOG(WARNING) << "letlist not used";
     }
   }

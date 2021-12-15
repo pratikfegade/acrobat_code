@@ -294,10 +294,10 @@ IRModule ApplyPasses(IRModule mod, transform::Sequential seq) {
 }
 
 Array<transform::Pass> AddPrintPasses(const Array<transform::Pass>& pass_list,
-				      const Array<String>& print_after) {
+                                      const Array<String>& print_after) {
   Array<transform::Pass> updated_pass_list;
   transform::Pass print_pass;
-  for (auto pass: pass_list) {
+  for (auto pass : pass_list) {
     updated_pass_list.push_back(pass);
     if (print_after.exists(pass->Info()->name)) {
       updated_pass_list.push_back(tir::transform::PrintCurrentIR(pass->Info()->name));
@@ -309,7 +309,7 @@ Array<transform::Pass> AddPrintPasses(const Array<transform::Pass>& pass_list,
 // Convert te schedule to IRModule
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                           const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-			  const Map<te::Tensor, tir::Buffer>& scatter_buffers) {
+                          const Map<te::Tensor, tir::Buffer>& scatter_buffers) {
   sch = sch.normalize();
 
   transform::PassContext pass_ctx = transform::PassContext::Current();
@@ -325,20 +325,20 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
   GetBinds(args, compact, binds, &out_binds, &out_arg_list);
 
   // Build the function, converting from te::Tensor to tir::Buffer
-  std::cout << "[STM] Map size " << scatter_buffers.size() << std::endl;
+  // std::cout << "[STM] Map size " << scatter_buffers.size() << std::endl;
   Map<tir::Var, tir::Buffer> var_scatter_buffer_mapping;
   if (scatter_buffers.defined()) {
-    for (auto it: scatter_buffers) {
+    for (auto it : scatter_buffers) {
       auto tensor = it.first;
       auto scatter_buffer = it.second;
       if (out_binds.count(tensor)) {
-	var_scatter_buffer_mapping.Set(out_binds.at(tensor)->data, scatter_buffer);
+        var_scatter_buffer_mapping.Set(out_binds.at(tensor)->data, scatter_buffer);
       }
     }
   }
-  std::cout << "[STM] Var map size " << var_scatter_buffer_mapping.size() << std::endl;
+  // std::cout << "[STM] Var map size " << var_scatter_buffer_mapping.size() << std::endl;
   tir::PrimFunc f = te::SchedulePostProcToPrimFunc(out_arg_list, std::move(stmt), out_binds,
-						   var_scatter_buffer_mapping);
+                                                   var_scatter_buffer_mapping);
   f = WithAttr(std::move(f), "global_symbol", runtime::String(name));
 
   // Mark this schedule as being converted from an TE schedule. Makes sure that
@@ -363,7 +363,8 @@ TVM_REGISTER_GLOBAL("driver.schedule_to_module")
           c_binds.insert({kv.first, kv.second});
         }
       }
-      IRModule mod = ScheduleToModule(std::move(sch), args, name, c_binds, Map<te::Tensor, tir::Buffer>());
+      IRModule mod =
+          ScheduleToModule(std::move(sch), args, name, c_binds, Map<te::Tensor, tir::Buffer>());
       return mod;
     });
 
@@ -399,8 +400,8 @@ TVM_REGISTER_GLOBAL("driver.lower_primfunc")
 
 IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args, const std::string& name,
                        const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-		       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
-		       const Array<String>& print_after_passes) {
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
+                       const Array<String>& print_after_passes) {
   Array<ObjectRef> ref_args;
   for (ObjectRef x : args) {
     ref_args.push_back(x);
@@ -410,8 +411,8 @@ IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args, const st
 
 IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                        const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-		       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
-		       const Array<String>& print_after_passes) {
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
+                       const Array<String>& print_after_passes) {
   IRModule mod = ScheduleToModule(std::move(sch), args, name, binds, scatter_buffers);
   // Get the legacy TE pass list
   Array<transform::Pass> pass_list = CreatePassList(simple_mode);
@@ -421,8 +422,8 @@ IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args, const std
 TVM_REGISTER_GLOBAL("driver.lower_schedule")
     .set_body_typed([](te::Schedule sch, const Array<ObjectRef>& args, const String& name,
                        const Map<te::Tensor, tir::Buffer>& binds, bool simple_mode,
-		       const Map<te::Tensor, tir::Buffer>& scatter_buffers,
-		       const Array<String>& print_after_passes) {
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                       const Array<String>& print_after_passes) {
       std::unordered_map<te::Tensor, tir::Buffer> c_binds;
       // Check to make sure binds is not null before doing the conversion;
       if (binds.get() != nullptr) {
@@ -430,7 +431,8 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
           c_binds.insert({kv.first, kv.second});
         }
       }
-      auto mod = LowerSchedule(std::move(sch), args, name, c_binds, scatter_buffers, simple_mode, print_after_passes);
+      auto mod = LowerSchedule(std::move(sch), args, name, c_binds, scatter_buffers, simple_mode,
+                               print_after_passes);
       // std::cout << "[RET] " << mod << std::endl;
       return mod;
     });
@@ -442,7 +444,7 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
  */
 std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target& target_arg,
                                                const Target& target_host_arg,
-					       const Array<String>& print_after_passes) {
+                                               const Array<String>& print_after_passes) {
   Target target = target_arg, target_host = target_host_arg;
   CheckAndUpdateHostConsistency(&target, &target_host);
 
@@ -450,9 +452,11 @@ std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target&
 
   mod_mixed = ApplyPasses(mod_mixed, MixedModulePassManager(mod_mixed, target, print_after_passes));
 
-  IRModule host_mod = ApplyPasses(mod_mixed, HostModulePassManager(mod_mixed, target_host, print_after_passes));
+  IRModule host_mod =
+      ApplyPasses(mod_mixed, HostModulePassManager(mod_mixed, target_host, print_after_passes));
 
-  IRModule device_mod = ApplyPasses(mod_mixed, DeviceModulePassManager(mod_mixed, target, print_after_passes));
+  IRModule device_mod =
+      ApplyPasses(mod_mixed, DeviceModulePassManager(mod_mixed, target, print_after_passes));
   // exit(0);
   // return {};
 
@@ -469,8 +473,9 @@ std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target&
   return {host_mod, device_mod};
 }
 
-runtime::Module PreProcessModuleForBuild(const Map<Target, IRModule>& inputs_arg, const Target& host_target,
-					 const Array<String>& print_after_passes) {
+runtime::Module PreProcessModuleForBuild(const Map<Target, IRModule>& inputs_arg,
+                                         const Target& host_target,
+                                         const Array<String>& print_after_passes) {
   std::vector<runtime::Module> device_modules;
   Map<Target, IRModule> inputs = inputs_arg;
   Target target_host = host_target;
@@ -528,7 +533,7 @@ runtime::Module PreProcessModuleForBuild(const Map<Target, IRModule>& inputs_arg
 
 TVM_REGISTER_GLOBAL("driver.preprocess_module")
     .set_body_typed([](const Map<Target, IRModule>& inputs_arg, Target host_target,
-		       const Array<String>& print_after_passes) {
+                       const Array<String>& print_after_passes) {
       return PreProcessModuleForBuild(inputs_arg, host_target, print_after_passes);
     });
 
@@ -632,7 +637,7 @@ runtime::Module build(const IRModule& funcs, const Target& target_arg,
 }
 
 transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target,
-					     const Array<String>& print_after_passes) {
+                                             const Array<String>& print_after_passes) {
   transform::PassContext pass_ctx = transform::PassContext::Current();
 
   Array<Pass> mixed_pass_list;
@@ -678,7 +683,7 @@ TVM_REGISTER_GLOBAL("driver.mixed_mod_passes")
     });
 
 transform::Sequential HostModulePassManager(IRModule mixed_mod, Target target_host,
-					    const Array<String>& print_after_passes) {
+                                            const Array<String>& print_after_passes) {
   Array<tvm::transform::Pass> host_pass_list;
   host_pass_list.push_back(Filter([](const tir::PrimFunc& f) {
     return f->GetAttr<Integer>(tvm::attr::kCallingConv, Integer(CallingConv::kDefault)) !=
@@ -704,7 +709,7 @@ TVM_REGISTER_GLOBAL("driver.host_mod_passes")
     });
 
 transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target,
-					      const Array<String>& print_after_passes) {
+                                              const Array<String>& print_after_passes) {
   Array<Pass> device_pass_list;
   device_pass_list.push_back(Filter([](const tir::PrimFunc& f) {
     return f->GetAttr<Integer>(tvm::attr::kCallingConv, Integer(CallingConv::kDefault)) ==

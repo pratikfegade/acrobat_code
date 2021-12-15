@@ -39,8 +39,8 @@ LinkedParam::LinkedParam(int64_t id, ::tvm::runtime::NDArray param) {
 PrimFunc::PrimFunc(Array<tir::Var> params, Stmt body, Type ret_type,
                    Map<tir::Var, Buffer> buffer_map, Map<tir::Var, Buffer> scatter_buffer_map,
                    DictAttrs attrs, Span span) {
-  std::cout << "New PrimFunc " << scatter_buffer_map.size() << " " << buffer_map.size()
-            << std::endl;
+  // std::cout << "New PrimFunc " << scatter_buffer_map.size() << " " << buffer_map.size()
+  // << std::endl;
   // Assume void-return type for now
   // TODO(tvm-team) consider type deduction from body.
   if (!ret_type.defined()) {

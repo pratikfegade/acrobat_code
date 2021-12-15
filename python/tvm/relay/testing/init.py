@@ -73,13 +73,14 @@ class Initializer(object):
         """Abstract method to Initialize weight."""
         raise NotImplementedError("Must override it")
 
-    def _init_default(self, name, _):
-        raise ValueError(
-            "Unknown initialization pattern for %s. "
-            "Default initialization is now limited to "
-            '"weight", "bias", "gamma" (1.0), and "beta" (0.0).'
-            "Please use mx.sym.Variable(init=mx.init.*) to set initialization pattern" % name
-        )
+    def _init_default(self, name, arr):
+        arr[:] = 1.0
+        # raise ValueError(
+            # "Unknown initialization pattern for %s. "
+            # "Default initialization is now limited to "
+            # '"weight", "bias", "gamma" (1.0), and "beta" (0.0).'
+            # "Please use mx.sym.Variable(init=mx.init.*) to set initialization pattern" % name
+        # )
 
 
 class Xavier(Initializer):

@@ -113,7 +113,7 @@ class Buffer(Object):
         """
         begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
         dtype = dtype if dtype else self.dtype
-        return _ffi_api.BufferVLoad(self, begin, dtype)  # type: ignore
+        return _ffi_api.BufferVLoad(self, begin, dtype, None)  # type: ignore
 
     def vstore(self, begin, value):
         """Generate a Stmt that store value into begin index.

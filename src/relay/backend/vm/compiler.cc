@@ -936,6 +936,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   // Run the optimizations necessary to target the VM.
   context_.module = OptimizeModuleImpl(std::move(mod));
 
+  std::cout << "Module " << context_.module << std::endl;
+
   // Populate the global map.
   //
   // This maps global variables to a global index
@@ -1029,7 +1031,7 @@ transform::Sequential MemoryOpt(const SEScope& cpu_se_scope) {
   // incomplete to provide memory resuse optimizations. Disable it until we can
   // rewrite it in C++ and complete it.
   // // Perform memory planning in order to coalesce/reduce allocations.
-  // pass_seqs.push_back(transform::MemoryPlan());
+  pass_seqs.push_back(transform::MemoryPlan());
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
