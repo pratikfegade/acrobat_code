@@ -23,6 +23,7 @@
 
 import tvm
 from tvm import relay
+from tvm.script import tir as T
 import tvm.testing
 import numpy as np
 
@@ -44,6 +45,9 @@ HOST = tvm.target.make_se_scope(HOST_DEVICE, HOST_TARGET)  # device_type=1
 CPU = tvm.target.make_se_scope(CPU_DEVICE, CPU_TARGET)  # device_type=1
 GPU = tvm.target.make_se_scope(GPU_DEVICE, GPU_TARGET)  # device_type=2
 DEFAULT = GPU
+
+CPU_SCOPE_A = tvm.target.make_se_scope(CPU_DEVICE, CPU_TARGET, memory_scope="scopeA")
+CPU_SCOPE_B = tvm.target.make_se_scope(CPU_DEVICE, CPU_TARGET, memory_scope="scopeB")
 
 CTXT = tvm.transform.PassContext(config={"relay.fallback_device_type": DEFAULT.device_type_int})
 
@@ -178,7 +182,7 @@ def test_left_add_on_cpu():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][1], meta[SEScope][1]],
                       result_se_scope=meta[SEScope][1]) {
               %0 = add(%a, %b);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %3 = add(%c, %d);
               subtract(%2, %3)
@@ -225,7 +229,7 @@ def test_left_add_on_cpu_via_copy():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][1], meta[SEScope][1]],
                       result_se_scope=meta[SEScope][1]) {
               %0 = add(%a, %b);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %3 = add(%c, %d);
               subtract(%2, %3)
@@ -272,9 +276,9 @@ def test_both_adds_on_cpu():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][0], meta[SEScope][0]],
                       result_se_scope=meta[SEScope][1]) {
               %0 = add(%a, %b);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = add(%c, %d);
-              %3 = on_device(%2, se_scope=meta[SEScope][0], is_fixed=True);
+              %3 = on_device(%2, se_scope=meta[SEScope][0], constrain_result=True);
               %4 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %5 = device_copy(%3, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               subtract(%4, %5)
@@ -318,8 +322,8 @@ def test_sharing():
             def @main(%a: Tensor[(5, 7), float32], %b: Tensor[(5, 7), float32],
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0]], result_se_scope=meta[SEScope][1]) {
               %0 = add(%a, %b);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
-              %2 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
+              %2 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %3 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %4 = device_copy(%2, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               subtract(%3, %4)
@@ -367,8 +371,8 @@ def test_let_on_cpu():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][1], meta[SEScope][1]],
                       result_se_scope=meta[SEScope][1]) {
               %0 = add(%a, %b);
-              let %l = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
-              let %r = add(%c, %d);
+              let %l = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
+              let %r = on_device(add(%c, %d), se_scope=meta[SEScope][1], constrain_result=True);
               %1 = device_copy(%l, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               subtract(%1, %r)
             }
@@ -473,7 +477,7 @@ def test_func_result_on_cpu():
                 add(%x, %y)
               };
               %1 = %f(%a, %b);
-              %2 = on_device(%1, se_scope=meta[SEScope][0], is_fixed=True);
+              %2 = on_device(%1, se_scope=meta[SEScope][0], constrain_result=True);
               %3 = device_copy(%2, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %4 = add(%c, %d);
               subtract(%3, %4)
@@ -591,7 +595,7 @@ def test_function_in_tuple():
                            param_se_scopes=[meta[SEScope][0], meta[SEScope][0]], result_se_scope=meta[SEScope][0]) {
                 add(%a, %b)
               };
-              let %t = (%f, %x);
+              let %t = on_device((%f, %x), se_scope=meta[SEScope][0], constrain_result=True);
               %0 = %t.1;
               %1 = %t.0;
               %1(%0, %y)
@@ -647,59 +651,10 @@ def test_device_copy():
     exercise(input(), expected(), ref, rands((5, 7), 1))
 
 
-def test_shape_func():
-    metatable = {"SEScope": [HOST, GPU]}
-
-    def input():
-        return tvm.parser.parse(
-            """
-            #[version = "0.0.5"] 
-            def @main(%x: Tensor[(?), float32], %s: Tensor[(1), int64]) {
-              %0 = fn (%y: Tensor[(?), float32]) {
-                nn.relu(%y)
-              };
-              let %p = on_device(%0, se_scope=meta[SEScope][1], is_fixed=True);
-              %1 = on_device(%x, se_scope=meta[SEScope][1], is_fixed=True);
-              %2 = vm.shape_of(%1, dtype="int64");
-              %3 = (%2,);
-              %4 = (%s,);
-              vm.shape_func(%p, %3, %4, is_input=[False])
-            }
-        """,
-            "from_string",
-            None,
-            metatable,
-        )
-
-    def expected():
-        return tvm.parser.parse(
-            """
-            #[version = "0.0.5"] 
-            def @main(%x: Tensor[(?), float32], %s: Tensor[(1), int64],
-                      param_se_scopes=[meta[SEScope][1], meta[SEScope][0]], result_se_scope=meta[SEScope][0]) {
-              let %p = fn (%y: Tensor[(?), float32],
-                           param_se_scopes=[meta[SEScope][1]], result_se_scope=meta[SEScope][1]) {
-                nn.relu(%y)
-              };
-              %1 = vm.shape_of(%x, dtype="int64");
-              %2 = (%1,);
-              %3 = (%s,);
-              vm.shape_func(%p, %2, %3, is_input=[False])
-            }
-        """,
-            "from_string",
-            None,
-            metatable,
-        )
-
-    # Don't try to execute, too fiddly to setup.
-    exercise(input(), expected(), None, None)
-
-
 def test_shape_of():
     metatable = {"SEScope": [HOST, GPU]}
 
-    # We need to use is_fixed=True in the on_device call so that the tensor will be on the GPU. Otherwise the
+    # We need to use constrain_result=True in the on_device call so that the tensor will be on the GPU. Otherwise the
     # result defaults to the result device for @main which is the CPU, thus forcing a copy.
     # TODO(mbs): Perhaps the defaulting heuristics are being too clever?
     def input():
@@ -707,7 +662,7 @@ def test_shape_of():
             """
             #[version = "0.0.5"] 
             def @main(%x: Tensor[(?, ?), float32]) {
-              %0 = on_device(%x, se_scope=meta[SEScope][1], is_fixed=True);
+              %0 = on_device(%x, se_scope=meta[SEScope][1], constrain_result=True);
               vm.shape_of(%0, dtype="int64")
             }
         """,
@@ -793,8 +748,8 @@ def test_alloc_tensor():
             """
             #[version = "0.0.5"]
             def @main(%sto: Storage[], param_se_scopes=[meta[SEScope][1]], result_se_scope=meta[SEScope][1]) {
-              %0 = on_device(0, se_scope=meta[SEScope][0], is_fixed=True);
-              %1 = on_device(meta[relay.Constant][0], se_scope=meta[SEScope][0], is_fixed=True);
+              %0 = on_device(0, se_scope=meta[SEScope][0], constrain_result=True);
+              %1 = on_device(meta[relay.Constant][0], se_scope=meta[SEScope][0], constrain_result=True);
               memory.alloc_tensor(%sto, %0, %1, const_shape=meta[relay.Constant][0], assert_shape=[])
             }
         """,
@@ -830,7 +785,7 @@ def test_reshape_tensor():
             #[version = "0.0.5"]
             def @main(%x: Tensor[(2, 8), float32],
                       param_se_scopes=[meta[SEScope][1]], result_se_scope=meta[SEScope][1]) {
-              %0 = on_device(meta[relay.Constant][0], se_scope=meta[SEScope][0], is_fixed=True);
+              %0 = on_device(meta[relay.Constant][0], se_scope=meta[SEScope][0], constrain_result=True);
               vm.reshape_tensor(%x, %0, newshape=[2, 4, 2])
             }
         """,
@@ -910,9 +865,9 @@ def test_redundant_annotation():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][1]],
                       result_se_scope=meta[SEScope][1]) {
               %0 = add(%x, %y);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
-              %3 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %3 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %4 = subtract(%2, %z);
               %5 = device_copy(%3, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               add(%4, %5)
@@ -957,7 +912,7 @@ def test_annotate_expr():
                       param_se_scopes=[meta[SEScope][1], meta[SEScope][1], meta[SEScope][0]],
                       result_se_scope=meta[SEScope][0]) {
               %0 = add(%x, %y);
-              %1 = on_device(%0, se_scope=meta[SEScope][1], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][1], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               subtract(%2, %z)
             }
@@ -1059,13 +1014,13 @@ def test_conv_network():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][0]],
                       result_se_scope=meta[SEScope][0]) {
               %0 = nn.conv2d(%data1, %weight, padding=[1, 1, 1, 1], channels=64, kernel_size=[3, 3]);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = nn.conv2d(%data2, %weight, padding=[1, 1, 1, 1], channels=64, kernel_size=[3, 3]);
-              %3 = on_device(%2, se_scope=meta[SEScope][0], is_fixed=True);
+              %3 = on_device(%2, se_scope=meta[SEScope][0], constrain_result=True);
               %4 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %5 = device_copy(%3, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %6 = add(%4, %5);
-              %7 = on_device(%6, se_scope=meta[SEScope][1], is_fixed=True);
+              %7 = on_device(%6, se_scope=meta[SEScope][1], constrain_result=True);
               %8 = device_copy(%7, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               nn.conv2d(%8, %weight, padding=[1, 1, 1, 1], channels=64, kernel_size=[3, 3])
             }
@@ -1110,11 +1065,11 @@ def test_tuple_get_item():
             def @main(%x: Tensor[(3, 3, 4), float32],
                       param_se_scopes=[meta[SEScope][0]], result_se_scope=meta[SEScope][1]) {
               %0 = split(%x, indices_or_sections=3);
-              let %t = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              let %t = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %1 = %t.0;
-              %2 = on_device(%1, se_scope=meta[SEScope][0], is_fixed=True);
+              %2 = on_device(%1, se_scope=meta[SEScope][0], constrain_result=True);
               %3 = %t.1;
-              %4 = on_device(%3, se_scope=meta[SEScope][0], is_fixed=True);
+              %4 = on_device(%3, se_scope=meta[SEScope][0], constrain_result=True);
               %5 = device_copy(%2, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %6 = device_copy(%4, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               subtract(%5, %6)
@@ -1178,14 +1133,14 @@ def test_propogation():
             def @main(%x: Tensor[(5, 7), float32],
                       param_se_scopes=[meta[SEScope][0]], result_se_scope=meta[SEScope][0]) {
               %0 = negative(%x);
-              %1 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
-              %3 = on_device(%0, se_scope=meta[SEScope][0], is_fixed=True);
+              %3 = on_device(%0, se_scope=meta[SEScope][0], constrain_result=True);
               %4 = device_copy(%3, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %5 = negative(%2);
               %6 = negative(%4);
               %7 = add(%5, %6);
-              %8 = on_device(%7, se_scope=meta[SEScope][1], is_fixed=True);
+              %8 = on_device(%7, se_scope=meta[SEScope][1], constrain_result=True);
               %9 = device_copy(%8, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               negative(%9)
             }
@@ -1248,14 +1203,14 @@ def test_fusible_network():
             def @main(%x: Tensor[(5, 7), float32], %y: Tensor[(5, 7), float32],
                       param_se_scopes=[meta[SEScope][1], meta[SEScope][1]], result_se_scope=meta[SEScope][0]) {
               %0 = add(%x, %y);
-              %1 = on_device(%0, se_scope=meta[SEScope][1], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][1], constrain_result=True);
               %2 = device_copy(%1, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               %3 = negative(%2);
-              %4 = on_device(%3, se_scope=meta[SEScope][0], is_fixed=True);
+              %4 = on_device(%3, se_scope=meta[SEScope][0], constrain_result=True);
               %5 = device_copy(%4, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
               %6 = negative(%0);
               %7 = add(%5, %6);
-              %8 = on_device(%7, se_scope=meta[SEScope][1], is_fixed=True);
+              %8 = on_device(%7, se_scope=meta[SEScope][1], constrain_result=True);
               %9 = device_copy(%8, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               negative(%9)
             }
@@ -1316,7 +1271,7 @@ def test_unpropagatable_graph():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0], meta[SEScope][1], meta[SEScope][1]],
                       result_se_scope=meta[SEScope][0]) {
               %0 = multiply(%c, %d);
-              %1 = on_device(%0, se_scope=meta[SEScope][1], is_fixed=True);
+              %1 = on_device(%0, se_scope=meta[SEScope][1], constrain_result=True);
               %2 = add(%a, %b);
               %3 = device_copy(%1, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][0]);
               subtract(%2, %3)
@@ -1343,7 +1298,7 @@ def test_conditional():
             #[version = "0.0.5"]
             def @main(%x: bool, %y: Tensor[(5, 7), float32], %z: Tensor[(5, 7), float32]) {
               let %f = fn (%a) {
-                %0 = on_device(%y, se_scope=meta[SEScope][0], is_fixed=True);
+                %0 = on_device(%y, se_scope=meta[SEScope][0], constrain_result=True);
                 add(%a, %0)
               };
               let %g = fn (%a1) {
@@ -1375,11 +1330,11 @@ def test_conditional():
               let %g = fn (%a1, param_se_scopes=[meta[SEScope][0]], result_se_scope=meta[SEScope][0]) {
                 subtract(%a1, %y)
               };
-              let %h = if (%x) {
+              let %h = on_device(if (%x) {
                 %f
               } else {
                 %g
-              };
+              }, se_scope=meta[SEScope][0], constrain_result=True);
               %h(%z)
             }
         """,
@@ -1479,9 +1434,9 @@ def test_ref():
             #[version = "0.0.5"]
             def @main(%x: Tensor[(5, 7), float32], %y: Tensor[(5, 7), float32],
                       param_se_scopes=[meta[SEScope][1], meta[SEScope][0]], result_se_scope=meta[SEScope][1]) {
-              let %r = ref(%x);
+              let %r = on_device(ref(%x), se_scope=meta[SEScope][1], constrain_result=True);
               %0 = device_copy(%y, src_se_scope=meta[SEScope][0], dst_se_scope=meta[SEScope][1]);
-              ref_write(%r, %0);
+              on_device(ref_write(%r, %0), se_scope=meta[SEScope][1], constrain_result=True);
               %1 = ref_read(%r);
               add(%x, %1)
             }
@@ -1512,7 +1467,7 @@ def test_adt():
               Nil,
             }
             def @main(%x : Tensor[(5, 7), float32], %y : Tensor[(5, 7), float32]) {
-              %0 = on_device(%y, se_scope=meta[SEScope][0], is_fixed=True);
+              %0 = on_device(%y, se_scope=meta[SEScope][0], constrain_result=True);
               %1 = Nil;
               %2 = Cons(%0, %1);
               let %l = Cons(%x, %2);
@@ -1538,7 +1493,7 @@ def test_adt():
                       param_se_scopes=[meta[SEScope][0], meta[SEScope][0]], result_se_scope=meta[SEScope][0]) {
               %0 = Nil;
               %1 = Cons(%y, %0);
-              let %l = Cons(%x, %1);
+              let %l = on_device(Cons(%x, %1), se_scope=meta[SEScope][0], constrain_result=True);
               match? (%l) {
                 Cons(%z, _) => %z
               }
@@ -1554,6 +1509,180 @@ def test_adt():
         return l[0]
 
     exercise(input(), expected(), ref, rands((5, 7), 2))
+
+
+def test_free_on_device():
+    """Tests that the 'free' form of on_device (ie with constrain_body=False) can be used to allow
+    a device_copy to be inserted if necessary, but otherwise does not prevent the flow of
+    device information."""
+    metatable = {
+        "SEScope": [
+            CPU,  # no memory scope constraint
+            CPU_SCOPE_A,  # constrain to scopeA
+            CPU_SCOPE_B,
+        ]
+    }  # constrain to scopeB
+
+    # Everything defaults to GPU
+    def input():
+        return tvm.parser.parse(
+            """
+            #[version = "0.0.5"]
+            def @on_scope_b(%x: Tensor[(5, 7), float32],
+                            param_se_scopes=[meta[SEScope][2]],
+                            result_se_scope=meta[SEScope][2]) -> Tensor[(5, 7), float32] {
+              %x                
+            }                 
+            def @main(%a: Tensor[(5, 7), float32], %b: Tensor[(5, 7), float32], %c: Tensor[(5, 7), float32],
+                      param_se_scopes=[meta[SEScope][0], meta[SEScope][1], meta[SEScope][2]],
+                      result_se_scope=meta[SEScope][1]) {
+              // %a's memory scope is unconstrained, so will take on "scopeB" and on_device has no effect
+              %0 = @on_scope_b(on_device(%a, se_scope=meta[SEScope][0], constrain_body=False));
+              // %b's memory scope is "scopeA", so will require a "scopeA"->"scopeB" copy.
+              %1 = @on_scope_b(on_device(%b, se_scope=meta[SEScope][0], constrain_body=False));
+              // %c's memory scope is "scopeB", so no copy required.
+              %2 = @on_scope_b(on_device(%c, se_scope=meta[SEScope][0], constrain_body=False));
+              // result's memory scope is is on "scopeA", so will require a "scopeB"->"scopeA" copy.
+              %3 = add(add(%0, %1), %2);
+              on_device(%3, se_scope=meta[SEScope][0], constrain_body=False)
+            }
+        """,
+            "from_string",
+            None,
+            metatable,
+        )
+
+    def expected():
+        return tvm.parser.parse(
+            """
+            #[version = "0.0.5"]
+            def @on_scope_b(%x: Tensor[(5, 7), float32],
+                            param_se_scopes=[meta[SEScope][2]],
+                            result_se_scope=meta[SEScope][2]) -> Tensor[(5, 7), float32] {
+              %x                
+            }                 
+            def @main(%a: Tensor[(5, 7), float32], %b: Tensor[(5, 7), float32], %c: Tensor[(5, 7), float32],
+                      param_se_scopes=[meta[SEScope][2], meta[SEScope][1], meta[SEScope][2]],
+                      result_se_scope=meta[SEScope][1]) {
+              %0 = @on_scope_b(%a);
+              %1 = device_copy(%b, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][2]);
+              %2 = @on_scope_b(%1);
+              %3 = @on_scope_b(%c);
+              %4 = add(add(%0, %2), %3);
+              %5 = on_device(%4, se_scope=meta[SEScope][2], constrain_result=True); 
+              device_copy(%5, src_se_scope=meta[SEScope][2], dst_se_scope=meta[SEScope][1])
+            }
+        """,
+            "from_string",
+            None,
+            metatable,
+        )
+
+    exercise(input(), expected(), None, None)
+
+
+def test_lowered():
+    """
+    Tests propagation of memory scopes from PrimFuncs and insertion
+    of device_copies to mediate any scope changes.
+    """
+
+    @T.prim_func
+    def input_gem(a: T.handle, b: T.handle, c: T.handle, d: T.handle) -> None:
+        A = T.match_buffer(a, [128, 128], scope="scopeA")  # will flow out
+        B = T.match_buffer(b, [128, 128], scope="")  # will flow in
+        C = T.match_buffer(c, [128, 128], scope="scopeB")  # will flow out
+        D = T.match_buffer(d, [128, 128], scope="scopeA")  # will flow out
+
+        for i, j, k in T.grid(128, 128, 128):
+            with T.block("update"):
+                vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                with T.init():
+                    D[vi, vj] = C[vi, vj]
+                D[vi, vj] = D[vi, vj] + A[vi, vk] * B[vj, vk]
+
+    @T.prim_func
+    def expected_gem(a: T.handle, b: T.handle, c: T.handle, d: T.handle) -> None:
+        A = T.match_buffer(a, [128, 128], scope="scopeA")
+        B = T.match_buffer(b, [128, 128], scope="scopeB")  # flowed in
+        C = T.match_buffer(c, [128, 128], scope="scopeB")
+        D = T.match_buffer(d, [128, 128], scope="scopeA")
+
+        for i, j, k in T.grid(128, 128, 128):
+            with T.block("update"):
+                vi, vj, vk = T.axis.remap("SSR", [i, j, k])
+                with T.init():
+                    D[vi, vj] = C[vi, vj]
+                D[vi, vj] = D[vi, vj] + A[vi, vk] * B[vj, vk]
+
+    metatable = {
+        "SEScope": [
+            CPU,  # meta[SEScope][0], no memory scope
+            CPU_SCOPE_A,  # meta[SEScope][1], "scopeA"
+            CPU_SCOPE_B,
+        ]
+    }  # meta[SEScope][2], "scopeB"
+    gem_ty = relay.FuncType(
+        [
+            relay.TensorType((128, 128), "float32"),
+            relay.TensorType((128, 128), "float32"),
+            relay.TensorType((128, 128), "float32"),
+        ],
+        relay.TensorType((128, 128), "float32"),
+    )
+    gem_gv = relay.GlobalVar("gem", type_annot=gem_ty)
+
+    def input():
+        mod = tvm.ir.IRModule()
+        mod[gem_gv] = input_gem
+        # - %x on CPU, no memory scope constraint, so will be constrained by first param of gem to "scopeA".
+        # - %y on CPU "scopeB", so will flow in to second param of gem.
+        # - %z on CPU "scopeA", so will clash with third param of gem and will need device_copy.
+        # - result on CPU "scopeB", but result of gem on "scopeA" so will need device_copy
+        return tvm.parser.parse(
+            """
+            #[version = "0.0.5"]
+            def @main(%x : Tensor[(128, 128), float32],
+                      %y : Tensor[(128, 128), float32],
+                      %z : Tensor[(128, 128), float32],
+                      param_se_scopes=[meta[SEScope][0], meta[SEScope][2], meta[SEScope][1]],
+                      result_se_scope=meta[SEScope][2]) {
+              call_lowered(@gem, (%x, %y, %z))          
+            }
+            """,
+            "from_string",
+            mod,
+            metatable,
+        )
+
+    def expected():
+        mod = tvm.ir.IRModule()
+        mod[gem_gv] = expected_gem
+        # - %x now on CPU "scopeA", no device_copy needed.
+        # - %y still on CPU "scopeB", no device_copy needed.
+        # - %z still on CPU "scopeA", needs device_copy to "scopeB".
+        # - result still on CPU "scopeB", needs device_copy  from "scopeA".
+        return tvm.parser.parse(
+            """
+            #[version = "0.0.5"]
+            def @main(%x : Tensor[(128, 128), float32],
+                      %y : Tensor[(128, 128), float32],
+                      %z : Tensor[(128, 128), float32], 
+                      param_se_scopes=[meta[SEScope][1], meta[SEScope][2], meta[SEScope][1]],
+                      result_se_scope=meta[SEScope][2]) {
+              %0 = device_copy(%z, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][2]);
+              %1 = on_device(%0, se_scope=meta[SEScope][2], constrain_result=True);      
+              %2 = call_lowered(@gem, (%x, %y, %1));
+              %3 = on_device(%2, se_scope=meta[SEScope][1], constrain_result=True);
+              device_copy(%3, src_se_scope=meta[SEScope][1], dst_se_scope=meta[SEScope][2])
+            }
+            """,
+            "from_string",
+            mod,
+            metatable,
+        )
+
+    exercise(input(), expected(), None, None)
 
 
 if __name__ == "__main__":

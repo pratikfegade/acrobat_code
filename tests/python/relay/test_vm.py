@@ -797,6 +797,10 @@ def test_vm_reshape_tuple(target, dev, x_shape=(1, 4, 2), y_shape=(1, 2, 10)):
 
 
 def test_constant_shape_with_external_codegen():
+    @tvm.register_func("relay.ext.test1")
+    def relay_ext_test(func):
+        return None
+
     mod = tvm.IRModule()
     shape = (relay.Any(), 25)
     dtype = "float32"
@@ -808,7 +812,8 @@ def test_constant_shape_with_external_codegen():
     f1 = relay.Function([x], out)
     f1 = f1.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
     f1 = f1.with_attr("Inline", tvm.tir.IntImm("int32", 1))
-    f1 = f1.with_attr("Compiler", "a")
+    f1 = f1.with_attr("Compiler", "test1")
+    f1 = f1.with_attr("global_symbol", "f1")
     glb_f1 = relay.GlobalVar("f1")
     mod[glb_f1] = f1
     mod = relay.transform.InferType()(mod)
@@ -976,6 +981,10 @@ def test_benchmark_end_to_end_rpc():
 
 
 def test_shape_func_nested_function():
+    @tvm.register_func("relay.ext.test2")
+    def relay_ext_test(func):
+        return None
+
     data_shape = (relay.Any(), 16)
     weight_shape = (relay.Any(), 16)
 
@@ -988,7 +997,7 @@ def test_shape_func_nested_function():
     passes = tvm.transform.Sequential(
         [
             relay.transform.MergeComposite(patterns),
-            relay.transform.AnnotateTarget(["test"]),
+            relay.transform.AnnotateTarget(["test2"]),
             relay.transform.PartitionGraph(),
         ]
     )
@@ -1031,8 +1040,8 @@ def test_storage_size_and_offset_on_cpu():
     # - The offset of the tensor within the storage (second arg) to alloc_tensor
     # Both should be on the CPU
     assert "VirtualDevice[0]: device type 1" in exe.virtual_devices
-    assert "Constant[0]: has shape int64[] on device index 0" in exe.constants
-    assert "Constant[1]: has shape int64[] on device index 0" in exe.constants
+    assert "Const[0]: has shape int64[] on device index 0" in exe.constants
+    assert "Const[1]: has shape int64[] on device index 0" in exe.constants
 
 
 @tvm.testing.requires_cuda
@@ -1064,7 +1073,7 @@ def test_reshape_shape_on_cpu():
 
     # The newshape annotation should have been turned into a constant on the CPU.
     assert "VirtualDevice[0]: device type 1" in exe.virtual_devices
-    assert "Constant[0]: has shape int64[3] on device index 0" in exe.constants
+    assert "Const[0]: has shape int64[3] on device index 0" in exe.constants
 
 
 @tvm.testing.requires_cuda
@@ -1101,6 +1110,40 @@ def test_multi_targets():
     # Test
     expected_result = x_data + y_data + z_data
     tvm.testing.assert_allclose(actual_result.numpy(), expected_result)
+
+
+def test_large_constants():
+    """Large constants can be serialized outside of executable"""
+    target = tvm.target.Target("llvm")
+    dev = tvm.cpu()
+
+    # fn(x) { add(x, <large constant>) }
+    x = relay.var("x", shape=(1000, 1000))
+    const_data = np.random.rand(1000, 1000).astype("float32")
+    const = relay.const(const_data, dtype="float32")
+    func = relay.Function([x], relay.op.add(x, const))
+    mod = tvm.IRModule.from_expr(func)
+
+    # Compile to executable.
+    vm_exec = vm.compile(mod, target=target)
+
+    # Save to constants and library files
+    temp = utils.tempdir()
+    path_consts = temp.relpath("consts")
+    vm_exec.move_late_bound_consts(path_consts, byte_limit=256)
+    path_dso = temp.relpath("lib.so")
+    vm_exec.mod.export_library(path_dso)
+
+    # Load library files and constants
+    mod = runtime.load_module(path_dso)
+    mod["load_late_bound_consts"](path_consts)
+
+    # Test main
+    x_data = np.random.rand(1000, 1000).astype("float32")
+    the_vm = runtime.vm.VirtualMachine(mod, dev)
+    actual = the_vm.invoke("main", x_data)
+    expected = x_data + const_data
+    tvm.testing.assert_allclose(expected, actual.numpy())
 
 
 if __name__ == "__main__":
