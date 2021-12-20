@@ -66,50 +66,120 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
     h2h_weight = relay.Var("h2h_weight", weight_type)
     h2h_bias = relay.Var("h2h_bias", bias_type)
 
-    i2h = builder.let(
-        ("i2h", dense_type),
-        layers.dense_add_bias(
-            data=inputs, units=num_hidden * 4, weight=i2h_weight, bias=i2h_bias, name="%si2h" % name
-        ),
-    )
-    h2h = builder.let(
-        ("h2h", dense_type),
-        layers.dense_add_bias(
-            data=relay.TupleGetItem(states, 0),
-            units=num_hidden * 4,
-            weight=h2h_weight,
-            bias=h2h_bias,
-            name="%sh2h" % name,
-        ),
+    # i2h = builder.let(
+    #     ("i2h", dense_type),
+    #     layers.dense_add_bias(
+    #         data=inputs, units=num_hidden * 4, weight=i2h_weight, bias=i2h_bias, name="%si2h" % name
+    #     ),
+    # )
+    # h2h = builder.let(
+    #     ("h2h", dense_type),
+    #     layers.dense_add_bias(
+    #         data=relay.TupleGetItem(states, 0),
+    #         units=num_hidden * 4,
+    #         weight=h2h_weight,
+    #         bias=h2h_bias,
+    #         name="%sh2h" % name,
+    #     ),
+    # )
+
+    # gates = builder.let(("gates", dense_type), relay.add(i2h, h2h))
+    # slice_gates = builder.let(
+    #     ("slice_gates", slice_type), relay.split(gates, indices_or_sections=4, axis=1).astuple()
+    # )
+
+    # in_gate = builder.let(
+    #     ("in_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 0))
+    # )
+    # forget_gate = builder.let(
+    #     ("forget_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 1))
+    # )
+    # in_transform = builder.let(
+    #     ("in_transform", input_type), relay.tanh(relay.TupleGetItem(slice_gates, 2))
+    # )
+    # out_gate = builder.let(
+    #     ("out_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 3))
+    # )
+
+    # next_c = builder.let(
+    #     ("next_c", input_type),
+    #     relay.add(
+    #         relay.multiply(forget_gate, relay.TupleGetItem(states, 1)),
+    #         relay.multiply(in_gate, in_transform),
+    #     ),
+    # )
+    # next_h = builder.let(("next_h", input_type), relay.multiply(out_gate, relay.tanh(next_c)))
+    # ret = builder.let(("ret", ret_type), relay.Tuple([next_h, relay.Tuple([next_h, next_c])]))
+    # builder.ret(ret)
+
+
+
+
+
+
+
+    # i2h = layers.dense_add_bias(
+    #     data=inputs, units=num_hidden * 4, weight=i2h_weight, bias=i2h_bias, name="%si2h" % name
+    # )
+    # h2h = layers.dense_add_bias(
+    #     data=relay.TupleGetItem(states, 0),
+    #     units=num_hidden * 4,
+    #     weight=h2h_weight,
+    #     bias=h2h_bias,
+    #     name="%sh2h" % name,
+    # )
+
+    # gates = relay.add(i2h, h2h)
+    # slice_gates = relay.split(gates, indices_or_sections=4, axis=1).astuple()
+
+    # in_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 0))
+    # forget_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 1))
+    # in_transform = relay.tanh(relay.TupleGetItem(slice_gates, 2))
+    # out_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 3))
+
+    # next_c = relay.add(
+    #     relay.multiply(forget_gate, relay.TupleGetItem(states, 1)),
+    #     relay.multiply(in_gate, in_transform),
+    # )
+    # next_h = relay.multiply(out_gate, relay.tanh(next_c))
+    # ret = relay.Tuple([next_h, relay.Tuple([next_h, next_c])])
+    # builder.ret(ret)
+
+    # body = builder.get()
+
+    # return relay.Function(
+    #     [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
+    # )
+
+
+
+
+
+
+
+
+    h2h = layers.dense_add_bias(
+        data=relay.TupleGetItem(states, 0),
+        units=num_hidden * 4,
+        weight=h2h_weight,
+        bias=h2h_bias,
+        name="%sh2h" % name,
     )
 
-    gates = builder.let(("gates", dense_type), relay.add(i2h, h2h))
-    slice_gates = builder.let(
-        ("slice_gates", slice_type), relay.split(gates, indices_or_sections=4, axis=1).astuple()
-    )
+    gates = h2h
+    slice_gates = relay.split(gates, indices_or_sections=4, axis=1).astuple()
 
-    in_gate = builder.let(
-        ("in_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 0))
-    )
-    forget_gate = builder.let(
-        ("forget_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 1))
-    )
-    in_transform = builder.let(
-        ("in_transform", input_type), relay.tanh(relay.TupleGetItem(slice_gates, 2))
-    )
-    out_gate = builder.let(
-        ("out_gate", input_type), relay.sigmoid(relay.TupleGetItem(slice_gates, 3))
-    )
+    in_gate = relay.TupleGetItem(slice_gates, 0)
+    forget_gate = relay.TupleGetItem(slice_gates, 1)
+    in_transform = relay.TupleGetItem(slice_gates, 2)
+    out_gate = relay.TupleGetItem(slice_gates, 3)
 
-    next_c = builder.let(
-        ("next_c", input_type),
-        relay.add(
-            relay.multiply(forget_gate, relay.TupleGetItem(states, 1)),
-            relay.multiply(in_gate, in_transform),
-        ),
+    next_c = relay.add(
+        forget_gate,
+        in_gate,
     )
-    next_h = builder.let(("next_h", input_type), relay.multiply(out_gate, relay.tanh(next_c)))
-    ret = builder.let(("ret", ret_type), relay.Tuple([next_h, relay.Tuple([next_h, next_c])]))
+    next_h = relay.multiply(out_gate, in_transform)
+    ret = relay.Tuple([next_h, relay.Tuple([next_h, next_c])])
     builder.ret(ret)
 
     body = builder.get()

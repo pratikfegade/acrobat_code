@@ -229,6 +229,9 @@ Scope LCA(Scope lhs, Scope rhs);
 // For basic block normal form.
 Expr ToBasicBlockNormalFormAux(const Expr& e);
 
+// Remove on_device calls for easier printing and analysis.
+Expr RemoveOnDeviceCalls(const Expr& e);
+
 // ToANormalForm for expressions and as a Pass are declared in transform.h
 
 }  // namespace relay

@@ -566,7 +566,6 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     ICHECK(cfunc.defined());
 
     auto opt_compiler = func->GetAttr<String>(attr::kCompiler);
-
     // Add some metadata on top of the *original function* and invoke the callback so it can
     // be captured.
     // TODO(@areusch, @jroesch): this metadata is for AOT, this should be our interface for AOT
@@ -693,7 +692,6 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       }
       return DeviceAwareExprMutator::DeviceAwareVisitExpr_(call_node);
     }
-
     // Prepare the arguments.
     Array<Expr> new_args;
     for (const auto& arg : call_node->args) {

@@ -33,6 +33,7 @@
 
 #include <tvm/relay/attrs/memory.h>
 #include <tvm/target/se_scope.h>
+#include <tvm/te/tensor.h>
 #include <tvm/tir/function.h>
 #include <tvm/tir/stmt_functor.h>
 
@@ -239,7 +240,8 @@ class ApplyDeviceConstraintsMutator : public StmtExprMutator {
 
     if (any_change) {
       return PrimFunc(prim_func->params, std::move(new_body), prim_func->ret_type,
-                      std::move(new_buffer_map), prim_func->attrs, prim_func->span);
+                      std::move(new_buffer_map), Map<Var, Buffer>(), prim_func->attrs,
+                      prim_func->span);
     } else {
       return prim_func;
     }

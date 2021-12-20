@@ -223,6 +223,7 @@ class StorageCoalesce(ExprMutator):
         if getattr(func.attrs, "Primitive", 0) == 1:
             return super().visit_function(func)
         else:
+            print("Entering", func.body)
             self.enter_scope()
             body = self.visit(func.body)
             body = self.exit_scope(body)

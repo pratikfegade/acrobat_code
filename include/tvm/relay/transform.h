@@ -110,6 +110,15 @@ TVM_DLL Pass LazyGradientInit();
 TVM_DLL Pass FoldConstant();
 
 /*!
+ * \brief Debugging pass to print the current state of the IR
+ *
+ * \param previous_pass the name of the pass before this one.
+ *
+ * \return The Pass
+ */
+TVM_DLL Pass PrintCurrentIR(String previous_pass, bool clean_up = false);
+
+/*!
  * \brief Split function with huge number of arguments to smaller pieces.
  *
  * \return The pass.
@@ -124,6 +133,14 @@ TVM_DLL Pass SplitArgs(int max_function_args);
  * \return The pass.
  */
 TVM_DLL Pass FuseOps(int fuse_opt_level = -1);
+
+/*!
+ * \brief Coarsen granularity of primitive funcs by fusing all ops
+ * with not intervening control flow.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass CoarsenPrimitiveFuncGranularity();
 
 /*!
  * \brief The inverse operation of FuseOps. It transforms a fused program returned by

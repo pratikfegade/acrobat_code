@@ -345,6 +345,9 @@ class RelayBuildModule : public runtime::ModuleNode {
 
     // Always plan devices so the remaining passes don't need to distinguish homogeneous vs
     // hetrogenous execution.
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before BBNF"));
+    // pass_seqs.push_back(transform::ToBasicBlockNormalForm());
+    // pass_seqs.push_back(transform::PrintCurrentIR("After BBNF"));
     pass_seqs.push_back(transform::PlanDevices(config_));
 
     // Fuse the operations if it is needed.

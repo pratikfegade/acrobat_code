@@ -66,6 +66,7 @@ Pass LabelOps();
 
 Pass MemoryPlan() {
   auto f = tvm::runtime::Registry::Get("relay.transform.MemoryPlan");
+  std::cout << "Obtained MemoryPlan function " << std::endl;
   ICHECK(f != nullptr) << "unable to load the memory planning pass";
   return (*f)();
 }
@@ -868,6 +869,7 @@ void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
 }
 
 void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host) {
+  // std::cout << "Before lowering\n" << mod << std::endl;
   VLOG_CONTEXT << "VM Lower";
   exec_ = make_object<Executable>();
   config_ = CompilationConfig(PassContext::Current(), std::move(targets), std::move(target_host));
@@ -976,7 +978,10 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
   // incomplete to provide memory resuse optimizations. Disable it until we can
   // rewrite it in C++ and complete it.
   // // Perform memory planning in order to coalesce/reduce allocations.
+
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", true));
   pass_seqs.push_back(transform::MemoryPlan());
+  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryPlan", true));
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1047,7 +1052,12 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
 
+  // if (false) {
   pass_seqs.push_back(transform::FuseOps());
+  // } else {
+  // pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+  // pass_seqs.push_back(transform::PlanDevices(config_));
+  // }
 
   // Do layout rewrite for auto-scheduler.
   transform::PassContext pass_ctx = PassContext::Current();
@@ -1101,6 +1111,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
   pass_seqs.push_back(transform::InferType());
+  // pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

@@ -122,6 +122,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   }
 
   CachedFunc Create(const Function& relay_func, std::function<std::string(std::string)> renamer) {
+    // std::cout << "Lowering\n" << relay_func << "\n\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     for (Var param : relay_func->params) {
       Array<tvm::te::Tensor> inputs;
@@ -330,7 +331,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
   Array<te::Tensor> VisitExpr_(const TupleGetItemNode* op) final {
     const auto* tuple_type = op->tuple->type_as<TupleTypeNode>();
     Array<te::Tensor> tuple = VisitExpr(op->tuple);
-    ICHECK_EQ(tuple_type->fields.size(), tuple.size());
+    ICHECK_EQ(tuple_type->fields.size(), tuple.size()) << " " << GetRef<Expr>(op);
     ICHECK_GE(op->index, 0);
     ICHECK_LT(static_cast<size_t>(op->index), tuple.size());
     return {tuple[op->index]};
