@@ -407,6 +407,14 @@ TVM_DLL Pass Legalize(const String& legalize_map_attr_name = "FTVMLegalize");
 TVM_DLL Pass CanonicalizeCast();
 
 /*!
+ * \brief A C++ implementation of the mmory planning pass. Does not
+ * reuse memory yet and merely coalesces.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass CPPMemoryPlan();
+
+/*!
  * \brief Add abstraction over a constructor or global variable bound to a function.
  *
  * For example: `square` is transformed to

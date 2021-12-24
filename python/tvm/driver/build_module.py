@@ -147,7 +147,7 @@ def build(
     name: Optional[str] = "default_function",
     binds: Optional[Mapping[tensor.Tensor, Buffer]] = None,
     scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]] = None,
-    print_after_passes = Optional[List[str]]
+    print_after_passes: Optional[List[str]] = None
 ):
     """Build a function with arguments as signature. Code will be generated
     for devices coupled with target information.

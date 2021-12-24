@@ -117,6 +117,7 @@ IRModule FunctionPassNode::operator()(IRModule mod, const PassContext& pass_ctx)
       << "The diagnostic context was set at the top of this block this is a bug.";
 
   const PassInfo& pass_info = Info();
+  // std::cout << "Pass " << pass_info->name << std::endl;
 
   ICHECK(mod.defined());
 

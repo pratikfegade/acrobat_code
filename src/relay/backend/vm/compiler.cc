@@ -606,7 +606,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    this->VisitExpr(args[0]);
                    auto size_register = last_register_;
 
-                   ICHECK(args[1].as<ConstantNode>());  // Always a literal.
+                   ICHECK(args[1].as<ConstantNode>()) << args[1];  // Always a literal.
                    NDArray alignment_arr = args[1].as<ConstantNode>()->data;
                    ICHECK_EQ(alignment_arr->dtype.code, 0U)
                        << "The dtype of constant shape must be int32 or int64, but got "
@@ -869,7 +869,7 @@ void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
 }
 
 void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host) {
-  // std::cout << "Before lowering\n" << mod << std::endl;
+  std::cout << "Before lowering" << std::endl;
   VLOG_CONTEXT << "VM Lower";
   exec_ = make_object<Executable>();
   config_ = CompilationConfig(PassContext::Current(), std::move(targets), std::move(target_host));
@@ -881,7 +881,6 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
 
   // Run the optimizations necessary to target the VM.
   context_.module = OptimizeModuleImpl(std::move(mod));
-
   // Build the map from global variables bound to Functions to a global index in the
   // VMFunction table.
   size_t num_functions = PopulateGlobalMap();
@@ -980,11 +979,14 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
   // // Perform memory planning in order to coalesce/reduce allocations.
 
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", true));
-  pass_seqs.push_back(transform::MemoryPlan());
-  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryPlan", true));
+  // pass_seqs.push_back(transform::ToANormalForm());
+  // pass_seqs.push_back(transform::MemoryPlan());
+  // pass_seqs.push_back(transform::PrintCurrentIR("Before CPPMemoryPlan", true));
+  pass_seqs.push_back(transform::CPPMemoryPlan());
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
+  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true));
 
   // Fuse & lower yet again
   pass_seqs.push_back(FuseAndLowerOperators(host_se_scope));
@@ -1111,7 +1113,11 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
   pass_seqs.push_back(transform::InferType());
-  // pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+
+  pass_seqs.push_back(transform::PrintCurrentIR("Before CoarsenGranularity", false));
+  pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+  // pass_seqs.push_back(transform::PrintCurrentIR("Before CPPMemoryPlan", true));
+
   // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", false));
 
   transform::Sequential seq(pass_seqs);

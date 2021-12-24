@@ -17,6 +17,5 @@
 """Python bindings for creating SEScopes."""
 from . import _ffi_api
 
-
 def make_se_scope(device, target=None, memory_scope=""):
     return _ffi_api.SEScope_ForDeviceTargetAndMemoryScope(device, target, memory_scope)

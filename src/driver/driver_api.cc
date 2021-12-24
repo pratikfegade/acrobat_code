@@ -299,7 +299,7 @@ Array<transform::Pass> AddPrintPasses(const Array<transform::Pass>& pass_list,
   transform::Pass print_pass;
   for (auto pass : pass_list) {
     updated_pass_list.push_back(pass);
-    if (print_after.exists(pass->Info()->name)) {
+    if (print_after.defined() && print_after.exists(pass->Info()->name)) {
       updated_pass_list.push_back(tir::transform::PrintCurrentIR(pass->Info()->name));
     }
   }

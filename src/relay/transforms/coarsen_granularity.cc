@@ -285,7 +285,7 @@ class CoarsenRewriter : public ExprMutator {
 };
 
 Expr CoarsenPrimitiveFuncGranularity(const Expr& expr, const IRModule& module) {
-  std::cout << "Before coarsening\n" << expr << "\n\n\n" << std::endl;
+  std::cout << "Coarsening now!" << std::endl;
   // return CoarsenMutator().Mutate(expr);
   auto groups = GroupFinder().FindGroups(expr);
   std::cout << "Groups: " << groups.size() << std::endl;

@@ -250,6 +250,7 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     // Run type inference later to get the correct type.
     Var var("storage_" + name_hint, Type(nullptr));
     Expr value = AllocStorage(size, alignment, se_scope, type->dtype);
+    // std::cout << "[MA] Manifested storage " << value << std::endl;
     auto sto = scope->Push(var, MaybeOnDeviceFixed(value, se_scope));
 
     // TODO(@jroesch): There is a bug with typing based on the constant shape.
