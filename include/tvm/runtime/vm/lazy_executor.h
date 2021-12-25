@@ -45,17 +45,25 @@ namespace vm {
 
 class OpNode {
  public:
-  OpNode(const PackedFunc& func, const Index arg_count, const Index output_size,
-         const std::vector<ObjectRef> args)
-      : func_(func), arg_count_(arg_count), output_size_(output_size), args_(args) {}
+  OpNode(const int id, const PackedFunc& func, const Index arg_count, const Index output_size,
+         const std::vector<NDArray> args)
+      : id_(id), func_(func), arg_count_(arg_count), output_size_(output_size), args_(args) {}
 
   void Execute();
 
- private:
+  inline Index InputStart() { return 0; }
+
+  inline Index InputEnd() { return arg_count_ - output_size_; }
+
+  inline Index OutputStart() { return arg_count_ - output_size_; }
+
+  inline Index OutputEnd() { return arg_count_; }
+
+  const int id_;
   const PackedFunc& func_;
   const Index arg_count_;
   const Index output_size_;
-  const std::vector<ObjectRef> args_;
+  const std::vector<NDArray> args_;
 };
 
 /*!
@@ -68,6 +76,8 @@ class LazyExecutor {
                      const std::vector<ObjectRef> args);
 
   void Execute();
+
+  void BatchedExecute();
 
  private:
   std::vector<OpNode> nodes_;

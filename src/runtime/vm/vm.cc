@@ -668,7 +668,7 @@ void VirtualMachine::RunLoop() {
 
         if (PopFrame() == frame_start) {
           if (lazy_execution_) {
-            lazy_executor_.Execute();
+            lazy_executor_.BatchedExecute();
           }
           return;
           // Otherwise we are just returning from a local call.

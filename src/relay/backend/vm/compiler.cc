@@ -979,10 +979,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
   // // Perform memory planning in order to coalesce/reduce allocations.
 
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", true));
-  // pass_seqs.push_back(transform::ToANormalForm());
-  // pass_seqs.push_back(transform::MemoryPlan());
-  // pass_seqs.push_back(transform::PrintCurrentIR("Before CPPMemoryPlan", true));
-  pass_seqs.push_back(transform::CPPMemoryPlan());
+  // pass_seqs.push_back(transform::CPPMemoryPlan());
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1112,10 +1109,11 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::Inline());
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
+  // pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Before CoarsenGranularity", false));
-  pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+  // pass_seqs.push_back(transform::PrintCurrentIR("Before CoarsenGranularity", false));
+  // pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
   // pass_seqs.push_back(transform::PrintCurrentIR("Before CPPMemoryPlan", true));
 
   // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", false));

@@ -43,6 +43,22 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
+                            const std::vector<NDArray>& args) {
+  size_t arity = arg_count;
+
+  std::vector<TVMValue> values(arity);
+  std::vector<int> codes(arity);
+  runtime::TVMArgsSetter setter(values.data(), codes.data());
+  // std::cout << "Executing " << arity << std::endl;
+  for (Index i = 0; i < arity; i++) {
+    setter(i, args[i]);
+  }
+
+  TVMRetValue rv;
+  func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
+}
+
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args) {
   size_t arity = 0;

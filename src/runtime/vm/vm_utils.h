@@ -44,6 +44,21 @@ namespace runtime {
 namespace vm {
 
 /*!
+ * \brief Invoke a PackedFunction (refactored out to avoid code
+ * duplication). This functions assumes that all ADT args have already
+ * been unrolled into their constituent NDArrays
+ *
+ * \param func The PackedFunction to be invoked.
+ * \param arg_count The number of arguments to the PackedFunction.
+ * \param output_size The number of outputs of the PackedFunction.
+ * \param args Arguments to the PackedFunction.
+ *
+ * \note The return value will be stored in the last output_size slots of args.
+ */
+void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
+                            const std::vector<NDArray>& args);
+
+/*!
  * \brief Invoke a PackedFunction (refactored out to avoid code duplication)
  *
  * \param func The PackedFunction to be invoked.

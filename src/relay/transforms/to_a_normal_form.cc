@@ -376,8 +376,8 @@ IRModule ModuleToANormalForm(const IRModule& mod) {
   tvm::Map<GlobalVar, Function> updates;
   auto funcs = mod->functions;
   for (const auto& it : funcs) {
-    ICHECK_EQ(FreeVars(it.second).size(), 0);
     if (const auto* n = it.second.as<FunctionNode>()) {
+      ICHECK_EQ(FreeVars(it.second).size(), 0);
       if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
       Function func = GetRef<Function>(n);
       Function ret = Downcast<Function>(transform::ToANormalForm(func));
