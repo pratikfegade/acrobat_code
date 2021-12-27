@@ -80,9 +80,13 @@ NDArray StorageObj::AllocNDArray(size_t offset, std::vector<int64_t> shape, DLDa
   VerifyDataType(dtype);
 
   // crtical zone: allocate header, cannot throw
-  NDArray::Container* container =
-      new NDArray::Container(this->buffer.data, shape, dtype, this->buffer.device);
-  container->dl_tensor.byte_offset = offset;
+  // NDArray::Container* container =
+  // new NDArray::Container(this->buffer.data, shape, dtype, this->buffer.device);
+  // container->dl_tensor.byte_offset = offset;
+
+  NDArray::Container* container = new NDArray::Container(
+      static_cast<uint8_t*>(this->buffer.data) + offset, shape, dtype, this->buffer.device);
+  container->dl_tensor.byte_offset = 0;
 
   container->SetDeleter(StorageObj::Deleter);
   size_t needed_size = GetDataSize(container->dl_tensor);
