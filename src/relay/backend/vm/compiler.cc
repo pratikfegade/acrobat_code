@@ -59,6 +59,9 @@
 #include "./compiler.h"
 
 namespace tvm {
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_coarsen_granularity", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
+
 namespace relay {
 
 namespace transform {
@@ -914,7 +917,7 @@ void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
 }
 
 void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host) {
-  std::cout << "Before lowering" << std::endl;
+  // std::cout << "Before lowering" << std::endl;
   VLOG_CONTEXT << "VM Lower";
   exec_ = make_object<Executable>();
   config_ = CompilationConfig(PassContext::Current(), std::move(targets), std::move(target_host));
@@ -961,8 +964,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     ICHECK(!se_scope->IsFullyUnconstrained());
     ICHECK_GT(se_scope->device_type(), 0);
     // TODO(mbs): We forget the memory scope.
-    exec_->virtual_devices.push_back(
-        Device{/*device_type=*/se_scope->device_type(), /*device_id=*/se_scope->virtual_device_id});
+    exec_->virtual_devices.push_back(Device{/*device_type=*/se_scope->device_type(),
+                                            /*device_id=*/se_scope->virtual_device_id});
   }
   exec_->host_device_index = kHostDeviceIndex;
 
@@ -1155,8 +1158,12 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::InferType());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
-  pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
+    std::cout << "[SHIKAV PROJECT] " << std::endl;
+    pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+  }
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true,
+  // false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

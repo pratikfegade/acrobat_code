@@ -444,6 +444,6 @@ CreateModulePass(const runtime::TypedPackedFunc<IRModule(IRModule, PassContext)>
 TVM_DLL Pass PrintIR(String header = "", bool show_meta_data = false);
 
 }  // namespace transform
-}  // namespace
+}  // namespace tvm
 
 #endif  // TVM_IR_TRANSFORM_H_

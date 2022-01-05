@@ -61,6 +61,13 @@ def convert(args):
 
     return cargs
 
+class VMExecutionOptions(Object):
+    @staticmethod
+    def create(lazy_execution=False):
+        return _ffi_api.CreateVMExecutionOptions(lazy_execution)
+
+def create_vm_execution_options(lazy_execution=False):
+    return VMExecutionOptions.create(lazy_execution)
 
 class Executable(object):
     """Relay VM executable"""
@@ -333,7 +340,7 @@ class VirtualMachine(object):
     NAIVE_ALLOCATOR = 1
     POOLED_ALLOCATOR = 2
 
-    def __init__(self, exe, device, memory_cfg=None):
+    def __init__(self, exe, device, memory_cfg=None, execution_options=None):
         """
         Construct a VirtualMachine wrapper class which provides a simple
         interface over the raw C++ Module based API.
@@ -371,7 +378,11 @@ class VirtualMachine(object):
         if not isinstance(exe, Executable):
             exe = Executable(exe)
 
-        self.module = exe.mod["vm_load_executable"]()
+        if not execution_options:
+            execution_options = tvm.runtime.vm.create_vm_execution_options()
+
+
+        self.module = exe.mod["vm_load_executable"](execution_options)
         self._exec = exe
         self._init = self.module["init"]
         self._invoke = self.module["invoke"]

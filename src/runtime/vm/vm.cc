@@ -45,6 +45,14 @@ namespace runtime {
 namespace vm {
 
 TVM_REGISTER_OBJECT_TYPE(VMClosureObj);
+TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
+
+VMExecutionOptions::VMExecutionOptions(bool lazy_execution)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution)) {}
+
+TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions").set_body_typed([](bool lazy_execution) {
+  return VMExecutionOptions(lazy_execution);
+});
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
   auto ptr = make_object<VMClosureObj>();
@@ -337,6 +345,15 @@ void VirtualMachine::InvokePacked(Index packed_index, const PackedFunc& func, In
   }
 }
 
+void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
+  if (options->lazy_execution) {
+    std::cout << "[VM] Executing lazily" << std::endl;
+  } else {
+    std::cout << "[VM] Executing eagerly" << std::endl;
+  }
+  this->lazy_execution_ = options->lazy_execution;
+}
+
 void VirtualMachine::LoadExecutable(Executable* exec) {
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
@@ -452,13 +469,6 @@ int64_t VirtualMachine::LoadScalarInt(Index r) const {
 }
 
 void VirtualMachine::RunLoop() {
-  for (auto name : Registry::ListNames()) {
-    const PackedFunc* f = Registry::Get(name);
-    if (!f->body()) {
-      std::cout << "[VM] NoBody2 " << name << std::endl;
-    }
-  }
-
   ICHECK(this->exec_);
   ICHECK(this->code_);
   pc_ = 0;

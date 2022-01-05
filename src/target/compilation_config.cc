@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 /*!
  * \file tvm/target/compilation_config.cc
  * \brief Implementation of \p CompilationConfig for collecting \p Targets.

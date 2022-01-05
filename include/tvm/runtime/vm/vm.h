@@ -44,6 +44,32 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+/*! \brief range over one dimension */
+class VMExecutionOptionsNode : public Object {
+ public:
+  /*! \brief whether to execute tensor operations lazily */
+  bool lazy_execution;
+
+  VMExecutionOptionsNode() {}
+  VMExecutionOptionsNode(bool lazy_execution_) : lazy_execution(lazy_execution_) {}
+
+  static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
+  static constexpr const char* _type_key = "VMExecutionOptions";
+  TVM_DECLARE_FINAL_OBJECT_INFO(VMExecutionOptionsNode, Object);
+};
+
+/*! \brief VMExecutionOptions constainer  */
+class VMExecutionOptions : public ObjectRef {
+ public:
+  /*!
+   * \brief constructor
+   * \param lazy_execution whether to execute tensor operations lazily.
+   */
+  TVM_DLL VMExecutionOptions(bool lazy_execution);
+  // declare VMExecutionOptions.
+  TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
+};
+
 /*!
  * \brief An object representing a vm closure.
  */
@@ -176,6 +202,12 @@ class VirtualMachine : public runtime::ModuleNode {
    * \param exec The executable.
    */
   virtual void LoadExecutable(Executable* exec);
+
+  /*!
+   * \brief set runtime options for the VM.
+   * \param The options.
+   */
+  virtual void SetExecutionOptions(VMExecutionOptions options);
 
  protected:
   /*! \brief Push a call frame on to the call stack. */
@@ -325,7 +357,7 @@ class VirtualMachine : public runtime::ModuleNode {
   /*!
    * \brief Whether to execute tensor ops lazily.
    */
-  bool lazy_execution_ = false;
+  bool lazy_execution_ = true;
 };
 
 }  // namespace vm

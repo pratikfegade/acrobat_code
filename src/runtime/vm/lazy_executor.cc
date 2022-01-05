@@ -92,15 +92,15 @@ void LazyExecutor::AddPackedCall(const PackedFunc& func, const Index arg_count,
     return;
   }
 
-  std::cout << "Op " << nodes_.size() << std::endl;
-  size_t i = 0;
-  for (; i < unrolled_input_size; ++i) {
-    std::cout << " I " << args_copy[i].get() << std::endl;
-  }
+  // std::cout << "Op " << nodes_.size() << std::endl;
+  // size_t i = 0;
+  // for (; i < unrolled_input_size; ++i) {
+  // std::cout << " I " << args_copy[i].get() << std::endl;
+  // }
 
-  for (; i < unrolled_input_size + unrolled_output_size; ++i) {
-    std::cout << " O " << args_copy[i].get() << std::endl;
-  }
+  // for (; i < unrolled_input_size + unrolled_output_size; ++i) {
+  // std::cout << " O " << args_copy[i].get() << std::endl;
+  // }
 
   OpNode node(nodes_.size(), func, unrolled_input_size + unrolled_output_size, unrolled_output_size,
               args_copy);
@@ -108,7 +108,7 @@ void LazyExecutor::AddPackedCall(const PackedFunc& func, const Index arg_count,
 }
 
 void LazyExecutor::Execute() {
-  std::cout << "Executing nodes" << std::endl;
+  // std::cout << "Executing nodes" << std::endl;
   for (OpNode& node : nodes_) {
     node.Execute();
   }
@@ -116,7 +116,7 @@ void LazyExecutor::Execute() {
 }
 
 void LazyExecutor::BatchedExecute() {
-  std::cout << "Batch Executing" << std::endl;
+  // std::cout << "Batch Executing" << std::endl;
   std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
   for (OpNode& node : nodes_) {
     for (size_t i = node.OutputStart(); i < node.OutputEnd(); ++i) {
@@ -129,9 +129,9 @@ void LazyExecutor::BatchedExecute() {
   for (size_t i = 0; i < num_nodes; ++i) {
     OpNode& node = nodes_[i];
     int max_depth = 0;
-    std::cout << " Node " << i << std::endl;
+    // std::cout << " Node " << i << std::endl;
     for (size_t j = node.InputStart(); j < node.InputEnd(); ++j) {
-      std::cout << "   Tensor " << node.args_[j].get() << std::endl;
+      // std::cout << "   Tensor " << node.args_[j].get() << std::endl;
       auto it = output_tensor_to_node.find(node.args_[j]);
       if (it != output_tensor_to_node.end()) {
         auto input_node_id = it->second;
@@ -139,10 +139,10 @@ void LazyExecutor::BatchedExecute() {
       }
     }
     node_to_depth[i] = max_depth + 1;
-    std::cout << "  Depth " << max_depth << std::endl;
+    // std::cout << "  Depth " << max_depth << std::endl;
   }
 
-  std::cout << " Executing nodes" << std::endl;
+  // std::cout << " Executing nodes" << std::endl;
   for (OpNode& node : nodes_) {
     node.Execute();
   }

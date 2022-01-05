@@ -574,11 +574,11 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
     if (it.second.defined()) {
       const Target& target = it.first;
       const IRModule& ir_module = it.second;
-      std::cout << "[DA] Target " << target << std::endl;
-      for (auto pair : ir_module->functions) {
-        std::cout << "[DA]  Func " << pair.first->name_hint << " " << pair.second.defined()
-                  << std::endl;
-      }
+      // std::cout << "[DA] Target " << target << std::endl;
+      // for (auto pair : ir_module->functions) {
+      // std::cout << "[DA]  Func " << pair.first->name_hint << " " << pair.second.defined()
+      // << std::endl;
+      // }
       auto pair = SplitMixedModule(ir_module, target, target_host, Array<String>());
       auto& host_mod = pair.first;
       auto& device_mod = pair.second;
