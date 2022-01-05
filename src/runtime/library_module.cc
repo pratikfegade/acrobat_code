@@ -73,6 +73,8 @@ class ModuleInternal {
 
 PackedFunc WrapPackedFunc(TVMBackendPackedCFunc faddr, const ObjectPtr<Object>& sptr_to_self) {
   return PackedFunc([faddr, sptr_to_self](TVMArgs args, TVMRetValue* rv) {
+    // std::cout << "Executing " << args.size() << " " << reinterpret_cast<void*>(faddr) <<
+    // std::endl;
     TVMValue ret_value;
     int ret_type_code = kTVMNullptr;
     int ret = (*faddr)(const_cast<TVMValue*>(args.values), const_cast<int*>(args.type_codes),

@@ -62,6 +62,9 @@ void ModuleNode::Import(Module other) {
 }
 
 PackedFunc ModuleNode::GetFunction(const std::string& name, bool query_imports) {
+  if (name == "vm_mod_fused_zeros") {
+    std::cout << "Loading in VM" << std::endl;
+  }
   ModuleNode* self = this;
   PackedFunc pf = self->GetFunction(name, GetObjectPtr<Object>(this));
   if (pf != nullptr) return pf;
@@ -106,6 +109,7 @@ std::string ModuleNode::GetSource(const std::string& format) {
 }
 
 const PackedFunc* ModuleNode::GetFuncFromEnv(const std::string& name) {
+  std::cout << "[MD] Getting " << name << std::endl;
   auto it = import_cache_.find(name);
   if (it != import_cache_.end()) return it->second.get();
   PackedFunc pf;
@@ -125,10 +129,16 @@ const PackedFunc* ModuleNode::GetFuncFromEnv(const std::string& name) {
                          << " If this involves ops from a contrib library like"
                          << " cuDNN, ensure TVM was built with the relevant"
                          << " library.";
+    if (!f->body()) {
+      std::cout << "[NoBody] " << name << std::endl;
+    }
+    ICHECK(f->body());
     return f;
   } else {
     import_cache_.insert(std::make_pair(name, std::make_shared<PackedFunc>(pf)));
-    return import_cache_.at(name).get();
+    auto f = import_cache_.at(name).get();
+    ICHECK(f->body());
+    return f;
   }
 }
 

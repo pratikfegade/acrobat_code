@@ -356,15 +356,30 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
       packed_funcs_.resize(packed_index + 1);
     }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
+
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     packed_funcs_[packed_index] = pf;
 
     ICHECK(pf != nullptr) << packed_name;
-    std::cout << "[VM] Loading " << packed_name << " " << packed_index << std::endl;
-    auto registry = ::tvm::runtime::Registry::Register(packed_name);
-    ICHECK(pf.body());
-    registry.set_body(pf);
+    auto& registry = ::tvm::runtime::Registry::Register(packed_name);
+    PackedFunc pf_copy(pf.body());
+    ICHECK(pf_copy.body());
+    registry.set_body(pf_copy);
+    ICHECK(Registry::Get(packed_name)->body());
   }
+
+  // for (const auto& it : exec_->primitive_map) {
+  //   const auto& packed_name = it.first;
+  //   ICHECK(Registry::Get(packed_name)->body());
+  // }
+
+  // for (auto name : Registry::ListNames()) {
+  //   const PackedFunc* f = Registry::Get(name);
+  //   if (!f->body()) {
+  //     std::cout << "[VM] NoBody1 " << name << std::endl;
+  //   }
+  // }
+
   for (size_t i = 0; i < packed_funcs_.size(); ++i) {
     ICHECK(packed_funcs_[i] != nullptr) << "Packed function " << i << " is not initialized";
   }
@@ -437,6 +452,13 @@ int64_t VirtualMachine::LoadScalarInt(Index r) const {
 }
 
 void VirtualMachine::RunLoop() {
+  for (auto name : Registry::ListNames()) {
+    const PackedFunc* f = Registry::Get(name);
+    if (!f->body()) {
+      std::cout << "[VM] NoBody2 " << name << std::endl;
+    }
+  }
+
   ICHECK(this->exec_);
   ICHECK(this->code_);
   pc_ = 0;
@@ -501,7 +523,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
+        // std::cout << "InvokedPacked " << pc_ << " " << instr.packed_index
+        // << " arity=" << instr.arity << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;
@@ -534,7 +557,6 @@ void VirtualMachine::RunLoop() {
         goto main_loop;
       }
       case Opcode::GetField: {
-        std::cout << "[PC] " << pc_ << std::endl;
         auto object = ReadRegister(instr.object);
         const auto& tuple = Downcast<ADT>(object);
         auto field = tuple[instr.field_index];

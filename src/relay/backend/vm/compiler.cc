@@ -572,7 +572,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // can contribute to the hash of the compiled primitive. This way we can distinguish primitives
     // with the same body expression but different attributes which may arbitrarily influence code
     // generation.
-    std::cout << "[CC] Attrs " << op_index << " " << attrs->dict << std::endl;
+    // std::cout << "[CC] Attrs " << op_index << " " << attrs->dict << std::endl;
     op_attrs[op_index] = attrs->dict;
 
     Emit(Instruction::InvokePacked(op_index, argument_registers.size(), output_tuple->fields.size(),
@@ -1153,10 +1153,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", false, true));
   // pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
-  // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", false, true));
 
+  // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

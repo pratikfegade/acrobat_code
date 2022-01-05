@@ -388,7 +388,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     std::vector<Expr> flattened_call_args;
 
     for (auto var : free_vars) {
-      std::cout << "[TL]   FreeVar " << var->vid->name_hint << " " << var.get() << std::endl;
+      // std::cout << "[TL]   FreeVar " << var->vid->name_hint << " " << var.get() << std::endl;
       FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
     }
 
@@ -399,12 +399,10 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       auto rvalue = pair.second;
       bindings_map.Set(rvar, rvalue);
 
-      std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
+      // std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
         ICHECK(call->op == GetInvokeTVMOp());
         tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
-
-        // tir_stmts.push_back(tir::Evaluate(0));
       } else if (auto tuple = rvalue.as<TupleNode>()) {
         tuple_var_values_.Set(rvar, tuple->fields);
       } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
@@ -432,14 +430,14 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       }
     }
 
-    std::cout << "[TL] Body " << body << std::endl;
+    // std::cout << "[TL] Body " << body << std::endl;
     Expr body_in_free_vars;
     if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
       body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
     } else {
       body_in_free_vars = Tuple(Array<Expr>());
     }
-    std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
+    // std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
     Array<tir::Var> prim_func_params;
     for (auto rvar : flattened_free_vars) {
@@ -457,20 +455,20 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       Visitor(const RelayVarSet& free_vars, const Map<relay::Var, Expr>& bindings_map)
           : free_vars_(free_vars), bindings_map_(bindings_map) {}
       Expr VisitExpr_(const VarNode* op) {
-        std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
+        // std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
         auto var = GetRef<relay::Var>(op);
         if (free_vars_.count(var)) {
-          std::cout << "[TL]   FreeVar" << std::endl;
+          // std::cout << "[TL]   FreeVar" << std::endl;
           return var;
         } else {
           auto it = bindings_map_.find(var);
-          if (it == bindings_map_.end()) {
-            for (auto var : free_vars_) {
-              std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
-            }
-          }
+          // if (it == bindings_map_.end()) {
+          //   for (auto var : free_vars_) {
+          //     std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
+          //   }
+          // }
           ICHECK(it != bindings_map_.end()) << var;
-          std::cout << "[TL]   Value " << (*it).second << std::endl;
+          // std::cout << "[TL]   Value " << (*it).second << std::endl;
           return VisitExpr((*it).second);
         }
       }
@@ -478,7 +476,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       const RelayVarSet& free_vars_;
       const Map<relay::Var, Expr>& bindings_map_;
     };
-    std::cout << "[TL] Expressing " << body << std::endl;
+    // std::cout << "[TL] Expressing " << body << std::endl;
     return Visitor(free_vars, bindings_map)(body);
   }
 
@@ -607,11 +605,17 @@ class Coarsener : public ExprMutator {
       GlobalVar prim_func_var(name, VoidType());
       auto call = InvokeTVMOp(prim_func_var, Tuple(call_args), Tuple(Array<Expr>()),
                               DictAttrs({{"Primitive", tvm::Integer(1)}}));
-      // std::cout << "[CRN] PrimFunc\n" << prim_func << std::endl;
-      // std::cout << "[CRN] Returning " << call << std::endl;
       Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
+
+      size_t hash = StructuralHash()(prim_func);
+
+      // format hash as fixed length hex string so it is easier to read
+      std::stringstream s;
+      s << std::setfill('0') << std::setw(sizeof(size_t) * 2) << std::hex << hash;
+
       prim_func = WithAttrs(std::move(prim_func), {{"global_symbol", runtime::String(name)},
                                                    {tvm::attr::kTarget, target},
+                                                   {"hash", String(s.str())},
                                                    {"coarsened_prim_func", Bool(true)}});
       prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
       return Let(Var("dummy", VoidType()), call, replacement);
