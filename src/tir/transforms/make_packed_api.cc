@@ -308,6 +308,7 @@ Pass MakePackedAPI(int num_unpacked_args) {
     std::vector<std::pair<GlobalVar, PrimFunc> > updates;
 
     for (const auto& kv : mptr->functions) {
+      // std::cout << "[MPAPI] Func " << kv.first << std::endl;
       if (auto* n = kv.second.as<PrimFuncNode>()) {
         PrimFunc func = GetRef<PrimFunc>(n);
         if (func->GetAttr<Integer>(tvm::attr::kCallingConv, Integer(CallingConv::kDefault)) ==

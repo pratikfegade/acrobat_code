@@ -72,6 +72,7 @@ Registry& Registry::Register(const std::string& name, bool can_override) {  // N
   Registry* r = new Registry();
   r->name_ = name;
   m->fmap[name] = r;
+  // std::cout << "[RG] Registering " << name << std::endl;
   return *r;
 }
 

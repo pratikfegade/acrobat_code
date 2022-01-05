@@ -114,8 +114,8 @@ void CodeGenLLVM::InitFuncState() {
 void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   this->InitFuncState();
 
-  ICHECK_EQ(f->buffer_map.size(), 0U)
-      << "Cannot codegen function with buffer_map, please lower them first";
+  // ICHECK_EQ(f->buffer_map.size(), 0U)
+  // << "Cannot codegen function with buffer_map, please lower them first";
 
   std::vector<llvm::Type*> param_types;
   is_restricted_ = f->HasNonzeroAttr(tir::attr::kNoAlias);
@@ -161,6 +161,7 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   }
   llvm::BasicBlock* entry = llvm::BasicBlock::Create(*ctx_, "entry", function_);
   builder_->SetInsertPoint(entry);
+  // std::cout << "[GEN] " << f->body << std::endl;
   this->VisitStmt(f->body);
 
   // Add alignment attribute if needed.
@@ -187,6 +188,17 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     builder_->CreateRetVoid();
   } else {
     builder_->CreateRet(ConstInt32(0));
+  }
+
+  std::string prim_func_name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+  // std::cout << "[FUNC] Added " << prim_func_name << std::endl;
+  // for (size_t i = 0; i < f->params.size(); ++i) {
+  //   Var param = f->params[i];
+  //   std::cout << "[FUNC]   Params " << param << " " << GetType(param) << std::endl;
+  // }
+  functions_map_.insert({prim_func_name, function_});
+  if (llvm::verifyFunction(*function_, &llvm::outs())) {
+    std::cout << "[FUNC]  Verification failed!" << std::endl;
   }
 }
 
@@ -335,6 +347,11 @@ class MPassManager : public llvm::legacy::PassManager {
 void CodeGenLLVM::InitPassManagerBuilder(llvm::PassManagerBuilder* builder) {}
 
 void CodeGenLLVM::Optimize() {
+  if (llvm::verifyModule(*module_, &llvm::outs())) {
+    // module_->dump();
+    ICHECK(false) << "LLVM module verification failed";
+  }
+
   // pass manager
   FPassManager fpass(module_.get());
   MPassManager mpass;
@@ -1275,9 +1292,18 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const CallNode* op) {
       return CreateIntrinsic(op);
     }
   } else {
-    ICHECK(op->op.as<GlobalVarNode>());
-    LOG(FATAL) << "Do not yet support cross function call";
-    return nullptr;
+    std::cout << "[CALL] " << GetRef<PrimExpr>(op) << std::endl;
+    const GlobalVarNode* callee_gvn = op->op.as<GlobalVarNode>();
+    ICHECK(callee_gvn);
+    auto it = functions_map_.find(callee_gvn->name_hint);
+    ICHECK(it != functions_map_.end());
+    llvm::Function* callee = it->second;
+    std::vector<llvm::Value*> arg_value;
+    for (size_t i = 0; i < op->args.size(); ++i) {
+      std::cout << "[CALL]  Arg " << op->args[i] << " " << GetType(op->args[i]) << std::endl;
+      arg_value.push_back(MakeValue(op->args[i]));
+    }
+    return builder_->CreateCall(callee->getFunctionType(), callee, arg_value);
   }
 }
 
@@ -1493,7 +1519,9 @@ void CodeGenLLVM::VisitStmt_(const AttrStmtNode* op) {
 }
 
 void CodeGenLLVM::VisitStmt_(const AssertStmtNode* op) {
-  With<arith::ConstraintContext> cctx(analyzer_.get(), op->condition);
+  // std::cout << op->condition << std::endl;
+  // With<arith::ConstraintContext> cctx(analyzer_.get(), op->condition);
+  // std::cout << "BODY " << op->body << std::endl;
   this->VisitStmt(op->body);
 }
 

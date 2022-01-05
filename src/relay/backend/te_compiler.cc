@@ -1134,6 +1134,7 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
     const GlobalVar& var = kv.first;
     const BaseFunc& func = kv.second;
     if (func->IsInstance<tir::PrimFuncNode>()) {
+      // std::cout << "[PTM] Func " << var->name_hint << std::endl;
       // Extract target
       Optional<Target> target = func->GetAttr<Target>(tvm::attr::kTarget);
       ICHECK(target) << "Target should be set at this point";

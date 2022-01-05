@@ -358,6 +358,12 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     packed_funcs_[packed_index] = pf;
+
+    ICHECK(pf != nullptr) << packed_name;
+    std::cout << "[VM] Loading " << packed_name << " " << packed_index << std::endl;
+    auto registry = ::tvm::runtime::Registry::Register(packed_name);
+    ICHECK(pf.body());
+    registry.set_body(pf);
   }
   for (size_t i = 0; i < packed_funcs_.size(); ++i) {
     ICHECK(packed_funcs_[i] != nullptr) << "Packed function " << i << " is not initialized";
@@ -495,6 +501,7 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
+        std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;
@@ -527,6 +534,7 @@ void VirtualMachine::RunLoop() {
         goto main_loop;
       }
       case Opcode::GetField: {
+        std::cout << "[PC] " << pc_ << std::endl;
         auto object = ReadRegister(instr.object);
         const auto& tuple = Downcast<ADT>(object);
         auto field = tuple[instr.field_index];

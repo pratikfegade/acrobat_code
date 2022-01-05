@@ -39,25 +39,27 @@ namespace tvm {
 namespace relay {
 namespace transform {
 
-Pass PrintCurrentIR(String previous_pass, bool clean_up) {
+Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up_prim_funcs) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule m,
                                                                             PassContext pc) {
     std::cout << "[PRINT] IR after " << previous_pass << std::endl;
-    if (clean_up) {
+    if (clean_up_on_device) {
       for (auto kv : m->functions) {
         if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
-          // std::cout << kv.first << ": " << kv.second << std::endl;
+          if (!clean_up_prim_funcs) {
+            std::cout << kv.first << ": " << kv.second << std::endl;
+          }
         } else {
-          // std::cout << " " << kv.second << std::endl;
           std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
         }
       }
     } else {
       for (auto kv : m->functions) {
         if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
-          // std::cout << kv.first << ": " << kv.second << std::endl;
+          if (!clean_up_prim_funcs) {
+            std::cout << kv.first << ": " << kv.second << std::endl;
+          }
         } else {
-          // std::cout << " " << kv.second << std::endl;
           std::cout << kv.first << ": " << kv.second << std::endl;
         }
       }

@@ -36,6 +36,7 @@
 #include "../../printer/text_printer.h"
 #include "../../support/arena.h"
 #include "../op/annotation/annotation.h"
+#include "../op/vm/vm.h"
 #include "./expr_subst.h"
 #include "./pass_utils.h"
 #include "./pattern_utils.h"
@@ -291,6 +292,15 @@ class TupleInliner : public ExprMutator {
 
 class Serializer : public ExprVisitor {
  public:
+  void Serialize(const Expr& expr) {
+    VisitExpr(expr);
+    if (!body_.as<VarNode>()) {
+      auto var = relay::Var("dummy_body", body_->checked_type());
+      bindings_.push_back(std::make_pair(var, body_));
+      body_ = var;
+    }
+  }
+
   void VisitExpr_(const LetNode* op) override {
     Expr let = GetRef<Expr>(op);
     while (auto let_node = let.as<LetNode>()) {
@@ -320,218 +330,81 @@ class Serializer : public ExprVisitor {
   Expr body_;
 };
 
-// Construct a schedule for a given Relay primitive function and target.
-// class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
-//  public:
-//   tir::Stmt LowerToTIR(const Expr& rexpr) {
-//     Array<Var> free_vars = FreeVars(rexpr);
-//     for (auto var : free_vars) {
-//       if (auto ttn = var->checked_type().as<TupleTypeNode>()) {
-//         Array<PrimExpr> tir_tuple_vars;
-//         int ctr = 0;
-//         for (auto field_type : ttn->fields) {
-//           tir_tuple_vars.push_back(tir::Var(var->vid->name_hint + std::to_string(ctr++),
-//                                             RelayTypeToTIRType(field_type)));
-//         }
-//         tuple_var_values_.Set(var, tir_tuple_vars);
-//       } else {
-//         var_values_.Set(var,
-//                         tir::Var(var->vid->name_hint, RelayTypeToTIRType(var->checked_type())));
-//       }
-//     }
+Type GetVarType(relay::Var var) {
+  if (var->checked_type_.defined()) {
+    return var->checked_type();
+  } else {
+    ICHECK(var->type_annotation.defined());
+    return var->type_annotation;
+  }
+}
 
-//     Array<Stmt> tir_stmts;
-//     for (auto pair : bindings) {
-//       auto rvar = pair.first;
-//       auto rvalue = pair.second;
+typedef std::unordered_set<relay::Var, ObjectPtrHash, ObjectPtrEqual> RelayVarSet;
 
-//       if (auto call = rvalue.as<CallNode>()) {
-//         ICHECK(call->op == GetInvokeTVMOp());
-//         tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(rhs_call)));
-//       } else if (auto tuple = rvalue.as<TupleNode>()) {
-//         for (size_t i = 0; i < tuple->fields.size(); ++i) {
-//           auto tuple_type = tuple->checked_type().as<TupleTypeNode>();
-//           auto field = tuple->fields[i];
-//           auto field_type = tuple_type->fields[i];
-//           Var tvar = Var(rvar->vid->name_hint)
-//         }
-//       }
-//     }
-//   }
+void FlattenVar(const relay::Var& var, Map<relay::Var, Array<Expr>>* p_tuple_var_values,
+                std::vector<relay::Var>* p_flattened_free_vars,
+                std::vector<Expr>* p_flattened_call_args) {
+  Map<relay::Var, Array<Expr>>& tuple_var_values = *p_tuple_var_values;
+  std::vector<relay::Var>& flattened_free_vars = *p_flattened_free_vars;
+  std::vector<Expr>& flattened_call_args = *p_flattened_call_args;
 
-//   // let var == tvm_invoke_op
-//   // let var == tuple
+  if (auto ttn = var->checked_type().as<TupleTypeNode>()) {
+    Array<Expr> tir_tuple_vars;
+    int idx = 0;
+    for (auto field_type : ttn->fields) {
+      auto flattened_var =
+          relay::Var("ft_" + var->vid->name_hint + std::to_string(idx), field_type);
+      tir_tuple_vars.push_back(flattened_var);
+      flattened_free_vars.push_back(flattened_var);
+      flattened_call_args.push_back(TupleGetItem(var, idx++));
+      if (field_type.as<TupleTypeNode>()) {
+        FlattenVar(flattened_var, p_tuple_var_values, p_flattened_free_vars, p_flattened_call_args);
+      }
+      // std::cout << "[TL]  Flattened " << flattened_var << std::endl;
+    }
+    tuple_var_values.Set(var, tir_tuple_vars);
+  } else {
+    auto flattened_var = relay::Var("f_" + var->vid->name_hint, var->checked_type());
+    tuple_var_values.Set(var, {flattened_var});
+    flattened_free_vars.push_back(flattened_var);
+    flattened_call_args.push_back(var);
+    // std::cout << "[TL]  Flattened " << flattened_var << std::endl;
+  }
+}
 
-//   ObjectRef VisitExpr_(const LetNode* op) override {
-//     auto lhs = op->var;
-//     auto rhs = op->value;
-//     auto body = op->body;
-
-//     auto rhs_call = rhs.as<CallNode>();
-//     auto rhs_tuple = rhs.as<TupleNode>();
-//     if (rhs_call && rhs_call->op == GetInvokeTVMOp()) {
-//       return tir::SeqStmt(
-//           {tir::Evaluate(ConvertTVMOpInvoke(rhs_call)), ConvertToTIRStmt(VisitExpr(body))});
-//     } else if (rhs_tuple) {
-//       tuple_var_values_.Set(lhs, FlattenTuple(rhs));
-//       return VisitExpr(body);
-//     } else {
-//       var_values_.Set(lhs, ConvertToTIRExpr(VisitExpr(rhs)));
-//       return VisitExpr(body);
-//     }
-//   }
-
-//   ObjectRef VisitExpr_(const relay::TupleGetItemNode* op) override {
-//     if (op->tuple.as<relay::VarNode>()) {
-//       auto it = tuple_var_values_.find(Downcast<relay::Var>(op->tuple));
-//       ICHECK(it != tuple_var_values_.end());
-//       return ((*it).second)[op->index];
-//     } else if (auto tuple = op->tuple.as<relay::TupleNode>()) {
-//       return VisitExpr(tuple->fields[op->index]);
-//     } else {
-//       ICHECK(false);
-//       return NullValue<PrimExpr>();
-//     }
-//   }
-
-//   ObjectRef VisitExpr_(const VarNode* op) override {
-//     std::cout << "Visiting var " << GetRef<Expr>(op) << std::endl;
-//     auto it = var_values_.find(GetRef<relay::Var>(op));
-//     auto iit = tuple_var_values_.find(GetRef<relay::Var>(op));
-//     if (it != var_values_.end()) {
-//       return (*it).second;
-//     } else if (iit != tuple_var_values_.end()) {
-//       return (*iit).second;
-//     } else {
-//       return GetOrCreateVar(GetRef<Var>(op));
-//     }
-//   }
-
-//   Array<PrimExpr> FlattenTuple(const Expr& rexpr) {
-//     if (auto tuple = rexpr.as<TupleNode>()) {
-//       Array<PrimExpr> tir_fields;
-//       for (auto field : tuple->fields) {
-//         for (auto field_field : FlattenTuple(field)) {
-//           tir_fields.push_back(field_field);
-//         }
-//       }
-//       return tir_fields;
-//     } else if (rexpr.as<relay::VarNode>()) {
-//       auto var = Downcast<relay::Var>(rexpr);
-//       if (tuple_var_values_.count(var)) {
-//         return tuple_var_values_.at(var);
-//       }
-//     }
-
-//     return {ConvertToTIRExpr(VisitExpr(rexpr))};
-//   }
-
-//   PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) {
-//     Array<PrimExpr> args;
-//     // args.push_back(tir::StringImm(call->args[0].as<tir::PrimFuncNode>()->name));
-//     args.push_back(tir::StringImm("yumma yumma"));
-//     std::cout << "Call " << GetRef<Expr>(call) << std::endl;
-//     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
-
-//     Expr inputs_tuple = call->args[1];
-//     Expr outputs_tuple = call->args[2];
-//     for (auto arg : FlattenTuple(inputs_tuple)) {
-//       args.push_back(arg);
-//     }
-//     for (auto arg : FlattenTuple(outputs_tuple)) {
-//       args.push_back(arg);
-//     }
-//     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
-//   }
-
-//   ObjectRef VisitExpr_(const IfNode* op) override {
-//     PrimExpr cond = ConvertToTIRExpr(VisitExpr(op->cond));
-//     tir::Stmt true_branch = ConvertToTIRStmt(VisitExpr(op->true_branch));
-//     tir::Stmt false_branch = ConvertToTIRStmt(VisitExpr(op->false_branch));
-
-//     return tir::IfThenElse(cond, true_branch, false_branch, op->span);
-//   }
-
-//   Type RelayTypeToTIRType(const Type& type) {
-//     if (type.as<PrimTypeNode>()) {
-//       return type;
-//     } else if (auto ttn = type.as<TensorTypeNode>()) {
-//       return PointerType(PrimType(ttn->dtype));
-//     } else {
-//       ICHECK(false) << "Do not know how to convert type " << type;
-//       return type;
-//     }
-//   }
-
-//   PrimExpr GetOrCreateVar(relay::Var rvar) {
-//     auto it = var_values_.find(rvar);
-//     if (it != var_values_.end()) {
-//       PrimExpr tvar = (*it).second;
-//       return tvar;
-//     } else {
-//       tir::Var tvar = tir::Var(rvar->vid->name_hint, RelayTypeToTIRType(rvar->checked_type()));
-//       var_values_.Set(rvar, tvar);
-//       return tvar;
-//     }
-//   }
-
-//   tir::Stmt ConvertToTIRStmt(const ObjectRef& obj) {
-//     if (obj.as<tir::StmtNode>()) {
-//       return Downcast<tir::Stmt>(obj);
-//     } else {
-//       ICHECK(obj.as<PrimExprNode>()) << obj;
-//       return tir::Evaluate(Downcast<PrimExpr>(obj));
-//     }
-//   }
-
-//   PrimExpr ConvertToTIRExpr(const ObjectRef& obj) {
-//     ICHECK(obj.as<PrimExprNode>()) << obj;
-//     return Downcast<PrimExpr>(obj);
-//   }
-
-//   ObjectRef VisitExpr_(const TupleNode* op) override { return FlattenTuple(GetRef<Expr>(op)); }
-
-//   ObjectRef VisitExpr_(const relay::CallNode* op) override {
-//     if (op->op == GetInvokeTVMOp()) {
-//       return ConvertTVMOpInvoke(op);
-//     } else {
-//       return ThrowError(GetRef<Expr>(op));
-//     }
-//   }
-
-//  private:
-//   Map<relay::Var, PrimExpr> var_values_;
-//   Map<relay::Var, Array<PrimExpr>> tuple_var_values_;
-// };
+struct TIRLowererResult {
+  tir::PrimFunc func;
+  std::vector<Expr> call_args;
+  Expr replacement;
+};
 
 class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
  public:
-  tir::Stmt LowerToTIR(const Expr& rexpr, const Expr& body,
-                       const std::vector<std::pair<relay::Var, Expr>> bindings) {
-    Array<Var> free_vars = FreeVars(rexpr);
+  TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
+                              const std::vector<std::pair<relay::Var, Expr>> bindings) {
+    RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
+    std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
+    std::vector<Var> flattened_free_vars;
+    std::vector<Expr> flattened_call_args;
+
     for (auto var : free_vars) {
-      if (auto ttn = var->checked_type().as<TupleTypeNode>()) {
-        Array<Expr> tir_tuple_vars;
-        int ctr = 0;
-        for (auto field_type : ttn->fields) {
-          tir_tuple_vars.push_back(
-              relay::Var(var->vid->name_hint + std::to_string(ctr++), field_type));
-        }
-        tuple_var_values_.Set(var, tir_tuple_vars);
-      } else {
-        tuple_var_values_.Set(var, {relay::Var(var->vid->name_hint, var->checked_type())});
-      }
+      std::cout << "[TL]   FreeVar " << var->vid->name_hint << " " << var.get() << std::endl;
+      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
     }
 
     Array<tir::Stmt> tir_stmts;
+    Map<relay::Var, Expr> bindings_map;
     for (auto pair : bindings) {
       auto rvar = pair.first;
       auto rvalue = pair.second;
+      bindings_map.Set(rvar, rvalue);
 
       std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
         ICHECK(call->op == GetInvokeTVMOp());
         tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
+
+        // tir_stmts.push_back(tir::Evaluate(0));
       } else if (auto tuple = rvalue.as<TupleNode>()) {
         tuple_var_values_.Set(rvar, tuple->fields);
       } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
@@ -550,7 +423,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
         } else {
           tuple_var_values_.Set(rvar, {tuple_get_value});
         }
-      } else if (auto value_var_node = rvalue.as<relay::VarNode>()) {
+      } else if (rvalue.as<relay::VarNode>()) {
         auto value_var = Downcast<relay::Var>(rvalue);
         ICHECK(tuple_var_values_.count(value_var));
         tuple_var_values_.Set(rvar, tuple_var_values_.at(value_var));
@@ -558,7 +431,103 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
         ICHECK(false) << "Unsupported value type " << rvalue;
       }
     }
-    return tir::SeqStmt(tir_stmts);
+
+    std::cout << "[TL] Body " << body << std::endl;
+    Expr body_in_free_vars;
+    if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
+      body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
+    } else {
+      body_in_free_vars = Tuple(Array<Expr>());
+    }
+    std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
+    tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
+    Array<tir::Var> prim_func_params;
+    for (auto rvar : flattened_free_vars) {
+      prim_func_params.push_back(GetOrCreateVar(rvar));
+    }
+
+    return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
+                             flattened_call_args, body_in_free_vars});
+  }
+
+  Expr ExpressBodyWithFreeVars(const Expr& body, const RelayVarSet& free_vars,
+                               const Map<relay::Var, Expr>& bindings_map) {
+    class Visitor : public ExprMutator {
+     public:
+      Visitor(const RelayVarSet& free_vars, const Map<relay::Var, Expr>& bindings_map)
+          : free_vars_(free_vars), bindings_map_(bindings_map) {}
+      Expr VisitExpr_(const VarNode* op) {
+        std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
+        auto var = GetRef<relay::Var>(op);
+        if (free_vars_.count(var)) {
+          std::cout << "[TL]   FreeVar" << std::endl;
+          return var;
+        } else {
+          auto it = bindings_map_.find(var);
+          if (it == bindings_map_.end()) {
+            for (auto var : free_vars_) {
+              std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
+            }
+          }
+          ICHECK(it != bindings_map_.end()) << var;
+          std::cout << "[TL]   Value " << (*it).second << std::endl;
+          return VisitExpr((*it).second);
+        }
+      }
+
+      const RelayVarSet& free_vars_;
+      const Map<relay::Var, Expr>& bindings_map_;
+    };
+    std::cout << "[TL] Expressing " << body << std::endl;
+    return Visitor(free_vars, bindings_map)(body);
+  }
+
+  PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) {
+    Array<PrimExpr> args;
+    args.push_back(tir::StringImm(call->args[0].as<GlobalVarNode>()->name_hint));
+    ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
+
+    Expr inputs_tuple = call->args[1];
+    Expr outputs_tuple = call->args[2];
+    // std::cout << "[TL] Call inputs " << inputs_tuple << std::endl;
+    for (auto arg : FlattenTuple(inputs_tuple)) {
+      ICHECK(arg.as<relay::VarNode>());
+      // std::cout << "[TL]   Field " << arg << std::endl;
+      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+    }
+    // std::cout << "[TL] Call outputs " << outputs_tuple << std::endl;
+    for (auto arg : FlattenTuple(outputs_tuple)) {
+      ICHECK(arg.as<relay::VarNode>());
+      // std::cout << "[TL]   Field " << arg << std::endl;
+      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+    }
+    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+
+    // ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
+
+    // Expr inputs_tuple = call->args[1];
+    // Expr outputs_tuple = call->args[2];
+    // Array<PrimExpr> args;
+    // for (auto arg : FlattenTuple(inputs_tuple)) {
+    //   ICHECK(arg.as<relay::VarNode>());
+    //   args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+    // }
+    // for (auto arg : FlattenTuple(outputs_tuple)) {
+    //   ICHECK(arg.as<relay::VarNode>());
+    //   args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+    // }
+    // return tir::Call(DataType::Void(), call->args[0], args);
+  }
+
+  Type RelayTypeToTIRType(const Type& type) {
+    if (type.as<PrimTypeNode>()) {
+      return type;
+    } else if (auto ttn = type.as<TensorTypeNode>()) {
+      return PointerType(PrimType(ttn->dtype));
+    } else {
+      ICHECK(false) << "Do not know how to convert type " << type;
+      return type;
+    }
   }
 
   Array<Expr> FlattenTuple(const Expr& expr) {
@@ -587,53 +556,12 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     return tir_fields;
   }
 
-  PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) {
-    Array<PrimExpr> args;
-    args.push_back(tir::StringImm(call->args[0].as<GlobalVarNode>()->name_hint));
-    // args.push_back(tir::StringImm("yumma yumma"));
-    ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
-
-    Expr inputs_tuple = call->args[1];
-    Expr outputs_tuple = call->args[2];
-    std::cout << "[TL] Call inputs " << inputs_tuple << std::endl;
-    for (auto arg : FlattenTuple(inputs_tuple)) {
-      ICHECK(arg.as<relay::VarNode>());
-      std::cout << "[TL]   Field " << arg << std::endl;
-      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    }
-    std::cout << "[TL] Call outputs " << outputs_tuple << std::endl;
-    for (auto arg : FlattenTuple(outputs_tuple)) {
-      ICHECK(arg.as<relay::VarNode>());
-      std::cout << "[TL]   Field " << arg << std::endl;
-      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    }
-    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
-  }
-
-  Type RelayTypeToTIRType(const Type& type) {
-    if (type.as<PrimTypeNode>()) {
-      return type;
-    } else if (auto ttn = type.as<TensorTypeNode>()) {
-      return PointerType(PrimType(ttn->dtype));
-    } else {
-      ICHECK(false) << "Do not know how to convert type " << type;
-      return type;
-    }
-  }
-
-  Type GetVarType(relay::Var var) {
-    if (var->checked_type_.defined()) {
-      return var->checked_type();
-    } else {
-      ICHECK(var->type_annotation.defined());
-      return var->type_annotation;
-    }
-  }
-
-  PrimExpr GetOrCreateVar(relay::Var rvar) {
+  tir::Var GetOrCreateVar(relay::Var rvar) {
+    // std::cout << "[TL] Var " << rvar->type_annotation << " " << rvar->vid->name_hint <<
+    // std::endl;
     auto it = var_to_var_mapping_.find(rvar);
     if (it != var_to_var_mapping_.end()) {
-      PrimExpr tvar = (*it).second;
+      tir::Var tvar = (*it).second;
       return tvar;
     } else {
       Type var_type = GetVarType(rvar);
@@ -648,38 +576,104 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
   Map<relay::Var, Array<Expr>> tuple_var_values_;
 };
 
-Expr CoarsenPrimitiveFuncGranularity(const Expr& expr, const IRModule& module) {
-  std::cout << "Coarsening now!" << std::endl;
-  // return CoarsenMutator().Mutate(expr);
-  auto groups = GroupFinder().FindGroups(expr);
-  std::cout << "Groups: " << groups.size() << std::endl;
-  for (auto group : groups) {
-    group = TupleInliner()(group);
-    group = LetLifter()(group);
-    Serializer serializer;
-    // group = transform::ToANormalForm(group);
-    std::cout << "  Group " << DebugPrint(group) << std::endl;
-    serializer(group);
-    // for (auto pair : serializer.bindings_) {
-    // std::cout << "[PAIR] " << pair.first->vid->name_hint << " " << pair.second << std::endl;
-    // }
-    // std::cout << "[PAIR] Body: " << serializer.body_ << std::endl;
-    auto tir = TIRLowerer().LowerToTIR(group, serializer.body_, serializer.bindings_);
-    std::cout << "  TIR " << DebugPrint(tir) << std::endl;
+class Coarsener : public ExprMutator {
+ public:
+  Coarsener(const Groups& groups) : groups_(groups) {}
+
+ private:
+  Expr VisitExpr(const Expr& expr) override {
+    auto it = this->memo_.find(expr);
+    if (it != this->memo_.end()) {
+      return it->second;
+    } else {
+      Expr new_expr = HandleExpr(expr);
+      memo_[expr] = new_expr;
+      return new_expr;
+    }
   }
-  // auto ret = CoarsenRewriter(groups, module)(expr);
-  // std::cout << "After coarsening\n" << ret << "\n\n\n" << std::endl;
-  return expr;
+
+  Expr HandleExpr(const Expr& expr) {
+    if (groups_.count(expr)) {
+      auto tmp_expr = transform::ToANormalForm(expr);
+      tmp_expr = TupleInliner()(expr);
+      tmp_expr = LetLifter()(tmp_expr);
+      Serializer serializer;
+      serializer.Serialize(tmp_expr);
+      auto res = TIRLowerer().LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+      auto prim_func = res.func;
+      auto call_args = res.call_args;
+      auto replacement = res.replacement;
+      std::string name = "prim_func" + std::to_string(ctr++);
+      GlobalVar prim_func_var(name, VoidType());
+      auto call = InvokeTVMOp(prim_func_var, Tuple(call_args), Tuple(Array<Expr>()),
+                              DictAttrs({{"Primitive", tvm::Integer(1)}}));
+      // std::cout << "[CRN] PrimFunc\n" << prim_func << std::endl;
+      // std::cout << "[CRN] Returning " << call << std::endl;
+      Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
+      prim_func = WithAttrs(std::move(prim_func), {{"global_symbol", runtime::String(name)},
+                                                   {tvm::attr::kTarget, target},
+                                                   {"coarsened_prim_func", Bool(true)}});
+      prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
+      return Let(Var("dummy", VoidType()), call, replacement);
+    } else {
+      return ExprMutator::VisitExpr(expr);
+    }
+  }
+
+ public:
+  std::vector<std::pair<GlobalVar, tir::PrimFunc>> prim_funcs_;
+
+ private:
+  const Groups& groups_;
+  static int ctr;
+};
+
+int Coarsener::ctr = 0;
+
+IRModule CoarsenGranularity(const IRModule& mod) {
+  // std::cout << "Coarsening now!" << std::endl;
+  tvm::Map<GlobalVar, Function> updates;
+  tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
+  auto funcs = mod->functions;
+  for (const auto& it : funcs) {
+    if (const auto* n = it.second.as<FunctionNode>()) {
+      ICHECK_EQ(FreeVars(it.second).size(), 0);
+      if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
+      Function func = GetRef<Function>(n);
+
+      auto groups = GroupFinder().FindGroups(func);
+      Coarsener coarsener(groups);
+      Function ret = Downcast<Function>(coarsener(func));
+
+      updates.Set(it.first, ret);
+
+      for (auto it : coarsener.prim_funcs_) {
+        new_prim_funcs.Set(it.first, it.second);
+      }
+    }
+  }
+
+  for (auto pair : updates) {
+    mod->Add(pair.first, pair.second, true);
+  }
+
+  for (auto pair : new_prim_funcs) {
+    mod->Add(pair.first, pair.second, true);
+  }
+
+  return mod;
 }
 
-namespace transform {
+//   322 GlobalVar(vm_mod_fused_nn_dense_nn_bias_add): PrimFunc([placeholder, placeholder,
+//   placeholder, T_add]) attrs={"
+// 322 from_legacy_te_schedule": (bool)1, "global_symbol": "vm_mod_fused_nn_dense_nn_bias_add",
+// "tir.noalias": (bool)1 322 , "target": llvm -keys=cpu -link-params=0} {
 
+namespace transform {
 Pass CoarsenPrimitiveFuncGranularity() {
-  runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
-      [=](Function f, IRModule m, PassContext pc) {
-        return Downcast<Function>(CoarsenPrimitiveFuncGranularity(f, m));
-      };
-  return CreateFunctionPass(pass_func, 0, "CoarsenPrimitiveFuncGranularity", {});
+  runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
+      [=](IRModule m, PassContext pc) { return CoarsenGranularity(m); };
+  return CreateModulePass(pass_func, 0, "CoarsenPrimitiveFuncGranularity", {});
 }
 
 TVM_REGISTER_GLOBAL("relay._transform.CoarsenPrimitiveFuncGranularity").set_body_typed(FuseOps);

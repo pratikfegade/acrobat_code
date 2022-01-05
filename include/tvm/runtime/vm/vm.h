@@ -325,7 +325,7 @@ class VirtualMachine : public runtime::ModuleNode {
   /*!
    * \brief Whether to execute tensor ops lazily.
    */
-  bool lazy_execution_ = true;
+  bool lazy_execution_ = false;
 };
 
 }  // namespace vm

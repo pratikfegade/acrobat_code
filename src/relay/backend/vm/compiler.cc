@@ -38,6 +38,8 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/vm/vm.h>
 #include <tvm/te/operation.h>
+#include <tvm/tir/function.h>
+#include <tvm/tir/stmt_functor.h>
 
 #include <iostream>
 #include <map>
@@ -233,6 +235,23 @@ std::vector<int64_t> ToAllocTensorShape(NDArray shape) {
   }
   return raw_shape;
 }
+
+class TIRCalleeCollector : public tir::StmtExprVisitor {
+ public:
+  Array<String> Collect(const tir::PrimFunc& func) {
+    StmtExprVisitor::VisitStmt(func->body);
+    return callees_;
+  }
+
+ private:
+  void VisitExpr_(const tir::CallNode* op) override {
+    if (auto callee = op->args[0].as<tir::StringImmNode>()) {
+      callees_.push_back(callee->value);
+    }
+  }
+
+  Array<String> callees_;
+};
 
 class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
  public:
@@ -487,6 +506,30 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     this->last_register_ = merge_register;
   }
 
+  void CollectAndRegisterTIRCallees(const Expr& func_var, const DictAttrs& attrs) {
+    ICHECK(func_var.as<GlobalVarNode>()) << "Expecting function in invoke_tvm_op to be a global";
+    auto global_var = Downcast<GlobalVar>(func_var);
+    auto func = context_->module->Lookup(global_var);
+    ICHECK(func.as<tir::PrimFuncNode>()) << "Can only invoke PrimFuncs from TIR";
+    auto callees = TIRCalleeCollector().Collect(Downcast<tir::PrimFunc>(func));
+    for (auto callee_name : callees) {
+      Index op_index;
+      auto itr = context_->primitive_map.find(callee_name);
+      if (itr == context_->primitive_map.end()) {
+        op_index = context_->primitive_map.size();
+        context_->primitive_map.emplace(callee_name, op_index);
+      } else {
+        op_index = itr->second;
+      }
+
+      // Capture the dictionary of attributes from the original primitive function so that they
+      // can contribute to the hash of the compiled primitive. This way we can distinguish
+      // primitives with the same body expression but different attributes which may arbitrarily
+      // influence code generation.
+      op_attrs[op_index] = attrs->dict;
+    }
+  }
+
   void EmitInvokeTVMOp(const Expr& func, const Expr& inputs, const Expr& outputs,
                        const DictAttrs& attrs) {
     std::vector<Index> argument_registers;
@@ -529,6 +572,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // can contribute to the hash of the compiled primitive. This way we can distinguish primitives
     // with the same body expression but different attributes which may arbitrarily influence code
     // generation.
+    std::cout << "[CC] Attrs " << op_index << " " << attrs->dict << std::endl;
     op_attrs[op_index] = attrs->dict;
 
     Emit(Instruction::InvokePacked(op_index, argument_registers.size(), output_tuple->fields.size(),
@@ -562,6 +606,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
                    ICHECK_EQ(args.size(), 3);
                    EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
+                   CollectAndRegisterTIRCallees(args[0], Downcast<DictAttrs>(attrs));
                  })
           .Match("memory.alloc_tensor",
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
@@ -983,7 +1028,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
-  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", false));
 
   // Fuse & lower yet again
   pass_seqs.push_back(FuseAndLowerOperators(host_se_scope));
@@ -1051,12 +1096,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
 
-  // if (false) {
   pass_seqs.push_back(transform::FuseOps());
-  // } else {
-  // pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
-  // pass_seqs.push_back(transform::PlanDevices(config_));
-  // }
 
   // Do layout rewrite for auto-scheduler.
   transform::PassContext pass_ctx = PassContext::Current();
@@ -1109,14 +1149,14 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::Inline());
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
-  pass_seqs.push_back(transform::ToANormalForm());
+
+  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", false, true));
+  // pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
+  // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", false, true));
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Before CoarsenGranularity", false));
   pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
-  // pass_seqs.push_back(transform::PrintCurrentIR("Before CPPMemoryPlan", true));
-
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", false));
+  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

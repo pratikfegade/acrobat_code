@@ -372,6 +372,8 @@ class CodeGenLLVM : public ExprFunctor<llvm::Value*(const PrimExpr&)>,
   std::unordered_map<const VarNode*, llvm::Value*> var_map_;
   // global strings
   std::unordered_map<std::string, llvm::Constant*> str_map_;
+  // added functions
+  std::unordered_map<std::string, llvm::Function*> functions_map_;
   // Whether current function is restricted
   bool is_restricted_{true};
   // The analyzer information
@@ -420,10 +422,23 @@ void CodeGenLLVM::AddFunctionsOrdered(IterType begin, IterType end, ConvType pfu
     funcs.push_back(pfunc(*it));
   }
   std::sort(funcs.begin(), funcs.end(), [](PrimFunc func_a, PrimFunc func_b) {
+    bool coarsened_prim_func_a =
+        func_a->GetAttr("coarsened_prim_func", Bool(false)).value().operator bool();
+    bool coarsened_prim_func_b =
+        func_b->GetAttr("coarsened_prim_func", Bool(false)).value().operator bool();
     std::string name_a = func_a->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
     std::string name_b = func_b->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
-    return name_a < name_b;
+    if (coarsened_prim_func_a == coarsened_prim_func_b) {
+      return name_a < name_b;
+    } else {
+      return coarsened_prim_func_a < coarsened_prim_func_b;
+    }
   });
+  // std::cout << "[SORT] Functions" << std::endl;
+  // for (auto& f : funcs) {
+  //   std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+  //   std::cout << "[SORT]   " << name << std::endl;
+  // }
   for (auto& f : funcs) {
     AddFunction(f);
   }

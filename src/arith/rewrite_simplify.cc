@@ -219,11 +219,20 @@ std::function<void()> RewriteSimplifier::Impl::EnterConstraint(const PrimExpr& c
   size_t old_literal_size = literal_constraints_.size();
   // we will compare the already simplified result with the constraint,
   // so simplify the constarint as well
-  literal_constraints_.push_back(operator()(constraint));
+  PrimExpr simplified_constraint = operator()(constraint);
+  literal_constraints_.push_back(simplified_constraint);
   size_t new_literal_size = literal_constraints_.size();
-  auto frecover = [old_literal_size, new_literal_size, this]() {
+  ICHECK(simplified_constraint.defined()) << simplified_constraint;
+  auto frecover = [old_literal_size, new_literal_size, simplified_constraint, this]() {
     ICHECK_EQ(literal_constraints_.size(), new_literal_size);
-    literal_constraints_.resize(old_literal_size);
+    ICHECK(simplified_constraint.defined()) << simplified_constraint;
+    ICHECK(literal_constraints_.back().defined())
+        << simplified_constraint << " " << old_literal_size << " " << new_literal_size;
+    if (old_literal_size == 0) {
+      literal_constraints_.clear();
+    } else {
+      literal_constraints_.resize(old_literal_size);
+    }
   };
   return frecover;
 }

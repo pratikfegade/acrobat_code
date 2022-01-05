@@ -186,6 +186,17 @@ class VarVisitor : protected MixedModeVisitor, protected PatternVisitor {
     return ret;
   }
 
+  std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> FreeDedup(const Expr& expr) {
+    this->VisitExpr(expr);
+    std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> ret;
+    for (const auto& v : vars_.data) {
+      if (bound_vars_.set.count(v) == 0) {
+        ret.insert(v);
+      }
+    }
+    return ret;
+  }
+
   Array<Var> Collect() {
     Array<Var> ret;
     for (const auto& v : bound_vars_.data) {
@@ -273,6 +284,10 @@ tvm::Array<TypeVar> AllTypeVars(const Type& type, const IRModule& mod) {
 }
 
 tvm::Array<Var> FreeVars(const Expr& expr) { return VarVisitor().Free(expr); }
+
+std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> FreeVarsDedup(const Expr& expr) {
+  return VarVisitor().FreeDedup(expr);
+}
 
 tvm::Array<Var> BoundVars(const Expr& expr) { return VarVisitor().Bound(expr); }
 

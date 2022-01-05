@@ -116,7 +116,8 @@ TVM_DLL Pass FoldConstant();
  *
  * \return The Pass
  */
-TVM_DLL Pass PrintCurrentIR(String previous_pass, bool clean_up = false);
+TVM_DLL Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device = false,
+                            bool clean_up_prim_funcs = false);
 
 /*!
  * \brief Split function with huge number of arguments to smaller pieces.

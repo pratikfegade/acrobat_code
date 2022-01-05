@@ -33,6 +33,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace tvm {
 namespace relay {
@@ -129,6 +130,18 @@ TVM_DLL tvm::Array<Var> BoundVars(const Pattern& pat);
  * \return List of free vars, in the PostDFS order in the expression.
  */
 TVM_DLL tvm::Array<Var> FreeVars(const Expr& expr);
+
+/*!
+ * \brief Get free type parameters from expression expr.
+ *
+ * Free variables are variables that are not bound by a
+ * let or a function parameter in the context.
+ *
+ * \param expr the expression.
+ *
+ * \return List of free vars, in the PostDFS order in the expression.
+ */
+TVM_DLL std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> FreeVarsDedup(const Expr& expr);
 
 /*!
  * \brief Get all variables from expression expr.

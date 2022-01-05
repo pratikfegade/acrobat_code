@@ -115,6 +115,11 @@ const PackedFunc* ModuleNode::GetFuncFromEnv(const std::string& name) {
   }
   if (pf == nullptr) {
     const PackedFunc* f = Registry::Get(name);
+    if (f == nullptr) {
+      for (auto n : Registry::ListNames()) {
+        std::cout << "[MD] " << n << " " << name << std::endl;
+      }
+    }
     ICHECK(f != nullptr) << "Cannot find function " << name
                          << " in the imported modules or global registry."
                          << " If this involves ops from a contrib library like"

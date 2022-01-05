@@ -61,6 +61,7 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args) {
+  ICHECK(func.body());
   size_t arity = 0;
   for (Index i = 0; i < arg_count; i++) {
     if (const auto* obj = args[i].as<ADTObj>()) {
