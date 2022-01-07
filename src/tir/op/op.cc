@@ -150,7 +150,8 @@ void BinaryOpMatchTypes(PrimExpr& lhs, PrimExpr& rhs, Span span) {  // NOLINT(*)
       }
     }
   } else {
-    LOG(FATAL) << "Cannot match type " << ltype << " vs " << rtype;
+    LOG(FATAL) << "Cannot match type " << ltype << " vs " << rtype << " in " << lhs << " and "
+               << rhs;
   }
 }
 

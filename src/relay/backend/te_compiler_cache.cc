@@ -43,6 +43,7 @@
 
 #include "../op/memory/memory.h"
 #include "../transforms/pass_utils.h"
+#include "batch_te_graph.h"
 #include "utils.h"
 
 namespace tvm {
@@ -121,7 +122,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     use_meta_schedule_ = backend::IsMetaScheduleEnabled();
   }
 
-  CachedFunc Create(const Function& relay_func, std::function<std::string(std::string)> renamer) {
+  std::pair<CachedFunc, CachedFunc> Create(const Function& relay_func,
+                                           std::function<std::string(std::string)> renamer,
+                                           bool create_batched) {
     // std::cout << "Lowering\n" << relay_func << "\n\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     for (Var param : relay_func->params) {
@@ -135,6 +138,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     }
     readable_name_stream_ << "fused";
     auto outputs = this->VisitExpr(relay_func->body);
+
     auto candidate_name = readable_name_stream_.str();
     constexpr static size_t kMaxFuncNameLength = 80;
     // WARNING: Please make sure to also update TVM_CRT_MAX_STRLEN_FUNCTION_NAME
@@ -146,8 +150,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       candidate_name = truncated_name.str();
     }
 
-    // TODO(mbs): This should be the definititive global by which the PrimFunc is known and
-    // no other GlobalVar ctors should appear inside the lowering machinery.
+    // TODO(mbs): This should be the definitive global by which the
+    // PrimFunc is known and no other GlobalVar ctors should appear
+    // inside the lowering machinery.
     auto prim_fn_var = GlobalVar(renamer(candidate_name));
     prim_fn_var->checked_type_ = relay_func->checked_type();
 
@@ -181,7 +186,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
             runtime::Registry::Get("meta_schedule.MetaScheduleContextQueryInsideWithScope");
         ICHECK(f_create_func) << "te.CreatePrimFuncFromOutputs is not registered";
         ICHECK(f_meta_schedule)
-            << "meta_schedule.MetaScheduleContextQueryInsideWithScope is not registered";
+            << "meta_schedule.MetaScheduleContextQueryInsideWithScope is not registered ";
         prim_func = (*f_create_func)(tensor_outs);
         Optional<ObjectRef> opt_mod_or_base_func =
             (*f_meta_schedule)(prim_fn_var->name_hint, IRModule({{prim_fn_var, relay_func}}),
@@ -193,7 +198,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         }
       }
 
-      // Use TOPI schdule if user specificed, or the function has no auto_scheduler schedule.
+      // Use TOPI schedule if user specificed, or the function has no
+      // auto_scheduler schedule.
       if (!schedule.defined() && !prim_func.defined()) {
         ICHECK(anchor_implementation_.defined());
         schedule = anchor_implementation_.Schedule(anchor_attrs_, tensor_outs, target_);
@@ -207,7 +213,64 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
-    return CachedFunc(target_, prim_fn_var, fn_inputs, outputs, schedule, prim_func, {});
+    CachedFunc generated_prim_func =
+        CachedFunc(target_, prim_fn_var, fn_inputs, outputs, schedule, prim_func, {});
+    CachedFunc generated_batched_func;
+
+    if (create_batched) {
+      auto res = BatchifyTEGraph(fn_inputs, outputs);
+      Map<te::Operation, te::Operation> mapping = res.first;
+      te::Tensor batch_size_tensor = res.second;
+
+      auto map_tensors = [&](const Array<te::Tensor> tensors) {
+        Array<te::Tensor> output;
+        for (auto tensor : tensors) {
+          auto it = mapping.find(tensor->op);
+          if (it != mapping.end()) {
+            auto operation = (*it).second;
+            output.push_back(operation.output(tensor->value_index));
+          } else {
+            std::cout << tensor << " " << tensor->op << " " << tensor->op.get() << std::endl;
+          }
+        }
+        return output;
+      };
+
+      Array<te::Tensor> batched_outputs = map_tensors(outputs);
+      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs);
+      batched_inputs.push_back(batch_size_tensor);
+
+      Array<te::Operation> output_operations;
+      for (auto tensor : batched_outputs) {
+        output_operations.push_back(tensor->op);
+      }
+
+      auto tensor_to_batched_tensor_types = [](const Array<te::Tensor>& tensors) {
+        Array<Type> tensor_types;
+        for (auto tensor : tensors) {
+          Array<PrimExpr> shape;
+          shape.push_back(tir::Any());
+          shape.push_back_all(tensor->shape);
+          tensor_types.push_back(TensorType(shape, tensor->dtype));
+        }
+        return tensor_types;
+      };
+
+      Array<Type> input_tensor_types = tensor_to_batched_tensor_types(batched_inputs);
+      Array<Type> output_tensor_types = tensor_to_batched_tensor_types(batched_outputs);
+
+      auto batched_fn_var = GlobalVar(renamer(candidate_name + "_batched"));
+      batched_fn_var->checked_type_ = FuncType(input_tensor_types, TupleType(output_tensor_types),
+                                               Array<TypeVar>(), Array<TypeConstraint>());
+
+      auto batched_schedule = te::create_schedule(output_operations);
+
+      // std::cout << "[TEC] BatchedFnVar " << batched_fn_var << std::endl;
+      generated_batched_func = CachedFunc(target_, batched_fn_var, batched_inputs, batched_outputs,
+                                          batched_schedule, tir::PrimFunc{nullptr}, {});
+    }
+
+    return std::make_pair(generated_prim_func, generated_batched_func);
   }
 
   Array<te::Tensor> VisitExpr_(const VarNode* op) final {
@@ -360,9 +423,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
  * \return Pair of schedule and cache.
  *  The funcs field in cache is not yet populated.
  */
-CachedFunc PrimFuncFor(const Function& source_func, const Target& target,
-                       std::function<std::string(std::string)> renamer) {
-  return ScheduleBuilder(target).Create(source_func, renamer);
+std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
+                                              std::function<std::string(std::string)> renamer,
+                                              bool create_batched) {
+  return ScheduleBuilder(target).Create(source_func, renamer, create_batched);
 }
 
 // Creates shape function from functor.
@@ -736,9 +800,10 @@ std::string GetUniqueName(std::string name, std::unordered_map<std::string, int>
 }
 
 TVM_REGISTER_GLOBAL("relay.backend.LowerToTE").set_body_typed([](Function prim_func) {
-  return ScheduleBuilder(tvm::Target("ext_dev"), false).Create(prim_func, [&](std::string name) {
-    return name;
-  });
+  return ScheduleBuilder(tvm::Target("ext_dev"), false)
+      .Create(
+          prim_func, [&](std::string name) { return name; }, false)
+      .first;
 });
 
 }  // namespace tec

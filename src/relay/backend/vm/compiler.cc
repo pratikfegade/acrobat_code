@@ -61,6 +61,7 @@
 namespace tvm {
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_coarsen_granularity", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
 
 namespace relay {
 
@@ -1100,6 +1101,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::PlanDevices(config_));
 
   pass_seqs.push_back(transform::FuseOps());
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
 
   // Do layout rewrite for auto-scheduler.
   transform::PassContext pass_ctx = PassContext::Current();
@@ -1135,6 +1137,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1159,11 +1162,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
-    std::cout << "[SHIKAV PROJECT] " << std::endl;
     pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true,
-  // false));
+  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

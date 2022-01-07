@@ -26,6 +26,8 @@
 #include <tvm/relay/transform.h>
 #include <tvm/runtime/registry.h>
 
+#include "../transforms/pass_utils.h"
+
 namespace tvm {
 namespace relay {
 namespace transform {
@@ -150,6 +152,10 @@ IRModule FunctionPassNode::operator()(IRModule mod, const PassContext& pass_ctx)
 
   // TODO(@jroesch): move away from eager type checking for performance reasons
   // make issue.
+  // std::cout << "MOD\n" << std::endl;
+  // for (auto kv : updated_mod->functions) {
+  // std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+  // }
   return transform::InferType()(updated_mod);
 }
 

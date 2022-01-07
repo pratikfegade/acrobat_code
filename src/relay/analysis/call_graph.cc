@@ -66,6 +66,13 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   // This is the major overhead for constructing a call graph because the
   // post-order visitor will visit each AST node of the current function to
   // figure out the dependencies between functions.
+
+  auto batched_prim_funcs =
+      module->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
+          .value();
+  for (auto it : batched_prim_funcs) {
+    std::cout << "[CG] Batched " << it.first->name_hint << " " << it.second->name_hint << std::endl;
+  }
   PostOrderVisit(func, [&](const Expr& expr) {
     // TODO(mbs): Cleanup shapes functions.
     if (const auto* call_node = expr.as<CallNode>()) {
@@ -80,6 +87,12 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
       auto callee = GetRef<GlobalVar>(global_var_node);
       CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
       cg_node->AddCalledGlobal(callee_cg_node);
+      auto it = batched_prim_funcs.find(callee);
+      if (it != batched_prim_funcs.end()) {
+        auto batched_callee = (*it).second;
+        CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
+        cg_node->AddCalledGlobal(batched_callee_cg_node);
+      }
     }
   });
 }
@@ -227,6 +240,9 @@ void CallGraphEntry::CleanCallGraphEntries() {
 }
 
 inline void CallGraphEntry::AddCalledGlobal(CallGraphEntry* cg_node) {
+  if (cg_node->global_->name_hint == "vm_mod_fused_add") {
+    std::cout << "TIP TIP BARSA PAANI " << std::endl;
+  }
   called_globals_.emplace_back(global_, cg_node);
   // Increment the reference to indicate that another call site is found for
   // the callee in `cg_node`.

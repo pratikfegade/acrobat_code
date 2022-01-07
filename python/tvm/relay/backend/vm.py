@@ -33,6 +33,19 @@ from tvm.relay.backend.interpreter import Executor
 from tvm.target import Target
 from . import _vm
 
+def create_workflow_configs(lazy_execution=False,
+                            coarsened_execution=False,
+                            batched_execution=False,
+                            opt_level=3):
+    config = {
+        "relay.db_coarsen_granularity": coarsened_execution,
+        "relay.db_batched_execution": batched_execution,
+        "relay.db_lazy_execution": lazy_execution,
+    }
+    execution_options = tvm.runtime.vm.create_vm_execution_options(lazy_execution=lazy_execution)
+    pass_context = tvm.transform.PassContext(opt_level=opt_level, config=config)
+    return pass_context, execution_options
+
 
 def compile(mod, target=None, target_host=None, params=None):
     """Compile the module to VM executable. A helper function for VMCompiler.

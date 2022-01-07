@@ -101,29 +101,50 @@ class TECompilerImpl : public TECompilerNode {
 
   IRModule GetLoweredFunctions() {
     IRModule mod;
+
+    Map<GlobalVar, GlobalVar> batched_prim_funcs;
     // Extract lowered functions from the cache
     for (const auto& it : cache_) {
+      // Annotate functions with their target and put them in the return module
+      auto update_module = [&](const IRModule& lowered_mod, const Target& target) {
+        for (const auto& kv : lowered_mod->functions) {
+          const GlobalVar& var = kv.first;
+          const BaseFunc& func = kv.second;
+
+          // Only add functions that are not external functions
+          if (!func->GetAttr<String>(attr::kCompiler).defined()) {
+            ICHECK(func->IsInstance<tir::PrimFuncNode>())
+                << "Expected all functions that are not external to be PrimFuncs, but found:"
+                << std::endl
+                << PrettyPrint(func);
+            const tir::PrimFunc& prim_func = Downcast<tir::PrimFunc>(func);
+            mod->Update(var, WithAttr(prim_func, tvm::attr::kTarget, target));
+          }
+        }
+      };
+
       auto source_func = it.first;
       auto lowered_func = it.second;
+      update_module(lowered_func->cached_func->funcs, source_func->target);
+      if (lowered_func->batched_cached_func.defined()) {
+        update_module(lowered_func->batched_cached_func->funcs, source_func->target);
 
-      IRModule lowered_mod = lowered_func->cached_func->funcs;
-
-      // Annotate functions with their target and put them in the return module
-      for (const auto& kv : lowered_mod->functions) {
-        const GlobalVar& var = kv.first;
-        const BaseFunc& func = kv.second;
-
-        // Only add functions that are not external functions
-        if (!func->GetAttr<String>(attr::kCompiler).defined()) {
-          ICHECK(func->IsInstance<tir::PrimFuncNode>())
-              << "Expected all functions that are not external to be PrimFuncs, but found:"
-              << std::endl
-              << PrettyPrint(func);
-          const tir::PrimFunc& prim_func = Downcast<tir::PrimFunc>(func);
-          mod->Update(var, WithAttr(prim_func, tvm::attr::kTarget, source_func->target));
+        ICHECK_EQ(lowered_func->cached_func->funcs->functions.size(),
+                  lowered_func->batched_cached_func->funcs->functions.size());
+        for (auto it : lowered_func->cached_func->funcs->functions) {
+          auto gv = it.first;
+          auto batched_name = gv->name_hint + "_batched";
+          if (lowered_func->batched_cached_func->funcs->ContainGlobalVar(batched_name)) {
+            auto gv1 = it.first;
+            auto gv2 = lowered_func->batched_cached_func->funcs->GetGlobalVar(batched_name);
+            std::cout << "[TE] Batched " << gv1->name_hint << " " << gv2->name_hint << std::endl;
+            batched_prim_funcs.Set(gv1, gv2);
+          }
         }
       }
     }
+
+    mod = WithAttr(std::move(mod), "batched_prim_funcs", batched_prim_funcs);
 
     // Extract lowered dynamic shape functions from the shape cache
     for (const auto& it : shape_func_cache_) {
@@ -306,11 +327,18 @@ class TECompilerImpl : public TECompilerNode {
     // Enforce use the target.
     With<Target> target_scope(key->target);
 
+    bool batched_execution =
+        PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
     ICHECK(!value->cached_func.defined());
-    value->cached_func = PrimFuncFor(key->source_func, key->target, [&](std::string name) {
-      auto mangled = mangle_fn(name);
-      return GetUniqueName(mangled, &name_map_);
-    });
+    auto lowered_cached_funcs = PrimFuncFor(
+        key->source_func, key->target,
+        [&](std::string name) {
+          auto mangled = mangle_fn(name);
+          return GetUniqueName(mangled, &name_map_);
+        },
+        batched_execution);
+    value->cached_func = lowered_cached_funcs.first;
+    value->batched_cached_func = lowered_cached_funcs.second;
 
     if (value->cached_func->prim_func.defined()) {
       VLOG(1) << "already have PrimFunc";
@@ -318,27 +346,36 @@ class TECompilerImpl : public TECompilerNode {
                                      value->cached_func->prim_func.value());
     } else {
       // NOTE: array will copy on write.
-      Array<te::Tensor> all_args = Array<te::Tensor>(value->cached_func->inputs);
-      for (te::Tensor arg : value->cached_func->outputs) {
-        all_args.push_back(arg);
+      auto lower_scheduled_function = [](const CachedFunc& cached_func, bool batched) {
+        Array<te::Tensor> all_args = Array<te::Tensor>(cached_func->inputs);
+        for (te::Tensor arg : cached_func->outputs) {
+          all_args.push_back(arg);
+        }
+        // lower the function
+        std::unordered_map<te::Tensor, tir::Buffer> binds;
+        auto func_name = cached_func->prim_fn_var->name_hint;
+        VLOG(1) << "scheduling";
+        IRModule scheduled_module =
+            tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds);
+        // Unfortunately the above machinery creates its own GlobalVars instead of using *the*
+        // GlobalVar we established above. Fix this before the confusion spreads any further.
+        // TODO(mbs): LowerSchedule should be given prim_fn_gvar instead of func_name.
+        for (const auto& kv : scheduled_module->functions) {
+          GlobalVar global_var = kv.first->name_hint == cached_func->prim_fn_var->name_hint
+                                     ? cached_func->prim_fn_var
+                                     : kv.first;
+          // if (batched) {
+          // std::cout << "[TE] BatchedFn " << kv.second << std::endl;
+          // }
+          cached_func->funcs->Add(global_var, kv.second);
+        }
+        ICHECK(cached_func->funcs->Lookup(cached_func->prim_fn_var).as<tir::PrimFuncNode>());
+      };
+
+      lower_scheduled_function(value->cached_func, false);
+      if (value->batched_cached_func.defined()) {
+        lower_scheduled_function(value->batched_cached_func, true);
       }
-      // lower the function
-      std::unordered_map<te::Tensor, tir::Buffer> binds;
-      auto func_name = value->cached_func->prim_fn_var->name_hint;
-      VLOG(1) << "scheduling";
-      IRModule scheduled_module =
-          tvm::LowerSchedule(value->cached_func->schedule, all_args, func_name, binds);
-      // Unfortunately the above machinery creates its own GlobalVars instead of using *the*
-      // GlobalVar we established above. Fix this before the confusion spreads any further.
-      // TODO(mbs): LowerSchedule should be given prim_fn_gvar instead of func_name.
-      for (const auto& kv : scheduled_module->functions) {
-        GlobalVar global_var = kv.first->name_hint == value->cached_func->prim_fn_var->name_hint
-                                   ? value->cached_func->prim_fn_var
-                                   : kv.first;
-        value->cached_func->funcs->Add(global_var, kv.second);
-      }
-      ICHECK(value->cached_func->funcs->Lookup(value->cached_func->prim_fn_var)
-                 .as<tir::PrimFuncNode>());
     }
     VLOG(1) << "lowered to name:" << std::endl
             << PrettyPrint(value->cached_func->prim_fn_var) << std::endl
@@ -1080,6 +1117,11 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
     }
     updated_module->Add(kv.first, kv.second);
   }
+  updated_module = WithAttr(
+      std::move(updated_module), "batched_prim_funcs",
+      lowered_module
+          ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
+          .value());
 
   // Invoke external codegen for all Functions in the cache tagged with "Compiler", and
   // annotate the module with the resulting runtime modules.

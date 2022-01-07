@@ -439,6 +439,17 @@ class Array : public ObjectRef {
   }
 
   /*!
+   * \brief push items from another array into this one.
+   * \param item The array to be appended.
+   */
+  void push_back_all(const Array<T>& items) {
+    ArrayNode* p = CopyOnWrite(1);
+    for (const auto& item : items) {
+      p->EmplaceInit(p->size_++, item);
+    }
+  }
+
+  /*!
    * \brief Insert an element into the given position
    * \param position An iterator pointing to the insertion point
    * \param val The element to insert

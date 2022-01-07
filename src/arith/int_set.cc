@@ -453,6 +453,16 @@ class IntervalSetEvaluator : public ExprFunctor<IntervalSet(const PrimExpr&)> {
     return IntervalSet(min_value, max_value);
   }
 
+  IntervalSet VisitExpr_(const ProducerLoadNode* op) final {
+    if (op->indices.size() == 0) {
+      // Handle a scalar tensor load like a variable
+      return IntervalSet::SinglePoint(GetRef<PrimExpr>(op));
+    } else {
+      DLOG(WARNING) << "cannot evaluate set type " << op->GetTypeKey();
+      return IntervalSet::Everything();
+    }
+  }
+
   IntervalSet VisitExprDefault_(const Object* op) final {
     DLOG(WARNING) << "cannot evaluate set type " << op->GetTypeKey();
     return IntervalSet::Everything();

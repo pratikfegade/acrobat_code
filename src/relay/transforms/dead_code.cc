@@ -567,6 +567,15 @@ Pass DeadCodeElimination(bool inline_once, bool ignore_impurity) {
       }
     }
 
+    auto batched_prim_funcs =
+        result
+            ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
+            .value();
+    for (auto it : batched_prim_funcs) {
+      std::cout << "[DC] Batched " << it.first->name_hint << " " << it.second->name_hint
+                << std::endl;
+    }
+
     return result;
   };
   return tvm::transform::CreateModulePass(pass_func, /*opt_level=*/1, "DeadCodeElimination",
