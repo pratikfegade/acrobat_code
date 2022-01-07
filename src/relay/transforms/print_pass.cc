@@ -47,10 +47,12 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
       for (auto kv : m->functions) {
         if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
           if (!clean_up_prim_funcs) {
-            std::cout << kv.first << ": " << kv.second << std::endl;
+            // std::cout << kv.first << ": " << kv.second << std::endl;
+            std::cout << kv.first << std::endl;
           }
         } else {
-          std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+          // std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+          std::cout << kv.first << std::endl;
         }
       }
     } else {

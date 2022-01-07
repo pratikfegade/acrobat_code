@@ -62,8 +62,8 @@ void ModuleNode::Import(Module other) {
 }
 
 PackedFunc ModuleNode::GetFunction(const std::string& name, bool query_imports) {
-  if (name == "vm_mod_fused_zeros") {
-    std::cout << "Loading in VM" << std::endl;
+  if (name == "vm_mod_fused_layout_transform_batched") {
+    std::cout << "Loading in VM " << name << std::endl;
   }
   ModuleNode* self = this;
   PackedFunc pf = self->GetFunction(name, GetObjectPtr<Object>(this));

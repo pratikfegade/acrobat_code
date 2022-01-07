@@ -63,11 +63,11 @@ def convert(args):
 
 class VMExecutionOptions(Object):
     @staticmethod
-    def create(lazy_execution=False):
-        return _ffi_api.CreateVMExecutionOptions(lazy_execution)
+    def create(lazy_execution=False, batched_execution=False):
+        return _ffi_api.CreateVMExecutionOptions(lazy_execution, batched_execution)
 
-def create_vm_execution_options(lazy_execution=False):
-    return VMExecutionOptions.create(lazy_execution)
+def create_vm_execution_options(lazy_execution=False, batched_execution=False):
+    return VMExecutionOptions.create(lazy_execution, batched_execution)
 
 class Executable(object):
     """Relay VM executable"""

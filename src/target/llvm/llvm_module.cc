@@ -92,6 +92,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
 
     std::lock_guard<std::mutex> lock(mutex_);
 
+    // std::cout << "[LLVMMOD] " << name << std::endl;
     TVMBackendPackedCFunc faddr;
     if (name == runtime::symbol::tvm_module_main) {
       const char* entry_name =

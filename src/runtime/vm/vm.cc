@@ -47,12 +47,13 @@ namespace vm {
 TVM_REGISTER_OBJECT_TYPE(VMClosureObj);
 TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
 
-VMExecutionOptions::VMExecutionOptions(bool lazy_execution)
-    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution)) {}
+VMExecutionOptions::VMExecutionOptions(bool lazy_execution, bool batched_execution)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution, batched_execution)) {}
 
-TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions").set_body_typed([](bool lazy_execution) {
-  return VMExecutionOptions(lazy_execution);
-});
+TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions")
+    .set_body_typed([](bool lazy_execution, bool batched_execution) {
+      return VMExecutionOptions(lazy_execution, batched_execution);
+    });
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
   auto ptr = make_object<VMClosureObj>();
@@ -352,6 +353,13 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
     std::cout << "[VM] Executing eagerly" << std::endl;
   }
   this->lazy_execution_ = options->lazy_execution;
+
+  if (options->batched_execution) {
+    std::cout << "[VM] Executing batched" << std::endl;
+  } else {
+    std::cout << "[VM] Executing unbatched" << std::endl;
+  }
+  this->batched_execution_ = options->batched_execution;
 }
 
 void VirtualMachine::LoadExecutable(Executable* exec) {
@@ -372,6 +380,9 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     if (packed_funcs_.size() <= packed_index) {
       packed_funcs_.resize(packed_index + 1);
     }
+    if (packed_name == "vm_mod_fused_zeros_batched") {
+      std::cout << " " << std::endl;
+    }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
 
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
@@ -379,10 +390,18 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
 
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
-    PackedFunc pf_copy(pf.body());
-    ICHECK(pf_copy.body());
-    registry.set_body(pf_copy);
-    ICHECK(Registry::Get(packed_name)->body());
+    registry.set_body(pf);
+
+    // if (batched_execution_) {
+    //   auto bit = exec_->primitive_map.find(packed_name + "_batched");
+    //   if (bit != exec_->primitive_map.end()) {
+    //     if (batched_funcs_.size() <= packed_index) {
+    //       batched_funcs_.resize(packed_index + 1);
+    //     }
+    //     batched_funcs_[packed_index] = bit->second;
+    //     std::cout << "[VM] Found batched version: " << packed_name << std::endl;
+    //   }
+    // }
   }
 
   // for (const auto& it : exec_->primitive_map) {

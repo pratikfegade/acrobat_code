@@ -49,9 +49,12 @@ class VMExecutionOptionsNode : public Object {
  public:
   /*! \brief whether to execute tensor operations lazily */
   bool lazy_execution;
+  /*! \brief whether to execute tensor operations in a batched manner */
+  bool batched_execution;
 
   VMExecutionOptionsNode() {}
-  VMExecutionOptionsNode(bool lazy_execution_) : lazy_execution(lazy_execution_) {}
+  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_)
+      : lazy_execution(lazy_execution_), batched_execution(batched_execution_) {}
 
   static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
   static constexpr const char* _type_key = "VMExecutionOptions";
@@ -65,7 +68,7 @@ class VMExecutionOptions : public ObjectRef {
    * \brief constructor
    * \param lazy_execution whether to execute tensor operations lazily.
    */
-  TVM_DLL VMExecutionOptions(bool lazy_execution);
+  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution);
   // declare VMExecutionOptions.
   TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
 };
@@ -358,6 +361,14 @@ class VirtualMachine : public runtime::ModuleNode {
    * \brief Whether to execute tensor ops lazily.
    */
   bool lazy_execution_ = true;
+  /*!
+   * \brief Whether to execute tensor ops in a batched manner.
+   */
+  bool batched_execution_ = true;
+  /*!
+   * \brief A mapping from packed_funcs to there batched counterparts.
+   */
+  std::vector<Index> batched_funcs_;
 };
 
 }  // namespace vm

@@ -455,7 +455,7 @@ TVM_DLL Pass Inline();
  *
  * \return The pass.
  */
-TVM_DLL Pass RemoveUnusedFunctions(Array<runtime::String> entry_functions);
+TVM_DLL Pass RemoveUnusedFunctions(Array<runtime::String> entry_functions, bool batched_exection);
 
 /*!
  * \brief Simplify the Relay expression.

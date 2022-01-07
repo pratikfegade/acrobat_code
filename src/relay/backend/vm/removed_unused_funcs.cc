@@ -52,10 +52,30 @@ struct CallTracer : ExprVisitor {
   // Record the expressions that are being visited
   std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> visiting_;
 
-  explicit CallTracer(const IRModule& module) : module_{module}, called_funcs_{}, visiting_{} {}
+  // Whether or not to handle batched versions of PrimFuncs
+  bool batched_execution_;
+
+  explicit CallTracer(const IRModule& module, bool batched_exection)
+      : module_{module}, called_funcs_{}, visiting_{}, batched_execution_(batched_exection) {}
+
+  void HandleBatchedPrimFunc(const GlobalVarNode* gvn) {
+    if (batched_execution_) {
+      auto batched_funcs = module_
+                               ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs",
+                                                                    Map<GlobalVar, GlobalVar>())
+                               .value();
+      auto iit = batched_funcs.find(GetRef<GlobalVar>(gvn));
+      if (iit != batched_funcs.end()) {
+        std::cout << "[RUF] Also considering abtched function " << (*iit).second->name_hint
+                  << std::endl;
+        called_funcs_.insert((*iit).second->name_hint);
+      }
+    }
+  }
 
   void VisitExpr_(const GlobalVarNode* op) final {
     called_funcs_.insert(op->name_hint);
+    HandleBatchedPrimFunc(op);
     auto func = module_->Lookup(op->name_hint);
     if (const auto* function_node = func.as<FunctionNode>()) {
       VisitExpr(GetRef<Function>(function_node));
@@ -101,10 +121,11 @@ struct CallTracer : ExprVisitor {
  *
  * \return The module with dead functions removed.
  */
-IRModule RemoveUnusedFunctions(const IRModule& module, Array<runtime::String> entry_funcs) {
+IRModule RemoveUnusedFunctions(const IRModule& module, Array<runtime::String> entry_funcs,
+                               bool batched_execution) {
   std::unordered_set<std::string> called_funcs{};
   for (auto entry : entry_funcs) {
-    auto funcs = CallTracer(module).Trace(entry);
+    auto funcs = CallTracer(module, batched_execution).Trace(entry);
     called_funcs.insert(funcs.cbegin(), funcs.cend());
   }
   auto existing_functions = module->functions;
@@ -121,10 +142,10 @@ IRModule RemoveUnusedFunctions(const IRModule& module, Array<runtime::String> en
 
 namespace transform {
 
-Pass RemoveUnusedFunctions(Array<runtime::String> entry_functions) {
+Pass RemoveUnusedFunctions(Array<runtime::String> entry_functions, bool batched_exection) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule m,
                                                                             PassContext pc) {
-    return relay::vm::RemoveUnusedFunctions(m, entry_functions);
+    return relay::vm::RemoveUnusedFunctions(m, entry_functions, batched_exection);
   };
   return CreateModulePass(pass_func, 1, "RemoveUnusedFunctions", {});
 }

@@ -70,9 +70,6 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   auto batched_prim_funcs =
       module->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
           .value();
-  for (auto it : batched_prim_funcs) {
-    std::cout << "[CG] Batched " << it.first->name_hint << " " << it.second->name_hint << std::endl;
-  }
   PostOrderVisit(func, [&](const Expr& expr) {
     // TODO(mbs): Cleanup shapes functions.
     if (const auto* call_node = expr.as<CallNode>()) {

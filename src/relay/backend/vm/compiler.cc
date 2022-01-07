@@ -259,12 +259,13 @@ class TIRCalleeCollector : public tir::StmtExprVisitor {
 
 class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
  public:
-  VMFunctionCompiler(VMCompilerContext* context, SEScope host_se_scope)
+  VMFunctionCompiler(VMCompilerContext* context, SEScope host_se_scope, bool batched_execution)
       : DeviceAwareExprFunctor(context->module),
         last_register_(0),
         registers_num_(0),
         context_(context),
-        host_se_scope_(std::move(host_se_scope)) {}
+        host_se_scope_(std::move(host_se_scope)),
+        batched_execution_(batched_execution) {}
 
   VMFunction Compile(const GlobalVar& var, const Function& func) {
     std::vector<Index> param_device_indexes;
@@ -510,6 +511,25 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     this->last_register_ = merge_register;
   }
 
+  Index AddPrimFuncToContext(const std::string& name, const DictAttrs& attrs) {
+    // std::cout << "[CO] Contexting " << name << std::endl;
+    Index op_index;
+    auto itr = context_->primitive_map.find(name);
+    if (itr == context_->primitive_map.end()) {
+      op_index = context_->primitive_map.size();
+      context_->primitive_map.emplace(name, op_index);
+    } else {
+      op_index = itr->second;
+    }
+    // Capture the dictionary of attributes from the original
+    // primitive function so that they can contribute to the hash of
+    // the compiled primitive. This way we can distinguish primitives
+    // with the same body expression but different attributes which
+    // may arbitrarily influence code generation.
+    op_attrs[op_index] = attrs->dict;
+    return op_index;
+  }
+
   void CollectAndRegisterTIRCallees(const Expr& func_var, const DictAttrs& attrs) {
     ICHECK(func_var.as<GlobalVarNode>()) << "Expecting function in invoke_tvm_op to be a global";
     auto global_var = Downcast<GlobalVar>(func_var);
@@ -517,20 +537,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     ICHECK(func.as<tir::PrimFuncNode>()) << "Can only invoke PrimFuncs from TIR";
     auto callees = TIRCalleeCollector().Collect(Downcast<tir::PrimFunc>(func));
     for (auto callee_name : callees) {
-      Index op_index;
-      auto itr = context_->primitive_map.find(callee_name);
-      if (itr == context_->primitive_map.end()) {
-        op_index = context_->primitive_map.size();
-        context_->primitive_map.emplace(callee_name, op_index);
-      } else {
-        op_index = itr->second;
+      AddPrimFuncToContext(callee_name, attrs);
+      if (batched_execution_) {
+        AddPrimFuncToContext(callee_name + "_batched", attrs);
       }
-
-      // Capture the dictionary of attributes from the original primitive function so that they
-      // can contribute to the hash of the compiled primitive. This way we can distinguish
-      // primitives with the same body expression but different attributes which may arbitrarily
-      // influence code generation.
-      op_attrs[op_index] = attrs->dict;
     }
   }
 
@@ -563,21 +573,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       argument_registers.push_back(reg->second);
     }
 
-    Index op_index;
-    auto itr = context_->primitive_map.find(global_var_node->name_hint);
-    if (itr == context_->primitive_map.end()) {
-      op_index = context_->primitive_map.size();
-      context_->primitive_map.emplace(global_var_node->name_hint, op_index);
-    } else {
-      op_index = itr->second;
+    auto op_index = AddPrimFuncToContext(global_var_node->name_hint, attrs);
+    if (batched_execution_) {
+      AddPrimFuncToContext(global_var_node->name_hint + "_batched", attrs);
     }
-
-    // Capture the dictionary of attributes from the original primitive function so that they
-    // can contribute to the hash of the compiled primitive. This way we can distinguish primitives
-    // with the same body expression but different attributes which may arbitrarily influence code
-    // generation.
-    // std::cout << "[CC] Attrs " << op_index << " " << attrs->dict << std::endl;
-    op_attrs[op_index] = attrs->dict;
 
     Emit(Instruction::InvokePacked(op_index, argument_registers.size(), output_tuple->fields.size(),
                                    argument_registers));
@@ -871,6 +870,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   VMCompilerContext* context_;
   /*! \brief SEScope for data and computation which must reside on a CPU. */
   SEScope host_se_scope_;
+  /*! \brief createc code for batched execution. */
+  bool batched_execution_;
 };
 
 PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
@@ -930,6 +931,11 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
 
   // Run the optimizations necessary to target the VM.
   context_.module = OptimizeModuleImpl(std::move(mod));
+
+  for (auto it : context_.module->functions) {
+    std::cout << "[CO] Lowering functions: " << it.first->name_hint << std::endl;
+  }
+
   // Build the map from global variables bound to Functions to a global index in the
   // VMFunction table.
   size_t num_functions = PopulateGlobalMap();
@@ -938,6 +944,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   // the global state.
   exec_->functions.resize(num_functions);
 
+  bool batched_execution =
+      PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -946,7 +954,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
         continue;
       }
       auto func = GetRef<Function>(n);
-      VMFunctionCompiler func_compiler(&context_, config_->host_se_scope);
+      VMFunctionCompiler func_compiler(&context_, config_->host_se_scope, batched_execution);
       auto vm_func = func_compiler.Compile(gvar, func);
 
       size_t func_index = context_.global_map.at(gvar);
@@ -986,6 +994,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
 
   // update primitive function map
   for (const auto& pair : context_.primitive_map) {
+    // std::cout << "[CO] PrimFunc " << pair.first << std::endl;
     exec_->primitive_map.insert(pair);
   }
 
@@ -1003,10 +1012,13 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
 }
 
 transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
+  bool batched_execution =
+      PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+
   Array<Pass> pass_seqs;
   // Remove unused functions
   Array<runtime::String> entry_functions{"main"};
-  pass_seqs.push_back(transform::RemoveUnusedFunctions(entry_functions));
+  pass_seqs.push_back(transform::RemoveUnusedFunctions(entry_functions, batched_execution));
   // Manifest the allocations.
   pass_seqs.push_back(transform::ManifestAlloc(host_se_scope));
 
@@ -1137,7 +1149,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1153,18 +1165,18 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // and we use these ops to invoke the symbols in the module generated by
   // external codegen.
   pass_seqs.push_back(transform::Inline());
+  pass_seqs.push_back(transform::PrintCurrentIR("Inline", true, false));
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
+  pass_seqs.push_back(transform::PrintCurrentIR("FoldConstant", true, false));
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", false, true));
-  // pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
   }
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
@@ -1219,6 +1231,12 @@ void VMCompiler::Codegen() {
     LOG(INFO) << "All lowered functions have been build by BYOC -- generating an empty TVM module";
     lib = codegen::CSourceModuleCreate(";", "", Array<String>{});
   } else {
+    for (auto it : per_tvm_target_modules) {
+      std::cout << "[CO] Target: " << it.first << std::endl;
+      for (auto iit : it.second->functions) {
+        std::cout << "[CO]   Function: " << iit.first->name_hint << std::endl;
+      }
+    }
     lib = tvm::build(per_tvm_target_modules, config_->host_target);
   }
 
