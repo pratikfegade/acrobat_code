@@ -124,7 +124,8 @@ class ThreadAllreduceBuilder final : public StmtExprMutator {
     if (it != store_remap_.end()) {
       ICHECK(is_zero(op->index));
       auto value = StmtExprMutator::VisitExpr(op->value);
-      return Store(it->second, value, 0, op->predicate);
+      return Store(it->second, value, 0, op->predicate, op->scatter_buffer_var,
+                   op->scatter_batch_index, op->scatter_elem_index);
     } else {
       return StmtExprMutator::VisitStmt_(op);
     }
@@ -622,7 +623,7 @@ Pass LowerThreadAllreduce() {
     auto reduce_body = thread_all_reduce(n->body);
     // std::cout << "[LTAR] Reduce body " << reduce_body << std::endl;
     n->body =
-      UpdatePointerStorageScopeAllReduce(thread_all_reduce.new_storage_scopes_)(reduce_body);
+        UpdatePointerStorageScopeAllReduce(thread_all_reduce.new_storage_scopes_)(reduce_body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerThreadAllreduce", {});

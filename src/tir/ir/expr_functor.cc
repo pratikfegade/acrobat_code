@@ -139,8 +139,8 @@ PrimExpr ExprMutator::VisitExpr_(const LoadNode* op) {
   PrimExpr scatter_elem_index = NullValue<PrimExpr>();
 
   if (op->scatter_elem_index.defined()) {
-    scatter_batch_index = this->VisitExpr(op->scatter_elem_index);
-    scatter_elem_index = this->VisitExpr(op->scatter_batch_index);
+    scatter_batch_index = this->VisitExpr(op->scatter_batch_index);
+    scatter_elem_index = this->VisitExpr(op->scatter_elem_index);
   }
 
   if (index.same_as(op->index) && predicate.same_as(op->predicate) &&
@@ -149,7 +149,7 @@ PrimExpr ExprMutator::VisitExpr_(const LoadNode* op) {
     return GetRef<PrimExpr>(op);
   } else {
     return Load(op->dtype, op->buffer_var, index, predicate, op->scatter_buffer_var,
-		op->scatter_batch_index, op->scatter_elem_index);
+                scatter_batch_index, scatter_elem_index);
   }
 }
 

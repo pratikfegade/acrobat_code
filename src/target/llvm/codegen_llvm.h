@@ -146,6 +146,11 @@ class CodeGenLLVM : public ExprFunctor<llvm::Value*(const PrimExpr&)>,
   llvm::Constant* ConstInt32(int64_t value) const {
     return llvm::ConstantInt::getSigned(t_int32_, value);
   }
+
+  // Helper to generate the first of the two accesses in the case of
+  // scatter/gather accesses
+  llvm::Value* LoadBufferPointer(const Var& buffer_var, const PrimExpr& batch_index,
+                                 const DataType& element_type);
   // override codegen
   llvm::Value* VisitExpr_(const VarNode* op) override;
   llvm::Value* VisitExpr_(const CastNode* op) override;

@@ -62,6 +62,11 @@ void StmtVisitor::VisitStmt_(const StoreNode* op) {
   this->VisitExpr(op->value);
   this->VisitExpr(op->index);
   this->VisitExpr(op->predicate);
+
+  if (op->scatter_batch_index.defined()) {
+    this->VisitExpr(op->scatter_batch_index);
+    this->VisitExpr(op->scatter_elem_index);
+  }
 }
 
 void StmtVisitor::VisitStmt_(const BufferStoreNode* op) {
@@ -342,13 +347,26 @@ Stmt StmtMutator::VisitStmt_(const StoreNode* op) {
   PrimExpr value = this->VisitExpr(op->value);
   PrimExpr index = this->VisitExpr(op->index);
   PrimExpr predicate = this->VisitExpr(op->predicate);
-  if (value.same_as(op->value) && index.same_as(op->index) && predicate.same_as(op->predicate)) {
+
+  PrimExpr scatter_batch_index = NullValue<PrimExpr>();
+  PrimExpr scatter_elem_index = NullValue<PrimExpr>();
+
+  if (op->scatter_elem_index.defined()) {
+    scatter_batch_index = this->VisitExpr(op->scatter_batch_index);
+    scatter_elem_index = this->VisitExpr(op->scatter_elem_index);
+  }
+
+  if (value.same_as(op->value) && index.same_as(op->index) && predicate.same_as(op->predicate) &&
+      scatter_batch_index.same_as(op->scatter_batch_index) &&
+      scatter_elem_index.same_as(op->scatter_elem_index)) {
     return GetRef<Stmt>(op);
   } else {
     auto n = CopyOnWrite(op);
     n->value = std::move(value);
     n->index = std::move(index);
     n->predicate = std::move(predicate);
+    n->scatter_batch_index = std::move(scatter_batch_index);
+    n->scatter_elem_index = std::move(scatter_elem_index);
     return Stmt(n);
   }
 }
@@ -648,7 +666,9 @@ class IRSubstitute : public StmtExprMutator {
     PrimExpr ret = StmtExprMutator::VisitExpr_(op);
     op = ret.as<LoadNode>();
     if (auto mapped_var = vmap_(op->buffer_var)) {
-      return Load(op->dtype, Downcast<Var>(mapped_var.value()), op->index, op->predicate);
+      return Load(op->dtype, Downcast<Var>(mapped_var.value()), op->index, op->predicate,
+                  op->scatter_buffer_var, op->scatter_batch_index, op->scatter_elem_index,
+                  op->span);
     } else {
       return ret;
     }

@@ -298,7 +298,7 @@ class DynamicSharedMemoryRewriter : public StmtExprMutator {
       PrimExpr offset = GetBufferOffset(op->buffer_var, op->dtype);
       PrimExpr index = StmtExprMutator::VisitExpr(op->index);
       return Load(op->dtype, merged_buf_var_, offset + index, op->predicate, op->scatter_buffer_var,
-		  op->scatter_batch_index, op->scatter_elem_index, op->span);
+                  op->scatter_batch_index, op->scatter_elem_index, op->span);
     }
     return StmtExprMutator::VisitExpr_(op);
   }
@@ -308,7 +308,8 @@ class DynamicSharedMemoryRewriter : public StmtExprMutator {
       PrimExpr offset = GetBufferOffset(op->buffer_var, op->value->dtype);
       PrimExpr index = StmtExprMutator::VisitExpr(op->index);
       PrimExpr value = StmtExprMutator::VisitExpr(op->value);
-      return Store(merged_buf_var_, value, offset + index, op->predicate, op->span);
+      return Store(merged_buf_var_, value, offset + index, op->predicate, op->scatter_buffer_var,
+                   op->scatter_batch_index, op->scatter_elem_index, op->span);
     }
     return StmtExprMutator::VisitStmt_(op);
   }

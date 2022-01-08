@@ -24,8 +24,8 @@
 #ifndef TVM_TIR_BUFFER_H_
 #define TVM_TIR_BUFFER_H_
 
-#include <tvm/ir/expr.h>
 #include <tvm/ir/attrs.h>
+#include <tvm/ir/expr.h>
 #include <tvm/runtime/container/array.h>
 #include <tvm/runtime/container/string.h>
 #include <tvm/tir/var.h>
@@ -179,13 +179,15 @@ class Buffer : public ObjectRef {
    * \param begin The beginning index
    * \param dtype The data type to be loaded.
    */
-  TVM_DLL PrimExpr vload(Array<PrimExpr> begin, DataType dtype, Buffer scatter_buffer = NullValue<Buffer>()) const;
+  TVM_DLL PrimExpr vload(Array<PrimExpr> begin, DataType dtype,
+                         Buffer scatter_buffer = NullValue<Buffer>()) const;
   /*!
    * \brief Create a Stmt that does a vector store at begin index.
    * \param begin The beginning index
    * \param value The value to be stored.
    */
-  TVM_DLL Stmt vstore(Array<PrimExpr> begin, PrimExpr value) const;
+  TVM_DLL Stmt vstore(Array<PrimExpr> begin, PrimExpr value,
+                      Buffer scatter_buffer = NullValue<Buffer>()) const;
 
   /*!
    * \brief Return the storage scope associated with this buffer.

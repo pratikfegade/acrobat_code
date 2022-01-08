@@ -208,8 +208,15 @@ class DataTypeRewriter : public StmtExprMutator {
     PrimExpr value = this->VisitExpr(op->value);
     is_index_ = true;
     PrimExpr index = this->VisitExpr(op->index);
+    PrimExpr scatter_batch_index = NullValue<PrimExpr>();
+    PrimExpr scatter_elem_index = NullValue<PrimExpr>();
+    if (op->scatter_buffer_var.defined()) {
+      scatter_batch_index = this->VisitExpr(op->scatter_batch_index);
+      scatter_elem_index = this->VisitExpr(op->scatter_elem_index);
+    }
     is_index_ = false;
-    Stmt s = Store(op->buffer_var, op->value, index, op->predicate);
+    Stmt s = Store(op->buffer_var, op->value, index, op->predicate, op->scatter_buffer_var,
+                   scatter_batch_index, scatter_elem_index);
     return StmtExprMutator::VisitStmt_(s.as<StoreNode>());
   }
 
@@ -277,7 +284,7 @@ class DataTypeRewriter : public StmtExprMutator {
 
     is_index_ = false;
     PrimExpr e = Load(op->dtype, op->buffer_var, index, op->predicate, op->scatter_buffer_var,
-		      scatter_batch_index, scatter_elem_index);
+                      scatter_batch_index, scatter_elem_index);
     return StmtExprMutator::VisitExpr_(e.as<LoadNode>());
   }
 

@@ -754,7 +754,7 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
     const VarNode* scatter_buffer_var_ptr = nullptr;
     PrimExpr scatter_batch_index = op->scatter_batch_index;
     PrimExpr scatter_elem_index = op->scatter_elem_index;
-    if (op->scatter_buffer_var.defined()) {
+    if (has_scatter) {
       scatter_buffer_var_ptr = op->scatter_buffer_var.get();
     }
 
@@ -763,6 +763,7 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
     HandleVolatileLoads(ref, op, os);
   } else {
     ICHECK(is_one(op->predicate)) << "predicated vectorized load is not supported";
+    ICHECK(!has_scatter) << "scatter vectorized load is not supported";
 
     bool can_vector_load = false;
     arith::PVar<PrimExpr> base;
@@ -810,14 +811,27 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
 }
 
 void CodeGenC::VisitStmt_(const StoreNode* op) {
+  bool has_scatter = op->scatter_buffer_var.defined();
+  if (has_scatter) {
+    std::cout << "[CC] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
+  }
   DataType t = op->value.dtype();
   if (t.lanes() == 1) {
+    const VarNode* scatter_buffer_var_ptr = nullptr;
+    PrimExpr scatter_batch_index = op->scatter_batch_index;
+    PrimExpr scatter_elem_index = op->scatter_elem_index;
+    if (has_scatter) {
+      scatter_buffer_var_ptr = op->scatter_buffer_var.get();
+    }
+
     std::string value = this->PrintExpr(op->value);
-    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index, scatter_buffer_var_ptr,
+                                         scatter_batch_index, scatter_elem_index);
     this->PrintIndent();
     stream << ref << " = " << value << ";\n";
   } else {
     ICHECK(is_one(op->predicate)) << "Predicated store is not supported";
+    ICHECK(!has_scatter) << "scatter vectorized store is not supported";
     arith::PVar<PrimExpr> base;
 
     if (arith::ramp(base, 1, t.lanes()).Match(op->index)) {

@@ -1059,6 +1059,7 @@ void CodeGenLLVM::Scalarize(const PrimExpr& e, std::function<void(int i, llvm::V
 llvm::Value* CodeGenLLVM::VisitExpr_(const VarNode* op) { return GetVarValue(op); }
 
 llvm::Value* CodeGenLLVM::VisitExpr_(const CastNode* op) {
+  // std::cout << "[LLVM] Cast " << GetRef<PrimExpr>(op) << std::endl;
   return CreateCast(op->value.dtype(), op->dtype, MakeValue(op->value));
 }
 llvm::Value* CodeGenLLVM::VisitExpr_(const IntImmNode* op) {
@@ -1206,16 +1207,37 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const LetNode* op) {
   return MakeValue(op->body);
 }
 
+llvm::Value* CodeGenLLVM::LoadBufferPointer(const Var& buffer_var, const PrimExpr& batch_index,
+                                            const DataType& element_type) {
+  llvm::Value* buffer = MakeValue(buffer_var);
+  llvm::Value* index = MakeValue(batch_index);
+
+  auto element_llvm_type = DTypeToLLVMType(element_type);
+  // TODO(ppf): Corrent address space
+  auto loaded_llvm_type = element_llvm_type->getPointerTo(GetGlobalAddressSpace());
+
+  auto ptr = builder_->CreateInBoundsGEP(loaded_llvm_type, buffer, index);
+
+  std::cout << "[LLVM]  Value " << buffer_var.dtype() << std::endl;
+  return builder_->CreateAlignedLoad(loaded_llvm_type, ptr, llvm::Align(1), false);
+}
+
 llvm::Value* CodeGenLLVM::VisitExpr_(const LoadNode* op) {
   bool has_scatter = op->scatter_buffer_var.defined();
-  if (has_scatter) {
-    std::cout << "[LLVM] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
-  }
 
   DataType t = op->dtype;
   bool is_volatile = volatile_buf_.count(op->buffer_var.get());
-  llvm::Value* buffer = MakeValue(op->buffer_var);
-  llvm::Value* index = MakeValue(op->index);
+  llvm::Value* buffer = nullptr;
+  llvm::Value* index = nullptr;
+
+  if (has_scatter) {
+    std::cout << "[LLVM] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+    buffer = LoadBufferPointer(op->scatter_buffer_var, op->scatter_batch_index, t);
+    index = MakeValue(op->scatter_elem_index);
+  } else {
+    buffer = MakeValue(op->buffer_var);
+    index = MakeValue(op->index);
+  }
 
   if (t.lanes() == 1) {
     int alignment, native_bits;

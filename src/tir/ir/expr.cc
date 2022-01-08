@@ -628,8 +628,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     });
 
 // Load
-Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, Var scatter_buffer_var,
-	     PrimExpr scatter_batch_index, PrimExpr scatter_elem_index, Span span) {
+Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate,
+           Var scatter_buffer_var, PrimExpr scatter_batch_index, PrimExpr scatter_elem_index,
+           Span span) {
   ICHECK(buffer_var.defined());
   ICHECK(predicate.defined());
   ICHECK(index.defined());
@@ -688,14 +689,14 @@ Load::Load(DataType dtype, Var buffer_var, PrimExpr index, PrimExpr predicate, V
 TVM_REGISTER_GLOBAL("tir.Load").set_body([](TVMArgs args, TVMRetValue* ret) {
   DataType t = args[0];
   if (args.size() == 3) {
-    *ret = Load(t, args[1], args[2], const_true(t.lanes()), NullValue<Var>(),
-		NullValue<PrimExpr>(), NullValue<PrimExpr>(), Span());
+    *ret = Load(t, args[1], args[2], const_true(t.lanes()), NullValue<Var>(), NullValue<PrimExpr>(),
+                NullValue<PrimExpr>(), Span());
   } else if (args.size() == 4) {
-    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(),
-		NullValue<PrimExpr>(), NullValue<PrimExpr>(), Span());
+    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(), NullValue<PrimExpr>(),
+                NullValue<PrimExpr>(), Span());
   } else {
-    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(),
-		NullValue<PrimExpr>(), NullValue<PrimExpr>(), args[4]);
+    *ret = Load(t, args[1], args[2], args[3], NullValue<Var>(), NullValue<PrimExpr>(),
+                NullValue<PrimExpr>(), args[4]);
   }
 });
 
@@ -704,12 +705,9 @@ TVM_REGISTER_NODE_TYPE(LoadNode);
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<LoadNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const LoadNode*>(node.get());
-      if (op->buffer_var->name_hint == "I_2") {
-	std::cout << "Where did you come from?" << std::endl;
-      }
       p->stream << op->buffer_var;
       if (op->scatter_buffer_var.defined()) {
-	p->stream << "(S)";
+        p->stream << "(" << op->scatter_batch_index << ", " << op->scatter_elem_index << ")";
       }
       p->stream << "[";
       p->Print(op->index);

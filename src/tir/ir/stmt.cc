@@ -240,7 +240,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     });
 
 // Store
-Store::Store(Var buffer_var, PrimExpr value, PrimExpr index, PrimExpr predicate, Span span) {
+Store::Store(Var buffer_var, PrimExpr value, PrimExpr index, PrimExpr predicate,
+             Var scatter_buffer_var, PrimExpr scatter_batch_index, PrimExpr scatter_elem_index,
+             Span span) {
   ICHECK(value.defined());
   ICHECK(index.defined());
   ICHECK(predicate.defined());
@@ -272,6 +274,9 @@ Store::Store(Var buffer_var, PrimExpr value, PrimExpr index, PrimExpr predicate,
   node->buffer_var = std::move(buffer_var);
   node->value = std::move(value);
   node->index = std::move(index);
+  node->scatter_buffer_var = std::move(scatter_buffer_var);
+  node->scatter_batch_index = std::move(scatter_batch_index);
+  node->scatter_elem_index = std::move(scatter_elem_index);
   node->predicate = std::move(predicate);
   node->span = std::move(span);
   data_ = std::move(node);
@@ -280,11 +285,14 @@ Store::Store(Var buffer_var, PrimExpr value, PrimExpr index, PrimExpr predicate,
 TVM_REGISTER_GLOBAL("tir.Store").set_body([](TVMArgs args, TVMRetValue* ret) {
   PrimExpr value = args[1];
   if (args.size() == 3) {
-    *ret = Store(args[0], value, args[2], const_true(value.dtype().lanes()), Span());
+    *ret = Store(args[0], value, args[2], const_true(value.dtype().lanes()), NullValue<Var>(),
+                 NullValue<PrimExpr>(), NullValue<PrimExpr>(), Span());
   } else if (args.size() == 4) {
-    *ret = Store(args[0], value, args[2], args[3], Span());
+    *ret = Store(args[0], value, args[2], args[3], NullValue<Var>(), NullValue<PrimExpr>(),
+                 NullValue<PrimExpr>(), Span());
   } else {
-    *ret = Store(args[0], value, args[2], args[3], args[4]);
+    *ret = Store(args[0], value, args[2], args[3], NullValue<Var>(), NullValue<PrimExpr>(),
+                 NullValue<PrimExpr>(), args[4]);
   }
 });
 
@@ -294,7 +302,11 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<StoreNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const StoreNode*>(node.get());
       p->PrintIndent();
-      p->stream << op->buffer_var << "[";
+      p->stream << op->buffer_var;
+      if (op->scatter_buffer_var.defined()) {
+        p->stream << "(S)";
+      }
+      p->stream << "[";
       p->Print(op->index);
       p->stream << "] = ";
       p->Print(op->value);

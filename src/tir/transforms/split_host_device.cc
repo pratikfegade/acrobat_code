@@ -107,7 +107,11 @@ class VarUseDefAnalysis : public StmtExprMutator {
   }
 
   Stmt VisitStmt_(const StoreNode* op) final {
-    this->HandleUse(op->buffer_var);
+    if (op->scatter_buffer_var.defined()) {
+      this->HandleUse(op->scatter_buffer_var);
+    } else {
+      this->HandleUse(op->buffer_var);
+    }
     return StmtExprMutator::VisitStmt_(op);
   }
 

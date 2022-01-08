@@ -1085,18 +1085,20 @@ class StorageFlattener : public StmtExprMutator {
       bound_analyzer(func->body);
 
       auto fptr = func.CopyOnWrite();
-      fptr->body = StorageFlattener(fptr->buffer_map, fptr->scatter_buffer_map, cache_line_size,
-				    create_bound_attributes, &bound_analyzer)(std::move(fptr->body));
+      fptr->body =
+          StorageFlattener(fptr->buffer_map, fptr->scatter_buffer_map, cache_line_size,
+                           create_bound_attributes, &bound_analyzer)(std::move(fptr->body));
       return func;
     };
     return transform::CreatePrimFuncPass(pass_func, 0, "tir.StorageFlattener", {});
   }
 
   explicit StorageFlattener(const Map<Var, Buffer>& extern_buffer_map,
-			    const Map<Var, Buffer>& scatter_buffer_map, int cache_line_size,
+                            const Map<Var, Buffer>& scatter_buffer_map, int cache_line_size,
                             bool create_bound_attributes, IRVisitorWithAnalyzer* bound_analyzer)
-    : bound_analyzer_(bound_analyzer), create_bound_attributes_(create_bound_attributes),
-      scatter_buffer_map_(scatter_buffer_map) {
+      : bound_analyzer_(bound_analyzer),
+        create_bound_attributes_(create_bound_attributes),
+        scatter_buffer_map_(scatter_buffer_map) {
     for (auto kv : extern_buffer_map) {
       BufferEntry e;
       e.buffer = kv.second;
@@ -1153,7 +1155,12 @@ class StorageFlattener : public StmtExprMutator {
     const BufferEntry& e = it->second;
     ICHECK(e.in_scope) << "Cannot write to " << op->buffer << ", out of scope.";
 
-    Stmt body = e.buffer.vstore(op->indices, op->value);
+    Buffer scatter_buffer;
+    if (scatter_buffer_map_.count(key->data)) {
+      scatter_buffer = scatter_buffer_map_.at(key->data);
+    }
+
+    Stmt body = e.buffer.vstore(op->indices, op->value, scatter_buffer);
     if (create_bound_attributes_ && ShapeIsValid(e.buffer->shape)) {
       shape_collector_.push_back(std::make_pair(e.buffer->data, e.buffer->shape));
     }
@@ -1271,13 +1278,11 @@ class StorageFlattener : public StmtExprMutator {
   PrimExpr VisitExpr_(const BufferLoadNode* op) final {
     PrimExpr expr = StmtExprMutator::VisitExpr_(op);
     op = expr.as<BufferLoadNode>();
-    // std::cout << "[SF] Lowering " << GetRef<PrimExpr>(op) << std::endl;
 
     const auto& key = op->buffer;
 
     Buffer scatter_buffer;
     if (scatter_buffer_map_.count(key->data)) {
-      // std::cout << "[SF]  Has a scatter mapping " << scatter_buffer_map_.count(key->data) << std::endl;
       scatter_buffer = scatter_buffer_map_.at(key->data);
     }
 
@@ -1494,7 +1499,7 @@ class AssertSimplifier : public StmtMutator {
 //
 // We do support a few relaxed case, such as binding a
 // region with shape [1, 1, n, m] to buffer with shape [n, m]
-  PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_attributes) {
+PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_attributes) {
   // Only apply this pass to TIR from TE schedules.  Because this is a
   // per-function attribute, we can't just check it once for the
   // entire module and apply the Sequential transform.
@@ -1524,7 +1529,7 @@ class AssertSimplifier : public StmtMutator {
 namespace transform {
 
 // TODO(tvm-team): consolidate configs to the PassContext
-  Pass StorageFlatten(int cache_line_size, bool create_bound_attributes) {
+Pass StorageFlatten(int cache_line_size, bool create_bound_attributes) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     return StorageFlatten(std::move(f), cache_line_size, create_bound_attributes);
   };

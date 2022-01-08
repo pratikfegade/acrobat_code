@@ -41,8 +41,9 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
   using IRMutatorWithAnalyzer::VisitStmt_;
   using FLowerGeneral = runtime::TypedPackedFunc<PrimExpr(PrimExpr)>;
 
-  IntrinInjecter(arith::Analyzer* analyzer, std::string target, std::string mtriple = "")
-      : IRMutatorWithAnalyzer(analyzer) {
+  IntrinInjecter(arith::Analyzer* analyzer, std::string target, std::string mtriple = "",
+                 bool print = false)
+      : IRMutatorWithAnalyzer(analyzer), print_(print) {
     std::vector<std::string> patterns;
     patterns.push_back(target + ".FLowerIntrinsic");
     patterns.push_back(target + ".FLegalize");
@@ -54,13 +55,14 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
     patterns.push_back("default.FLowerIntrinsic");
     patterns.push_back("default.FLegalize");
 
-    for (const std::string& pattern : patterns)
+    for (const std::string& pattern : patterns) {
       if (Op::HasAttrMap(pattern)) {
         attr_maps_.push_back(Op::GetAttrMap<FLowerGeneral>(pattern));
         if (fma_ == nullptr) {
           fma_ = (*attr_maps_.rbegin()).get(Op::Get("tir.fma"), nullptr);
         }
       }
+    }
   }
 
   PrimExpr VisitExpr_(const CallNode* op) final {
@@ -148,8 +150,15 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
 
   PrimExpr VisitExpr_(const FloorModNode* op) final {
     PrimExpr ret = IRMutatorWithAnalyzer::VisitExpr_(op);
+    if (print_) {
+      std::cout << "[LOWER]   Visit " << GetRef<PrimExpr>(op) << " " << op << " " << ret
+                << std::endl;
+    }
     op = ret.as<FloorModNode>();
-    if (op == nullptr) return ret;
+    if (op == nullptr) {
+      if (print_) std::cout << "[LOWER]    Ret1" << std::endl;
+      return ret;
+    }
     // Lower floordiv to native truncdiv.
     int shift;
     const DataType& dtype = op->dtype;
@@ -158,12 +167,17 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
     if (support_bitwise_op_ && is_const_power_of_two_integer(op->b, &shift)) {
       // lower to masking if possible.
       int64_t mask = (static_cast<int64_t>(1) << static_cast<int64_t>(shift)) - 1;
-      return op->a & make_const(dtype, mask);
+      auto ret = (op->a & make_const(dtype, mask));
+      if (print_) {
+        std::cout << "[LOWER]    Ret2 " << ret << std::endl;
+      }
+      return ret;
     }
 
     if (analyzer_->CanProveGreaterEqual(op->b, 0)) {
       // Common pass, positive divisor
       if (analyzer_->CanProveGreaterEqual(op->a, 0)) {
+        if (print_) std::cout << "[LOWER]    Ret3" << std::endl;
         return truncmod(op->a, op->b);
       } else {
         DLOG(INFO) << "LowerFloorMod: Cannot decide the sign of divident";
@@ -175,14 +189,17 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
           // (rmod >> shift) & b
           // -> (rmod >= 0 ? 0: -1) & b
           // -> rmod >= 0 ? 0 : b
+          if (print_) std::cout << "[LOWER]    Ret4" << std::endl;
           return rmod + (op->b & (rmod >> make_const(dtype, dtype.bits() - 1)));
         } else {
+          if (print_) std::cout << "[LOWER]    Ret5" << std::endl;
           return tir::Select(rmod >= 0, rmod, rmod + op->b);
         }
       }
     } else {
       if (dtype.is_float()) {
         // a - floor(a / b) * b
+        if (print_) std::cout << "[LOWER]    Ret6" << std::endl;
         return op->a - (VisitExpr_(tvm::floor(op->a / op->b).as<CallNode>()) * op->b);
       } else {
         // uncommon case
@@ -192,6 +209,7 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
         // b > 0 && rmod < 0  -> rmod + b
         // b < 0 && rmod < 0 -> rmod
         // b < 0 && rmod > 0 -> rmod + b
+        if (print_) std::cout << "[LOWER]    Ret7" << std::endl;
         return Let(
             rmod, truncmod(op->a, op->b),
             Select((op->b >= 0 && rmod >= 0) || (op->b < 0 && rmod <= 0), rmod, rmod + op->b));
@@ -285,12 +303,46 @@ class IntrinInjecter : public tvm::arith::IRMutatorWithAnalyzer {
   std::vector<OpAttrMap<FLowerGeneral>> attr_maps_;
   FLowerGeneral fma_{nullptr};
   bool support_bitwise_op_{true};
+  bool print_{false};
 };
 
 Stmt LowerIntrinStmt(Stmt stmt, const std::string& target) {
   arith::Analyzer analyzer;
   return IntrinInjecter(&analyzer, target)(std::move(stmt));
 }
+
+class FloorModVisitor : public StmtExprVisitor {
+ public:
+  int Visit(const Stmt& stmt, bool print) {
+    this->print = print;
+    this->VisitStmt(stmt);
+    return counter;
+  }
+
+  void VisitExpr_(const FloorModNode* op) {
+    if (print) {
+      std::cout << "[HELLO]   " << GetRef<PrimExpr>(op) << " " << op << " " << in_load << std::endl;
+    }
+    StmtExprVisitor::VisitExpr_(op);
+    counter++;
+  }
+
+  void VisitExpr_(const LoadNode* op) {
+    this->VisitExpr(op->index);
+    this->VisitExpr(op->predicate);
+
+    in_load = true;
+    if (op->scatter_batch_index.defined()) {
+      this->VisitExpr(op->scatter_batch_index);
+      this->VisitExpr(op->scatter_elem_index);
+    }
+    in_load = false;
+  }
+
+  bool print;
+  bool in_load = false;
+  int counter = 0;
+};
 
 namespace transform {
 
@@ -301,8 +353,18 @@ Pass LowerIntrin() {
     ICHECK(target.defined()) << "LowerIntrin: Require the target attribute";
     arith::Analyzer analyzer;
     auto mtriple = target.value()->GetAttr<runtime::String>("mtriple", "");
-    n->body =
-        IntrinInjecter(&analyzer, target.value()->kind->name, mtriple.value())(std::move(n->body));
+    int start = FloorModVisitor().Visit(n->body, false);
+    if (start) {
+      std::cout << "[HELLO] Start" << std::endl;
+    }
+    n->body = IntrinInjecter(&analyzer, target.value()->kind->name, mtriple.value(),
+                             start > 0)(std::move(n->body));
+    if (start) {
+      std::cout << "[HELLO] End" << std::endl;
+      if (FloorModVisitor().Visit(n->body, true)) {
+        std::cout << "[HELLO] BODY " << n->body << std::endl;
+      }
+    }
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerIntrin", {});

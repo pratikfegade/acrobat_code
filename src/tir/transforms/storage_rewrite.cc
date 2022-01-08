@@ -1265,7 +1265,7 @@ class VectorTypeRewriter : public StmtExprMutator {
           ramp_index->base / make_const(ramp_index->base.dtype(), ramp_index->lanes);
       return Load(out_dtype_base.with_lanes(op->dtype.lanes()), info.new_buffer_var, new_index,
                   const_true(new_index.dtype().lanes()), op->scatter_buffer_var,
-		  op->scatter_batch_index, op->scatter_elem_index, op->span);
+                  op->scatter_batch_index, op->scatter_elem_index, op->span);
     } else {
       return Load(out_dtype_base, info.new_buffer_var, op->index, op->predicate);
     }
@@ -1290,9 +1290,11 @@ class VectorTypeRewriter : public StmtExprMutator {
       PrimExpr new_index =
           ramp_index->base / make_const(ramp_index->base.dtype(), ramp_index->lanes);
       return Store(info.new_buffer_var, op->value, new_index, const_true(new_index.dtype().lanes()),
+                   op->scatter_buffer_var, op->scatter_batch_index, op->scatter_elem_index,
                    op->span);
     } else {
-      return Store(info.new_buffer_var, op->value, op->index, op->predicate, op->span);
+      return Store(info.new_buffer_var, op->value, op->index, op->predicate, op->scatter_buffer_var,
+                   op->scatter_batch_index, op->scatter_elem_index, op->span);
     }
   }
 

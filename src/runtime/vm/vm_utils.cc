@@ -43,6 +43,18 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+NDArray GetPointerNDArray(std::vector<NDArray> arrays) {
+  int size = arrays.size();
+  std::vector<void*> raw_ptrs(size);
+  for (size_t i = 0; i < size; ++i) {
+    raw_ptrs[i] = arrays[i]->data;
+  }
+  auto result =
+      NDArray::Empty(ShapeTuple({size}), DLDataType{kDLOpaqueHandle, 64, 1}, arrays[0]->device);
+  result.CopyFromBytes(raw_ptrs.data(), size * sizeof(void*));
+  return result;
+}
+
 void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
                             const std::vector<NDArray>& args) {
   size_t arity = arg_count;
