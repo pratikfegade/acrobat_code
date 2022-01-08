@@ -112,6 +112,7 @@ void CodeGenLLVM::InitFuncState() {
 }
 
 void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
+  // std::cout << "[FUNC]\n" << f << std::endl;
   this->InitFuncState();
 
   // ICHECK_EQ(f->buffer_map.size(), 0U)

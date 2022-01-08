@@ -92,7 +92,8 @@ tir::Buffer BufferWithOffsetAlignment(Array<PrimExpr> shape, DataType dtype, std
       }
     }
   }
-  tir::BufferType buffer_type = has_any ? tir::kAutoBroadcast : tir::kDefault;
+  // tir::BufferType buffer_type = has_any ? tir::kAutoBroadcast : tir::kDefault;
+  tir::BufferType buffer_type = tir::kDefault;
 
   PrimExpr elem_offset;
   if (offset_factor != 0) {

@@ -57,9 +57,6 @@ class IRModuleNode : public Object {
   Map<GlobalVar, BaseFunc> functions;
   /*! \brief A map from global type vars to ADT type data. */
   Map<GlobalTypeVar, TypeData> type_definitions;
-  /*! \brief A map from unbatched to batched PrimFuncs in the case of
-      batched execution. */
-  Map<GlobalVar, GlobalVar> batched_prim_funcs;
   /*! \brief The source map for the module. */
   parser::SourceMap source_map;
   /* \brief Additional attributes storing meta-data about the module. */

@@ -133,10 +133,15 @@ struct CachedFuncNode : public Object {
   tvm::Target target;
   /*! \brief Primitive Function Name */
   GlobalVar prim_fn_var;
+  /*! \brief The variable inputs to the function, if any */
+  tvm::Array<tir::Var> input_variables;
   /*! \brief The inputs to the function */
   tvm::Array<te::Tensor> inputs;
   /*! \brief The outputs to the function */
   tvm::Array<te::Tensor> outputs;
+  /*! \brief The arg modes of the function. Applicable only for
+      batched funcs */
+  tvm::Array<Integer> batched_arg_mode;
   /*! \brief The schedule to the function */
   te::Schedule schedule;
   /*! \brief The TIR function if lowering in the meta schedule path */
@@ -149,8 +154,10 @@ struct CachedFuncNode : public Object {
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("target", &target);
     v->Visit("prim_fn_var", &prim_fn_var);
+    v->Visit("input_variables", &input_variables);
     v->Visit("inputs", &inputs);
     v->Visit("outputs", &outputs);
+    v->Visit("batched_arg_mode", &batched_arg_mode);
     v->Visit("schedule", &schedule);
     v->Visit("prim_func", &prim_func);
     v->Visit("funcs", &funcs);
@@ -163,8 +170,9 @@ struct CachedFuncNode : public Object {
 
 class CachedFunc : public ObjectRef {
  public:
-  CachedFunc(tvm::Target target, GlobalVar prim_fn_name, tvm::Array<te::Tensor> inputs,
-             tvm::Array<te::Tensor> outputs, te::Schedule schedule, tir::PrimFunc prim_func,
+  CachedFunc(tvm::Target target, GlobalVar prim_fn_name, tvm::Array<tir::Var> input_variables,
+             tvm::Array<te::Tensor> inputs, tvm::Array<te::Tensor> outputs,
+             tvm::Array<Integer> batched_arg_mode, te::Schedule schedule, tir::PrimFunc prim_func,
              tvm::Array<Integer> shape_func_param_states,
              IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({})));
 

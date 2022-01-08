@@ -237,9 +237,6 @@ void CallGraphEntry::CleanCallGraphEntries() {
 }
 
 inline void CallGraphEntry::AddCalledGlobal(CallGraphEntry* cg_node) {
-  if (cg_node->global_->name_hint == "vm_mod_fused_add") {
-    std::cout << "TIP TIP BARSA PAANI " << std::endl;
-  }
   called_globals_.emplace_back(global_, cg_node);
   // Increment the reference to indicate that another call site is found for
   // the callee in `cg_node`.

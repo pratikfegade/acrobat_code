@@ -29,6 +29,7 @@
 #include <tvm/relay/op_attr_types.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/te/operation.h>
 #include <tvm/te/schedule.h>
 #include <tvm/te/schedule_pass.h>
@@ -69,15 +70,18 @@ CCacheKey::CCacheKey(Function source_func, Target target) {
   data_ = std::move(n);
 }
 
-CachedFunc::CachedFunc(tvm::Target target, GlobalVar prim_fn_var, tvm::Array<te::Tensor> inputs,
-                       tvm::Array<te::Tensor> outputs, te::Schedule schedule,
-                       tir::PrimFunc prim_func, tvm::Array<Integer> shape_func_param_states,
-                       IRModule funcs) {
+CachedFunc::CachedFunc(tvm::Target target, GlobalVar prim_fn_var,
+                       tvm::Array<tir::Var> input_variables, tvm::Array<te::Tensor> inputs,
+                       tvm::Array<te::Tensor> outputs, tvm::Array<Integer> batched_arg_mode,
+                       te::Schedule schedule, tir::PrimFunc prim_func,
+                       tvm::Array<Integer> shape_func_param_states, IRModule funcs) {
   auto n = make_object<CachedFuncNode>();
   n->target = target;
   n->prim_fn_var = prim_fn_var;
+  n->input_variables = input_variables;
   n->inputs = inputs;
   n->outputs = outputs;
+  n->batched_arg_mode = batched_arg_mode;
   n->schedule = schedule;
   n->shape_func_param_states = shape_func_param_states;
   n->funcs = funcs;
@@ -213,32 +217,39 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
-    CachedFunc generated_prim_func =
-        CachedFunc(target_, prim_fn_var, fn_inputs, outputs, schedule, prim_func, {});
+    CachedFunc generated_prim_func = CachedFunc(target_, prim_fn_var, Array<tir::Var>(), fn_inputs,
+                                                outputs, Array<Integer>(), schedule, prim_func, {});
     CachedFunc generated_batched_func;
 
     if (create_batched) {
       auto res = BatchifyTEGraph(fn_inputs, outputs);
       Map<te::Operation, te::Operation> mapping = res.first;
-      te::Tensor batch_size_tensor = res.second;
+      tir::Var batch_size_var = res.second;
 
-      auto map_tensors = [&](const Array<te::Tensor> tensors) {
+      auto map_tensors = [&](const Array<te::Tensor>& tensors, Array<Integer>* p_arg_modes) {
         Array<te::Tensor> output;
         for (auto tensor : tensors) {
           auto it = mapping.find(tensor->op);
           if (it != mapping.end()) {
             auto operation = (*it).second;
             output.push_back(operation.output(tensor->value_index));
+            p_arg_modes->push_back(
+                tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kConcat)));
+            std::cout << "[AM]  concat " << tensor << std::endl;
           } else {
             std::cout << tensor << " " << tensor->op << " " << tensor->op.get() << std::endl;
+            p_arg_modes->push_back(
+                tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kIgnore)));
+            std::cout << "[AM]  ignore " << tensor << std::endl;
           }
         }
         return output;
       };
 
-      Array<te::Tensor> batched_outputs = map_tensors(outputs);
-      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs);
-      batched_inputs.push_back(batch_size_tensor);
+      std::cout << "[AM] function " << prim_fn_var->name_hint << std::endl;
+      Array<Integer> arg_modes;
+      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes);
+      Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes);
 
       Array<te::Operation> output_operations;
       for (auto tensor : batched_outputs) {
@@ -266,8 +277,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       auto batched_schedule = te::create_schedule(output_operations);
 
       // std::cout << "[TEC] BatchedFnVar " << batched_fn_var << std::endl;
-      generated_batched_func = CachedFunc(target_, batched_fn_var, batched_inputs, batched_outputs,
-                                          batched_schedule, tir::PrimFunc{nullptr}, {});
+      generated_batched_func =
+          CachedFunc(target_, batched_fn_var, Array<tir::Var>({batch_size_var}), batched_inputs,
+                     batched_outputs, arg_modes, batched_schedule, tir::PrimFunc{nullptr}, {});
     }
 
     return std::make_pair(generated_prim_func, generated_batched_func);
@@ -559,8 +571,9 @@ class MakeShapeFunc : public backend::MemoizedExprTranslator<Array<te::Tensor>> 
           kv.first->name_hint == prim_fn_gvar->name_hint ? prim_fn_gvar : kv.first;
       fixed_lowered_module->Add(global_var, kv.second);
     }
-    return CachedFunc(target, prim_fn_gvar, inputs, outputs, schedule, tir::PrimFunc{nullptr},
-                      shape_func_param_states, fixed_lowered_module);
+    return CachedFunc(target, prim_fn_gvar, Array<tir::Var>(), inputs, outputs, Array<Integer>(),
+                      schedule, tir::PrimFunc{nullptr}, shape_func_param_states,
+                      fixed_lowered_module);
   }
 
   Array<te::Tensor> VisitExpr(const Expr& expr) final {

@@ -30,6 +30,7 @@
 #include <tvm/runtime/packed_func.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/vm/bytecode.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/runtime/vm/executable.h>
 #include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/memory_manager.h>
@@ -272,7 +273,8 @@ class VirtualMachine : public runtime::ModuleNode {
    * \note The return value will be stored in the last output_size slots of args.
    */
   virtual void InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
-                            Index output_size, const std::vector<ObjectRef>& args);
+                            Index output_size, const std::vector<ObjectRef>& args,
+                            bool batched = false);
 
   /*!
    * \brief Initialize the virtual machine for a set of (physical) devices.
@@ -369,6 +371,10 @@ class VirtualMachine : public runtime::ModuleNode {
    * \brief A mapping from packed_funcs to there batched counterparts.
    */
   std::vector<Index> batched_funcs_;
+  /*!
+   * \brief A mapping from packed_funcs to there batched counterparts.
+   */
+  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
 };
 
 }  // namespace vm

@@ -338,11 +338,17 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
 }
 
 void VirtualMachine::InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
-                                  Index output_size, const std::vector<ObjectRef>& args) {
+                                  Index output_size, const std::vector<ObjectRef>& args,
+                                  bool batched) {
   if (lazy_execution_) {
     lazy_executor_.AddPackedCall(func, arg_count, output_size, args);
   } else {
-    InvokePackedFn(func, arg_count, output_size, args);
+    if (batched) {
+      InvokePackedFn(func, arg_count, output_size, args, batched_func_arg_mode_[packed_index],
+                     batched);
+    } else {
+      InvokePackedFn(func, arg_count, output_size, args, {}, batched);
+    }
   }
 }
 
@@ -380,29 +386,29 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     if (packed_funcs_.size() <= packed_index) {
       packed_funcs_.resize(packed_index + 1);
     }
-    if (packed_name == "vm_mod_fused_zeros_batched") {
-      std::cout << " " << std::endl;
-    }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
 
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     packed_funcs_[packed_index] = pf;
 
+    std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
+              << exec_->batched_func_arg_mode[packed_index].size() << std::endl;
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
 
-    // if (batched_execution_) {
-    //   auto bit = exec_->primitive_map.find(packed_name + "_batched");
-    //   if (bit != exec_->primitive_map.end()) {
-    //     if (batched_funcs_.size() <= packed_index) {
-    //       batched_funcs_.resize(packed_index + 1);
-    //     }
-    //     batched_funcs_[packed_index] = bit->second;
-    //     std::cout << "[VM] Found batched version: " << packed_name << std::endl;
-    //   }
-    // }
+    if (batched_execution_) {
+      auto bit = exec_->primitive_map.find(packed_name + "_batched");
+      if (bit != exec_->primitive_map.end()) {
+        if (batched_funcs_.size() <= packed_index) {
+          batched_funcs_.resize(packed_index + 1, -1);
+        }
+        batched_funcs_[packed_index] = bit->second;
+      }
+    }
   }
+
+  this->batched_func_arg_mode_ = exec_->batched_func_arg_mode;
 
   // for (const auto& it : exec_->primitive_map) {
   //   const auto& packed_name = it.first;
@@ -552,8 +558,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        // std::cout << "InvokedPacked " << pc_ << " " << instr.packed_index
-        // << " arity=" << instr.arity << std::endl;
+        std::cout << "InvokedPacked " << pc_ << " " << instr.packed_index
+                  << " arity=" << instr.arity << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;
@@ -566,7 +572,16 @@ void VirtualMachine::RunLoop() {
 
         // We no longer need to write the registers back, we write directly
         // through the registers mutably.
-        InvokePacked(instr.packed_index, func, arity, instr.output_size, args);
+        if (batched_funcs_[instr.packed_index] >= 0) {
+          // InvokePacked(instr.packed_index, func, arity, instr.output_size, args);
+          auto& arg_modes = batched_func_arg_mode_[batched_funcs_[instr.packed_index]];
+          // std::cout << "  ArgModes " << arg_modes.size() << std::endl;
+          InvokePacked(batched_funcs_[instr.packed_index],
+                       packed_funcs_[batched_funcs_[instr.packed_index]], arity, instr.output_size,
+                       args, true);
+        } else {
+          InvokePacked(instr.packed_index, func, arity, instr.output_size, args, false);
+        }
         pc_++;
         goto main_loop;
       }

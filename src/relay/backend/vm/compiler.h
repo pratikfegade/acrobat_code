@@ -82,6 +82,8 @@ struct VMCompilerContext {
   std::unordered_map<std::string, Index> primitive_map;
   // The SEScopes corresponding to each device index.
   std::vector<SEScope> se_scopes_;
+  /*! \brief The arg_mode for all batched PrimFuncs. */
+  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
 };
 
 class VMCompiler : public runtime::ModuleNode {

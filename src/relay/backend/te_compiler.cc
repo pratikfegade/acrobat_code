@@ -103,6 +103,7 @@ class TECompilerImpl : public TECompilerNode {
     IRModule mod;
 
     Map<GlobalVar, GlobalVar> batched_prim_funcs;
+    Map<GlobalVar, Array<Integer>> batched_arg_mode;
     // Extract lowered functions from the cache
     for (const auto& it : cache_) {
       // Annotate functions with their target and put them in the return module
@@ -137,14 +138,17 @@ class TECompilerImpl : public TECompilerNode {
           if (lowered_func->batched_cached_func->funcs->ContainGlobalVar(batched_name)) {
             auto gv1 = it.first;
             auto gv2 = lowered_func->batched_cached_func->funcs->GetGlobalVar(batched_name);
-            std::cout << "[TE] Batched " << gv1->name_hint << " " << gv2->name_hint << std::endl;
             batched_prim_funcs.Set(gv1, gv2);
+            batched_arg_mode.Set(gv2, lowered_func->batched_cached_func->batched_arg_mode);
+            // std::cout << "[TE] Batched " << gv2->name_hint << " "
+            //           << lowered_func->batched_cached_func->batched_arg_mode.size() << std::endl;
           }
         }
       }
     }
 
     mod = WithAttr(std::move(mod), "batched_prim_funcs", batched_prim_funcs);
+    mod = WithAttr(std::move(mod), "batched_prim_func_arg_mode", batched_arg_mode);
 
     // Extract lowered dynamic shape functions from the shape cache
     for (const auto& it : shape_func_cache_) {
@@ -312,7 +316,7 @@ class TECompilerImpl : public TECompilerNode {
       auto global_var = GlobalVar(opt_global_symbol.value());
       global_var->checked_type_ = key->source_func->checked_type();
       ir_module->Add(global_var, key->source_func);
-      value->cached_func = CachedFunc(target, global_var, {}, {}, te::Schedule{nullptr},
+      value->cached_func = CachedFunc(target, global_var, {}, {}, {}, {}, te::Schedule{nullptr},
                                       tir::PrimFunc{nullptr}, {}, ir_module);
       // Collect these here as it's removed in LowerExternalFunctions()
       device_contexts_.Set(value->cached_func->prim_fn_var, opt_compiler.value());
@@ -347,7 +351,13 @@ class TECompilerImpl : public TECompilerNode {
     } else {
       // NOTE: array will copy on write.
       auto lower_scheduled_function = [](const CachedFunc& cached_func, bool batched) {
-        Array<te::Tensor> all_args = Array<te::Tensor>(cached_func->inputs);
+        Array<ObjectRef> all_args;
+        for (tir::Var arg : cached_func->input_variables) {
+          all_args.push_back(arg);
+        }
+        for (te::Tensor arg : cached_func->inputs) {
+          all_args.push_back(arg);
+        }
         for (te::Tensor arg : cached_func->outputs) {
           all_args.push_back(arg);
         }
@@ -364,9 +374,6 @@ class TECompilerImpl : public TECompilerNode {
           GlobalVar global_var = kv.first->name_hint == cached_func->prim_fn_var->name_hint
                                      ? cached_func->prim_fn_var
                                      : kv.first;
-          // if (batched) {
-          // std::cout << "[TE] BatchedFn " << kv.second << std::endl;
-          // }
           cached_func->funcs->Add(global_var, kv.second);
         }
         ICHECK(cached_func->funcs->Lookup(cached_func->prim_fn_var).as<tir::PrimFuncNode>());
@@ -1122,6 +1129,32 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
       lowered_module
           ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
           .value());
+
+  auto original_arg_modes = module
+                                ->GetAttr<Map<GlobalVar, Array<Integer>>>(
+                                    "batched_prim_func_arg_mode", Map<GlobalVar, Array<Integer>>())
+                                .value();
+  auto new_arg_modes = lowered_module
+                           ->GetAttr<Map<GlobalVar, Array<Integer>>>(
+                               "batched_prim_func_arg_mode", Map<GlobalVar, Array<Integer>>())
+                           .value();
+  Map<GlobalVar, Array<Integer>> merged_arg_modes(original_arg_modes);
+  for (auto pair : new_arg_modes) {
+    ICHECK(!merged_arg_modes.count(pair.first));
+    merged_arg_modes.Set(pair.first, pair.second);
+  }
+  // std::cout << "[CO] LowerTE Start" << std::endl;
+  // for (auto it : arg_modes) {
+  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  // }
+
+  updated_module =
+      WithAttr(std::move(updated_module), "batched_prim_func_arg_mode", merged_arg_modes);
+
+  // std::cout << "[CO] ARGMODES1" << std::endl;
+  // for (auto it : arg_modes) {
+  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  // }
 
   // Invoke external codegen for all Functions in the cache tagged with "Compiler", and
   // annotate the module with the resulting runtime modules.

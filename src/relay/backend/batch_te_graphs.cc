@@ -58,7 +58,7 @@ class BatchifyRewriter : public te::ExprMutator {
   const te::IterVar& batch_iv_;
 };
 
-std::pair<Map<te::Operation, te::Operation>, te::Tensor> BatchifyTEGraph(
+std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs) {
   Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
   if (inputs.size() == 0) {
@@ -81,9 +81,7 @@ std::pair<Map<te::Operation, te::Operation>, te::Tensor> BatchifyTEGraph(
   //   std::cout << "[BR]   OutputOps " << tensor->op << std::endl;
   // }
 
-  tvm::te::Tensor batch_size_tensor = tvm::te::placeholder(Array<PrimExpr>(), DataType::Int(32));
-
-  PrimExpr batch_size = batch_size_tensor(Array<PrimExpr>());
+  tir::Var batch_size = tir::Var("batch_size", DataType::Int(64));
   Map<te::Operation, te::Operation> rewritten;
   Map<te::Operation, te::Operation> ret;
   for (auto op : graph_ops) {
@@ -114,7 +112,7 @@ std::pair<Map<te::Operation, te::Operation>, te::Tensor> BatchifyTEGraph(
     }
     ret.Set(op, batchified_op);
   }
-  return std::make_pair(ret, batch_size_tensor);
+  return std::make_pair(ret, batch_size);
 }
 
 }  // namespace tec

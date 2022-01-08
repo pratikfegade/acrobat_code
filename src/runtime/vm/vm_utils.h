@@ -69,7 +69,8 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
  * \note The return value will be stored in the last output_size slots of args.
  */
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
-                    const std::vector<ObjectRef>& args);
+                    const std::vector<ObjectRef>& args,
+                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched = false);
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

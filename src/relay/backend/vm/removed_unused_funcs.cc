@@ -66,8 +66,8 @@ struct CallTracer : ExprVisitor {
                                .value();
       auto iit = batched_funcs.find(GetRef<GlobalVar>(gvn));
       if (iit != batched_funcs.end()) {
-        std::cout << "[RUF] Also considering abtched function " << (*iit).second->name_hint
-                  << std::endl;
+        // std::cout << "[RUF] Also considering abtched function " << (*iit).second->name_hint
+        // << std::endl;
         called_funcs_.insert((*iit).second->name_hint);
       }
     }

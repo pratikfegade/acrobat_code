@@ -60,9 +60,13 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
 }
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
-                    const std::vector<ObjectRef>& args) {
-  ICHECK(func.body());
+                    const std::vector<ObjectRef>& args,
+                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched) {
+  std::cout << "Invoking " << arg_modes.size() << " " << arg_count << std::endl;
   size_t arity = 0;
+  if (batched) {
+    arity++;
+  }
   for (Index i = 0; i < arg_count; i++) {
     if (const auto* obj = args[i].as<ADTObj>()) {
       arity += obj->size;
@@ -71,17 +75,53 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
     }
   }
 
+  if (batched) {
+    ICHECK_EQ(arg_modes.size() + 1, arity) << arg_modes.size() << " " << arity << " " << arg_count;
+  }
+
+  std::vector<ObjectRef> new_args(arity);
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
-  int idx = 0;
+  int32_t idx = 0;
   bool is_empty_output = false;
+  int32_t batch_size = 1;
+  int32_t counter = 0;
+  if (batched) {
+    counter++;
+    std::cout << "[VMU]  Adding batch size" << std::endl;
+    setter(idx++, batch_size);
+  }
   for (Index i = 0; i < arg_count; i++) {
     if (const auto* dt_cell = args[i].as<ADTObj>()) {
       for (size_t fi = 0; fi < dt_cell->size; ++fi) {
+        if (batched && arg_modes.size() > 0 && arg_modes[idx - 1] == kIgnore) {
+          std::cout << "[VMU]  Skipping " << i << std::endl;
+          idx++;
+          continue;
+        }
+
         auto obj = (*dt_cell)[fi];
         auto nd_array = Downcast<NDArray>(obj);
-        setter(idx++, nd_array);
+
+        if (batched) {
+          auto old_shape = nd_array.Shape();
+          std::vector<Index> new_shape_vec;
+          new_shape_vec.push_back(batch_size);
+          for (auto dim : old_shape) {
+            new_shape_vec.push_back(dim);
+          }
+          auto view = nd_array.CreateView(ShapeTuple(new_shape_vec), nd_array.DataType());
+          new_args[idx] = view;
+          ICHECK(view.Shape().size() == old_shape.size() + 1);
+          std::cout << "[VMU]  Adding tensor " << view.Shape().size() << std::endl;
+          counter++;
+          setter(idx++, view);
+        } else {
+          std::cout << "[VMU]  Adding tensor " << nd_array.Shape().size() << std::endl;
+          counter++;
+          setter(idx++, nd_array);
+        }
       }
     } else {
       auto nd_array = Downcast<NDArray>(args[i]);
@@ -95,13 +135,37 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
           }
         }
       }
-      setter(idx++, nd_array);
+
+      if (batched && arg_modes.size() > 0 && arg_modes[idx - 1] == kIgnore) {
+        std::cout << "[VMU]  Skipping " << i << std::endl;
+        idx++;
+        continue;
+      }
+
+      if (batched) {
+        auto old_shape = nd_array.Shape();
+        std::vector<Index> new_shape_vec;
+        new_shape_vec.push_back(batch_size);
+        for (auto dim : old_shape) {
+          new_shape_vec.push_back(dim);
+        }
+        auto view = nd_array.CreateView(ShapeTuple(new_shape_vec), nd_array.DataType());
+        new_args[idx] = view;
+        ICHECK((int32_t)(view.Shape()[0]) == batch_size);
+        std::cout << "[VMU]  Adding tensor " << view.Shape().size() << std::endl;
+        counter++;
+        setter(idx++, view);
+      } else {
+        std::cout << "[VMU]  Adding tensor " << nd_array.Shape().size() << std::endl;
+        counter++;
+        setter(idx++, nd_array);
+      }
     }
   }
 
   if (!is_empty_output) {
     TVMRetValue rv;
-    func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
+    func.CallPacked(TVMArgs(values.data(), codes.data(), counter), &rv);
   }
 }
 }  // namespace vm

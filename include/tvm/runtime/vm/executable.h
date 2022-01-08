@@ -30,6 +30,7 @@
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/packed_func.h>
 #include <tvm/runtime/vm/bytecode.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 
 #include <map>
 #include <string>
@@ -272,6 +273,8 @@ class Executable : public ModuleNode {
   std::vector<VMFunction> functions;
   /*! \brief The index of the device holding each constant. */
   std::vector<Index> const_device_indexes;
+  /*! \brief The arg_mode for all batched PrimFuncs. */
+  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode;
 
  private:
   /*!

@@ -17,29 +17,32 @@
  * under the License.
  */
 
-#ifndef TVM_RELAY_BACKEND_BATCH_TE_GRAPH_H_
-#define TVM_RELAY_BACKEND_BATCH_TE_GRAPH_H_
-
-#include <tvm/runtime/registry.h>
-#include <tvm/te/operation.h>
-#include <tvm/te/schedule.h>
-#include <tvm/te/tensor.h>
-#include <tvm/tir/stmt_functor.h>
-
-#include <algorithm>
-
-#include "../../te/schedule/graph.h"
+/*!
+ * \file tvm/runtime/vm/executable.h
+ * \brief The Relay virtual machine executable.
+ */
+#ifndef TVM_RUNTIME_VM_DYNAMIC_BATCHING_H_
+#define TVM_RUNTIME_VM_DYNAMIC_BATCHING_H_
 
 namespace tvm {
-namespace relay {
-namespace tec {
+namespace runtime {
+namespace vm {
 
-std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
-    const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs);
+/*!
+ * \brief Dynamic batching argument mode.
+ *
+ * For a batched version of a kernel, this specifies which arguments
+ * are to be (logically) concatenated, which ones can be reused and
+ * which ones are to be ignored.
+ */
+enum DBBatchedArgMode {
+  kIgnore = 0,
+  kConcat = 1,
+  kReuse = 2,
+};
 
-}  // namespace tec
-}  // namespace relay
+}  // namespace vm
+}  // namespace runtime
 }  // namespace tvm
 
-#undef COUT
-#endif  // TVM_RELAY_BACKEND_BATCH_TE_GRAPH_H_
+#endif  // TVM_RUNTIME_VM_DYNAMIC_BATCHING_H_
