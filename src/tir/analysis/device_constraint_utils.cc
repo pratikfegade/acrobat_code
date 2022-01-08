@@ -187,7 +187,7 @@ class ApplyDeviceConstraintsMutator : public StmtExprMutator {
    * memory scopes needed to change.
    */
   PrimFunc Rewrite(const PrimFunc& prim_func, const FuncType& relay_func_type,
-                   const Array<SEScope>& arg_and_result_se_scopes) {
+                   const Array<SEScope>& arg_and_result_se_scopes, bool scattered_kernels) {
     size_t current_primfunc_param_index = 0;
     std::unordered_map<const tir::VarNode*, SEScope> param_constraints;
 
@@ -205,8 +205,14 @@ class ApplyDeviceConstraintsMutator : public StmtExprMutator {
     InsertParamConstraints(prim_func, ret_type, ret_se_scope, &current_primfunc_param_index,
                            &param_constraints);
 
-    // Make sure we accounted for all prim_func parameters.
-    CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+    if (!scattered_kernels) {
+      // Make sure we accounted for all prim_func parameters.
+      CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+    } else {
+      // TODO(ppf): In the case of scattered kernels, we will have the
+      // pointer buffers after this. Construct a test that takes these
+      // into account.
+    }
 
     // Start with a copy of the current prim_func buffer map.
     Map<Var, Buffer> new_buffer_map(prim_func->buffer_map.begin(), prim_func->buffer_map.end());
@@ -224,8 +230,15 @@ class ApplyDeviceConstraintsMutator : public StmtExprMutator {
       }
       new_buffer_map.Set(param, new_buffer);
     }
-    // Make sure we have accounted for all prim_func parameters.
-    CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+
+    if (!scattered_kernels) {
+      // Make sure we have accounted for all prim_func parameters.
+      CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+    } else {
+      // TODO(ppf): In the case of scattered kernels, we will have the
+      // pointer buffers after this. Construct a test that takes these
+      // into account.
+    }
 
     // Apply data variable and buffer substitutions to the prim_func body. These will have been
     // accumulated from processing the parameters above.
@@ -458,7 +471,8 @@ class ApplyDeviceConstraintsMutator : public StmtExprMutator {
 }  // namespace
 
 Array<SEScope> GetPrimFuncArgAndResultConstraints(const tir::PrimFunc& prim_func,
-                                                  const FuncType& relay_func_type) {
+                                                  const FuncType& relay_func_type,
+                                                  bool scattered_kernels) {
   // Build the implied domain (in terms of the function's Relay type) implied by any memory scope
   // constrains in the function's buffers, for both arguments and results.
   Array<SEScope> se_scopes;
@@ -478,8 +492,14 @@ Array<SEScope> GetPrimFuncArgAndResultConstraints(const tir::PrimFunc& prim_func
       ConsistentParamConstraint(prim_func, ret_type, &current_primfunc_param_index);
   se_scopes.push_back(ret_se_scope);
 
-  // Make sure all parameters of the prim_func have been accounted for.
-  CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+  if (!scattered_kernels) {
+    // Make sure all parameters of the prim_func have been accounted for.
+    CheckNoRemainingPointerParams(prim_func, &current_primfunc_param_index);
+  } else {
+    // TODO(ppf): In the case of scattered kernels, we will have the
+    // pointer buffers after this. Construct a test that takes these
+    // into account.
+  }
 
   return se_scopes;
 }
@@ -496,9 +516,10 @@ TVM_REGISTER_GLOBAL("tir.analysis.GetPrimFuncArgAndResultMemoryConstraints")
 
 PrimFunc ApplyPrimFuncArgAndResultConstraints(const PrimFunc& prim_func,
                                               const FuncType& relay_func_type,
-                                              const Array<SEScope>& arg_and_result_se_scopes) {
+                                              const Array<SEScope>& arg_and_result_se_scopes,
+                                              bool scattered_kernels) {
   return ApplyDeviceConstraintsMutator().Rewrite(prim_func, relay_func_type,
-                                                 arg_and_result_se_scopes);
+                                                 arg_and_result_se_scopes, scattered_kernels);
 }
 
 TVM_REGISTER_GLOBAL("tir.analysis.ApplyPrimFuncArgAndResultMemoryConstraints")

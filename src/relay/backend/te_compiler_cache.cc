@@ -134,7 +134,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     for (Var param : relay_func->params) {
       Array<tvm::te::Tensor> inputs;
       for (const auto& ttype : FlattenTupleType(param->checked_type())) {
-        tvm::te::Tensor tensor = tvm::te::placeholder(GetShape(ttype->shape), ttype->dtype);
+        tvm::te::Tensor tensor =
+            tvm::te::placeholder(GetShape(ttype->shape), ttype->dtype, param->vid->name_hint);
         fn_inputs.push_back(tensor);
         inputs.push_back(tensor);
       }
@@ -235,18 +236,18 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
             output.push_back(operation.output(tensor->value_index));
             p_arg_modes->push_back(
                 tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kConcat)));
-            std::cout << "[AM]  concat " << tensor << std::endl;
+            // std::cout << "[AM]  concat " << tensor << std::endl;
           } else {
             std::cout << tensor << " " << tensor->op << " " << tensor->op.get() << std::endl;
             p_arg_modes->push_back(
                 tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kIgnore)));
-            std::cout << "[AM]  ignore " << tensor << std::endl;
+            // std::cout << "[AM]  ignore " << tensor << std::endl;
           }
         }
         return output;
       };
 
-      std::cout << "[AM] function " << prim_fn_var->name_hint << std::endl;
+      // std::cout << "[AM] function " << prim_fn_var->name_hint << std::endl;
       Array<Integer> arg_modes;
       Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes);
       Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes);

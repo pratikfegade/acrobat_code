@@ -47,12 +47,14 @@ namespace vm {
 TVM_REGISTER_OBJECT_TYPE(VMClosureObj);
 TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
 
-VMExecutionOptions::VMExecutionOptions(bool lazy_execution, bool batched_execution)
-    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution, batched_execution)) {}
+VMExecutionOptions::VMExecutionOptions(bool lazy_execution, bool batched_execution,
+                                       bool scattered_kernels)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution, batched_execution,
+                                                             scattered_kernels)) {}
 
 TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions")
-    .set_body_typed([](bool lazy_execution, bool batched_execution) {
-      return VMExecutionOptions(lazy_execution, batched_execution);
+    .set_body_typed([](bool lazy_execution, bool batched_execution, bool scattered_kernels) {
+      return VMExecutionOptions(lazy_execution, batched_execution, scattered_kernels);
     });
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
@@ -558,8 +560,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        std::cout << "InvokedPacked " << pc_ << " " << instr.packed_index
-                  << " arity=" << instr.arity << std::endl;
+        // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
+        //           << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;

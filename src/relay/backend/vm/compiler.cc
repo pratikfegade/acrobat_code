@@ -62,6 +62,7 @@ namespace tvm {
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_coarsen_granularity", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_scattered_kernels", Bool);
 
 namespace relay {
 

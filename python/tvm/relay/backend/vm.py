@@ -36,14 +36,18 @@ from . import _vm
 def create_workflow_configs(lazy_execution=False,
                             coarsened_execution=False,
                             batched_execution=False,
+                            scattered_kernels=False,
                             opt_level=3):
     config = {
         "relay.db_coarsen_granularity": coarsened_execution,
         "relay.db_batched_execution": batched_execution,
         "relay.db_lazy_execution": lazy_execution,
+        "relay.db_scattered_kernels": scattered_kernels
     }
     execution_options = tvm.runtime.vm.create_vm_execution_options(
-        lazy_execution=lazy_execution, batched_execution=batched_execution)
+        lazy_execution=lazy_execution,
+        batched_execution=batched_execution,
+        scattered_kernels=scattered_kernels)
     pass_context = tvm.transform.PassContext(opt_level=opt_level, config=config)
     return pass_context, execution_options
 

@@ -77,7 +77,8 @@ namespace tir {
  * DPS.
  */
 Array<SEScope> GetPrimFuncArgAndResultConstraints(const tir::PrimFunc& prim_func,
-                                                  const FuncType& relay_func_type);
+                                                  const FuncType& relay_func_type,
+                                                  bool scattered_kernels = false);
 
 /*
  * \brief Returns \p prim_func written to capture the memory (aka storage) scope constraints
@@ -90,7 +91,8 @@ Array<SEScope> GetPrimFuncArgAndResultConstraints(const tir::PrimFunc& prim_func
  */
 PrimFunc ApplyPrimFuncArgAndResultConstraints(const PrimFunc& prim_func,
                                               const FuncType& relay_func_type,
-                                              const Array<SEScope>& arg_and_result_se_scopes);
+                                              const Array<SEScope>& arg_and_result_se_scopes,
+                                              bool scattered_kernels = false);
 
 }  // namespace tir
 }  // namespace tvm

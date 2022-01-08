@@ -442,8 +442,10 @@ class Array : public ObjectRef {
    * \brief push items from another array into this one.
    * \param item The array to be appended.
    */
-  void push_back_all(const Array<T>& items) {
-    ArrayNode* p = CopyOnWrite(1);
+  template <typename AddElement>
+  void push_back_all(const Array<AddElement>& items) {
+    static_assert(std::is_base_of<T, AddElement>::value, "Derived not derived from BaseClass");
+    ArrayNode* p = CopyOnWrite(items.size());
     for (const auto& item : items) {
       p->EmplaceInit(p->size_++, item);
     }

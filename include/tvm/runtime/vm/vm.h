@@ -52,10 +52,14 @@ class VMExecutionOptionsNode : public Object {
   bool lazy_execution;
   /*! \brief whether to execute tensor operations in a batched manner */
   bool batched_execution;
+  /*! \brief whether the batched kernels oeprate on scattered tensors */
+  bool scattered_kernels;
 
   VMExecutionOptionsNode() {}
-  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_)
-      : lazy_execution(lazy_execution_), batched_execution(batched_execution_) {}
+  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_, bool scattered_kernels_)
+      : lazy_execution(lazy_execution_),
+        batched_execution(batched_execution_),
+        scattered_kernels(scattered_kernels_) {}
 
   static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
   static constexpr const char* _type_key = "VMExecutionOptions";
@@ -69,7 +73,7 @@ class VMExecutionOptions : public ObjectRef {
    * \brief constructor
    * \param lazy_execution whether to execute tensor operations lazily.
    */
-  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution);
+  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution, bool scattered_kernels);
   // declare VMExecutionOptions.
   TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
 };

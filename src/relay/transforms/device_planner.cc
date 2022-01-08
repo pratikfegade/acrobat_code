@@ -468,8 +468,11 @@ class DeviceAnalyzer : public ExprVisitor {
     ICHECK(func_type_node);
     ICHECK_EQ(func_domain->function_arity(), func_type_node->arg_types.size());
 
-    Array<SEScope> se_scopes =
-        tir::GetPrimFuncArgAndResultConstraints(prim_func, GetRef<FuncType>(func_type_node));
+    bool scattered_kernels = relay::transform::PassContext::Current()
+                                 ->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false))
+                                 .value();
+    Array<SEScope> se_scopes = tir::GetPrimFuncArgAndResultConstraints(
+        prim_func, GetRef<FuncType>(func_type_node), scattered_kernels);
 
     // Build the implied domain (in terms of the function's Relay type) implied by any memory scope
     // constrains in the function's buffers, for both arguments and results.
@@ -972,8 +975,11 @@ class DeviceCapturer : public ExprMutator {
     VLOG(2) << "ret_se_scope = " << ret_se_scope;
     arg_and_result_se_scopes.push_back(ret_se_scope);
 
+    bool scattered_kernels = relay::transform::PassContext::Current()
+                                 ->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false))
+                                 .value();
     return tir::ApplyPrimFuncArgAndResultConstraints(prim_func, GetRef<FuncType>(func_type_node),
-                                                     arg_and_result_se_scopes);
+                                                     arg_and_result_se_scopes, scattered_kernels);
   }
 
   // Nothing interesting for VarNode, ConstantNode, GlobalVarNode, OpNode and ConstructorNode

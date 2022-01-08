@@ -333,6 +333,8 @@ class TECompilerImpl : public TECompilerNode {
 
     bool batched_execution =
         PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+    bool scattered_kernels =
+        PassContext::Current()->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
     ICHECK(!value->cached_func.defined());
     auto lowered_cached_funcs = PrimFuncFor(
         key->source_func, key->target,
@@ -349,24 +351,43 @@ class TECompilerImpl : public TECompilerNode {
       value->cached_func->funcs->Add(value->cached_func->prim_fn_var,
                                      value->cached_func->prim_func.value());
     } else {
+      auto create_pointer_buffer = [](const te::Tensor& tensor) {
+        std::string name = tensor->op->name + "ptr";
+        auto var_type = PointerType(PointerType(PrimType(tensor->dtype)));
+        return tir::Buffer(tir::Var(name, var_type), DataType::Handle(),
+                           Array<PrimExpr>({tensor->shape[0]}), Array<PrimExpr>(), 0, name, 0, 0,
+                           tir::kDefault);
+      };
+
       // NOTE: array will copy on write.
-      auto lower_scheduled_function = [](const CachedFunc& cached_func, bool batched) {
+      auto lower_scheduled_function = [&](const CachedFunc& cached_func, bool batched) {
         Array<ObjectRef> all_args;
-        for (tir::Var arg : cached_func->input_variables) {
-          all_args.push_back(arg);
-        }
-        for (te::Tensor arg : cached_func->inputs) {
-          all_args.push_back(arg);
-        }
-        for (te::Tensor arg : cached_func->outputs) {
-          all_args.push_back(arg);
+        all_args.push_back_all(cached_func->input_variables);
+        all_args.push_back_all(cached_func->inputs);
+        all_args.push_back_all(cached_func->outputs);
+        Map<te::Tensor, tir::Buffer> scatter_buffers;
+        if (scattered_kernels) {
+          for (te::Tensor arg : cached_func->inputs) {
+            auto scatter_buffer = create_pointer_buffer(arg);
+            all_args.push_back(scatter_buffer);
+            scatter_buffers.Set(arg, scatter_buffer);
+          }
+          for (te::Tensor arg : cached_func->outputs) {
+            auto scatter_buffer = create_pointer_buffer(arg);
+            all_args.push_back(scatter_buffer);
+            scatter_buffers.Set(arg, scatter_buffer);
+          }
         }
         // lower the function
         std::unordered_map<te::Tensor, tir::Buffer> binds;
         auto func_name = cached_func->prim_fn_var->name_hint;
         VLOG(1) << "scheduling";
+        if (batched) {
+          std::cout << "[BATCHED] Scaheduling: " << cached_func->prim_fn_var->name_hint << ": "
+                    << scatter_buffers.size() << std::endl;
+        }
         IRModule scheduled_module =
-            tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds);
+            tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds, scatter_buffers);
         // Unfortunately the above machinery creates its own GlobalVars instead of using *the*
         // GlobalVar we established above. Fix this before the confusion spreads any further.
         // TODO(mbs): LowerSchedule should be given prim_fn_gvar instead of func_name.

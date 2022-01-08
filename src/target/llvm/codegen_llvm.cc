@@ -1207,6 +1207,11 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const LetNode* op) {
 }
 
 llvm::Value* CodeGenLLVM::VisitExpr_(const LoadNode* op) {
+  bool has_scatter = op->scatter_buffer_var.defined();
+  if (has_scatter) {
+    std::cout << "[LLVM] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+  }
+
   DataType t = op->dtype;
   bool is_volatile = volatile_buf_.count(op->buffer_var.get());
   llvm::Value* buffer = MakeValue(op->buffer_var);
