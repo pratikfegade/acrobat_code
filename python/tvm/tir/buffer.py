@@ -132,7 +132,7 @@ class Buffer(Object):
             The corresponding store stmt.
         """
         begin = (begin,) if isinstance(begin, (int, PrimExpr)) else begin
-        return _ffi_api.BufferVStore(self, begin, value)  # type: ignore
+        return _ffi_api.BufferVStore(self, begin, value, None)  # type: ignore
 
     def scope(self):
         """Return the storage scope associated with this buffer.

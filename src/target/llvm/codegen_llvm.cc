@@ -1373,12 +1373,23 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const BroadcastNode* op) {
 }
 
 void CodeGenLLVM::VisitStmt_(const StoreNode* op) {
+  bool has_scatter = op->scatter_buffer_var.defined();
+
   ICHECK(is_one(op->predicate)) << op->predicate;
   DataType t = op->value.dtype();
   bool is_volatile = volatile_buf_.count(op->buffer_var.get());
-  llvm::Value* buffer = MakeValue(op->buffer_var);
-  llvm::Value* index = MakeValue(op->index);
   llvm::Value* value = MakeValue(op->value);
+  llvm::Value* buffer = nullptr;
+  llvm::Value* index = nullptr;
+
+  if (has_scatter) {
+    std::cout << "[LLVM] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
+    buffer = LoadBufferPointer(op->scatter_buffer_var, op->scatter_batch_index, t);
+    index = MakeValue(op->scatter_elem_index);
+  } else {
+    buffer = MakeValue(op->buffer_var);
+    index = MakeValue(op->index);
+  }
 
   if (t.lanes() == 1) {
     int alignment, native_bits;
