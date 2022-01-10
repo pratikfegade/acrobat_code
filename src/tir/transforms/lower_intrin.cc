@@ -313,8 +313,7 @@ Stmt LowerIntrinStmt(Stmt stmt, const std::string& target) {
 
 class FloorModVisitor : public StmtExprVisitor {
  public:
-  int Visit(const Stmt& stmt, bool print) {
-    this->print = print;
+  int Visit(const Stmt& stmt) {
     this->VisitStmt(stmt);
     return counter;
   }
@@ -339,7 +338,7 @@ class FloorModVisitor : public StmtExprVisitor {
     in_load = false;
   }
 
-  bool print;
+  bool print = false;
   bool in_load = false;
   int counter = 0;
 };
@@ -353,18 +352,18 @@ Pass LowerIntrin() {
     ICHECK(target.defined()) << "LowerIntrin: Require the target attribute";
     arith::Analyzer analyzer;
     auto mtriple = target.value()->GetAttr<runtime::String>("mtriple", "");
-    int start = FloorModVisitor().Visit(n->body, false);
-    if (start) {
-      std::cout << "[HELLO] Start" << std::endl;
-    }
-    n->body = IntrinInjecter(&analyzer, target.value()->kind->name, mtriple.value(),
-                             start > 0)(std::move(n->body));
-    if (start) {
-      std::cout << "[HELLO] End" << std::endl;
-      if (FloorModVisitor().Visit(n->body, true)) {
-        std::cout << "[HELLO] BODY " << n->body << std::endl;
-      }
-    }
+    // int start = FloorModVisitor().Visit(n->body, false);
+    // if (start) {
+    // std::cout << "[HELLO] Start" << std::endl;
+    // }
+    n->body =
+        IntrinInjecter(&analyzer, target.value()->kind->name, mtriple.value())(std::move(n->body));
+    // if (start) {
+    //   std::cout << "[HELLO] End" << std::endl;
+    //   if (FloorModVisitor().Visit(n->body, true)) {
+    //     std::cout << "[HELLO] BODY " << n->body << std::endl;
+    //   }
+    // }
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerIntrin", {});

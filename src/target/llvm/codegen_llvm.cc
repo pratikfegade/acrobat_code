@@ -1218,7 +1218,7 @@ llvm::Value* CodeGenLLVM::LoadBufferPointer(const Var& buffer_var, const PrimExp
 
   auto ptr = builder_->CreateInBoundsGEP(loaded_llvm_type, buffer, index);
 
-  std::cout << "[LLVM]  Value " << buffer_var.dtype() << std::endl;
+  // std::cout << "[LLVM]  Value " << buffer_var.dtype() << std::endl;
   return builder_->CreateAlignedLoad(loaded_llvm_type, ptr, llvm::Align(1), false);
 }
 
@@ -1231,7 +1231,7 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const LoadNode* op) {
   llvm::Value* index = nullptr;
 
   if (has_scatter) {
-    std::cout << "[LLVM] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+    // std::cout << "[LLVM] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
     buffer = LoadBufferPointer(op->scatter_buffer_var, op->scatter_batch_index, t);
     index = MakeValue(op->scatter_elem_index);
   } else {
@@ -1383,7 +1383,7 @@ void CodeGenLLVM::VisitStmt_(const StoreNode* op) {
   llvm::Value* index = nullptr;
 
   if (has_scatter) {
-    std::cout << "[LLVM] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
+    // std::cout << "[LLVM] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
     buffer = LoadBufferPointer(op->scatter_buffer_var, op->scatter_batch_index, t);
     index = MakeValue(op->scatter_elem_index);
   } else {
