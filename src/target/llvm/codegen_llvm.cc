@@ -112,7 +112,10 @@ void CodeGenLLVM::InitFuncState() {
 }
 
 void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
-  // std::cout << "[FUNC]\n" << f << std::endl;
+  std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+  bool batched_function = f->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc);
+  std::cout << "[LLVM] Function: " << name << " " << batched_function << std::endl;
+  std::cout << "[FUNC]\n" << f << std::endl;
   this->InitFuncState();
 
   // ICHECK_EQ(f->buffer_map.size(), 0U)

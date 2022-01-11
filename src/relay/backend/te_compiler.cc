@@ -31,6 +31,7 @@
 #include <tvm/relay/op.h>
 #include <tvm/runtime/device_api.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/te/schedule.h>
 #include <tvm/te/schedule_pass.h>
 #include <tvm/topi/tags.h>
@@ -134,21 +135,18 @@ class TECompilerImpl : public TECompilerNode {
                   lowered_func->batched_cached_func->funcs->functions.size());
         for (auto it : lowered_func->cached_func->funcs->functions) {
           auto gv = it.first;
-          auto batched_name = gv->name_hint + "_batched";
+          auto batched_name = runtime::vm::GetBatchedName(gv->name_hint);
           if (lowered_func->batched_cached_func->funcs->ContainGlobalVar(batched_name)) {
             auto gv1 = it.first;
             auto gv2 = lowered_func->batched_cached_func->funcs->GetGlobalVar(batched_name);
-            batched_prim_funcs.Set(gv1, gv2);
-            batched_arg_mode.Set(gv2, lowered_func->batched_cached_func->batched_arg_mode);
-            // std::cout << "[TE] Batched " << gv2->name_hint << " "
-            //           << lowered_func->batched_cached_func->batched_arg_mode.size() << std::endl;
+            mod->UpdateBatchedPrimFunc(gv1, gv2);
+            mod->UpdateArgMode(gv2, lowered_func->batched_cached_func->batched_arg_mode);
+            std::cout << "[TE] Batched " << gv2->name_hint << " " << mod->batched_prim_funcs.size()
+                      << std::endl;
           }
         }
       }
     }
-
-    mod = WithAttr(std::move(mod), "batched_prim_funcs", batched_prim_funcs);
-    mod = WithAttr(std::move(mod), "batched_prim_func_arg_mode", batched_arg_mode);
 
     // Extract lowered dynamic shape functions from the shape cache
     for (const auto& it : shape_func_cache_) {
@@ -383,7 +381,7 @@ class TECompilerImpl : public TECompilerNode {
         auto func_name = cached_func->prim_fn_var->name_hint;
         VLOG(1) << "scheduling";
         if (batched) {
-          std::cout << "[BATCHED] Scaheduling: " << cached_func->prim_fn_var->name_hint << ": "
+          std::cout << "[BATCHED] Scheduling: " << cached_func->prim_fn_var->name_hint << ": "
                     << scatter_buffers.size() << std::endl;
         }
         IRModule scheduled_module =
@@ -395,7 +393,15 @@ class TECompilerImpl : public TECompilerNode {
           GlobalVar global_var = kv.first->name_hint == cached_func->prim_fn_var->name_hint
                                      ? cached_func->prim_fn_var
                                      : kv.first;
-          cached_func->funcs->Add(global_var, kv.second);
+          auto func = kv.second;
+          if (func.as<tir::PrimFuncNode>() && batched) {
+            func = WithAttr(std::move(Downcast<tir::PrimFunc>(func)), tir::attr::kDBBatchedPrimFunc,
+                            Bool(true));
+          }
+          cached_func->funcs->Add(global_var, func);
+          if (batched && global_var->name_hint == "vm_mod_fused_zeros_batched") {
+            std::cout << "[BATCHED] " << global_var << ": " << func << std::endl;
+          }
         }
         ICHECK(cached_func->funcs->Lookup(cached_func->prim_fn_var).as<tir::PrimFuncNode>());
       };
@@ -1145,37 +1151,15 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
     }
     updated_module->Add(kv.first, kv.second);
   }
-  updated_module = WithAttr(
-      std::move(updated_module), "batched_prim_funcs",
-      lowered_module
-          ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
-          .value());
 
-  auto original_arg_modes = module
-                                ->GetAttr<Map<GlobalVar, Array<Integer>>>(
-                                    "batched_prim_func_arg_mode", Map<GlobalVar, Array<Integer>>())
-                                .value();
-  auto new_arg_modes = lowered_module
-                           ->GetAttr<Map<GlobalVar, Array<Integer>>>(
-                               "batched_prim_func_arg_mode", Map<GlobalVar, Array<Integer>>())
-                           .value();
-  Map<GlobalVar, Array<Integer>> merged_arg_modes(original_arg_modes);
-  for (auto pair : new_arg_modes) {
-    ICHECK(!merged_arg_modes.count(pair.first));
-    merged_arg_modes.Set(pair.first, pair.second);
+  // std::cout << "[TE] YAY " << lowered_module->batched_prim_funcs.size() << std::endl;
+  for (auto pair : lowered_module->batched_prim_funcs) {
+    updated_module->UpdateBatchedPrimFunc(pair.first, pair.second);
   }
-  // std::cout << "[CO] LowerTE Start" << std::endl;
-  // for (auto it : arg_modes) {
-  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  // }
-
-  updated_module =
-      WithAttr(std::move(updated_module), "batched_prim_func_arg_mode", merged_arg_modes);
-
-  // std::cout << "[CO] ARGMODES1" << std::endl;
-  // for (auto it : arg_modes) {
-  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  // }
+  for (auto pair : lowered_module->batched_arg_modes) {
+    updated_module->UpdateArgMode(pair.first, pair.second);
+  }
+  // std::cout << "[TE] YAY1 " << updated_module->batched_prim_funcs.size() << std::endl;
 
   // Invoke external codegen for all Functions in the cache tagged with "Compiler", and
   // annotate the module with the resulting runtime modules.
@@ -1238,7 +1222,7 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
       // Put the function in per_target_modules
       if (!per_target_modules.count(target.value())) {
         // Initialize the IRModule for this target with the attributes from the input IRModule
-        IRModule target_module = IRModule({}, {}, {}, {}, mod->attrs);
+        IRModule target_module = IRModule({}, {}, {}, {}, {}, {}, mod->attrs);
         // Add the function to the IRModule
         target_module->Add(var, func);
         per_target_modules[target.value()] = target_module;
@@ -1259,7 +1243,9 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
 Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_se_scope) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule module,
                                                                             PassContext ctx) {
-    return LowerTE(module, module_name, process_fn, host_se_scope);
+    auto ret = LowerTE(module, module_name, process_fn, host_se_scope);
+    // std::cout << "[TE] YAY2 " << ret->batched_prim_funcs.size() << std::endl;
+    return ret;
   };
 
   return tvm::transform::Sequential(

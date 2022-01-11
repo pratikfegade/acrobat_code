@@ -544,7 +544,7 @@ Pass DeadCodeElimination(bool inline_once, bool ignore_impurity) {
     }
 
     IRModule result(/*functions=*/{}, mod->type_definitions, mod->Imports(), mod->source_map,
-                    mod->attrs);
+                    mod->batched_prim_funcs, mod->batched_arg_modes, mod->attrs);
     for (const auto& kv : mod->functions) {
       if (const auto* function_node = kv.second.as<FunctionNode>()) {
         auto function = GetRef<Function>(function_node);

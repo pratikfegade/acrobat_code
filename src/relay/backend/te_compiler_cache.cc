@@ -271,7 +271,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       Array<Type> input_tensor_types = tensor_to_batched_tensor_types(batched_inputs);
       Array<Type> output_tensor_types = tensor_to_batched_tensor_types(batched_outputs);
 
-      auto batched_fn_var = GlobalVar(renamer(candidate_name + "_batched"));
+      auto batched_fn_var = GlobalVar(renamer(runtime::vm::GetBatchedName(candidate_name)));
       batched_fn_var->checked_type_ = FuncType(input_tensor_types, TupleType(output_tensor_types),
                                                Array<TypeVar>(), Array<TypeConstraint>());
 

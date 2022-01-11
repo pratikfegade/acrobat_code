@@ -400,7 +400,7 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     registry.set_body(pf);
 
     if (batched_execution_) {
-      auto bit = exec_->primitive_map.find(packed_name + "_batched");
+      auto bit = exec_->primitive_map.find(GetBatchedName(packed_name));
       if (bit != exec_->primitive_map.end()) {
         if (batched_funcs_.size() <= packed_index) {
           batched_funcs_.resize(packed_index + 1, -1);
@@ -560,8 +560,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
-        //           << std::endl;
+        std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
+                  << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;

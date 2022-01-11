@@ -192,6 +192,7 @@ constexpr const char* kInline = "Inline";
 constexpr const char* kPartitionedFromPattern = "PartitionedFromPattern";
 /*! \brief Mark the function as only composed of reshape operations. */
 constexpr const char* kReshapeOnly = "relay.reshape_only";
+
 }  // namespace attr
 
 }  // namespace relay

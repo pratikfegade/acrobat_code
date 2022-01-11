@@ -60,10 +60,7 @@ struct CallTracer : ExprVisitor {
 
   void HandleBatchedPrimFunc(const GlobalVarNode* gvn) {
     if (batched_execution_) {
-      auto batched_funcs = module_
-                               ->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs",
-                                                                    Map<GlobalVar, GlobalVar>())
-                               .value();
+      auto batched_funcs = module_->batched_prim_funcs;
       auto iit = batched_funcs.find(GetRef<GlobalVar>(gvn));
       if (iit != batched_funcs.end()) {
         // std::cout << "[RUF] Also considering abtched function " << (*iit).second->name_hint

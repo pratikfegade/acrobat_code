@@ -428,9 +428,9 @@ void CodeGenLLVM::AddFunctionsOrdered(IterType begin, IterType end, ConvType pfu
   }
   std::sort(funcs.begin(), funcs.end(), [](PrimFunc func_a, PrimFunc func_b) {
     bool coarsened_prim_func_a =
-        func_a->GetAttr("coarsened_prim_func", Bool(false)).value().operator bool();
+        func_a->GetAttr(tir::attr::kDBCoarseWrapperPrimFunc, Bool(false)).value().operator bool();
     bool coarsened_prim_func_b =
-        func_b->GetAttr("coarsened_prim_func", Bool(false)).value().operator bool();
+        func_b->GetAttr(tir::attr::kDBCoarseWrapperPrimFunc, Bool(false)).value().operator bool();
     std::string name_a = func_a->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
     std::string name_b = func_b->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
     if (coarsened_prim_func_a == coarsened_prim_func_b) {
@@ -445,6 +445,8 @@ void CodeGenLLVM::AddFunctionsOrdered(IterType begin, IterType end, ConvType pfu
   //   std::cout << "[SORT]   " << name << std::endl;
   // }
   for (auto& f : funcs) {
+    // std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+    // std::cout << "[LLVM] Function: " << name << std::endl;
     AddFunction(f);
   }
 }

@@ -666,7 +666,7 @@ class AOTExecutorCodegen : public MixedModeVisitor {
 
     // Make the PrimFunc
     return tir::PrimFunc(main_signature_, final_body, VoidType(), Map<tir::Var, tir::Buffer>(),
-			 Map<tir::Var, tir::Buffer>(), DictAttrs(dict_attrs));
+                         Map<tir::Var, tir::Buffer>(), DictAttrs(dict_attrs));
   }
 
  protected:
@@ -813,7 +813,7 @@ class AOTExecutorCodegen : public MixedModeVisitor {
     // Build the TIR IRModule for the main AOT function
     Map<GlobalVar, BaseFunc> symbol_map;
     symbol_map.Set(GlobalVar(::tvm::runtime::symbol::tvm_run_func_suffix), prim_func);
-    IRModule mod_run(symbol_map, {}, {}, {}, mod->attrs);
+    IRModule mod_run(symbol_map, {}, {}, {}, {}, {}, mod->attrs);
     VLOG(1) << "main module:" << std::endl << PrettyPrint(mod_run);
 
     // Apply storage rewrite pass to the runner function to do memory planning

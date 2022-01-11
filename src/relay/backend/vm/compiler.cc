@@ -36,6 +36,7 @@
 #include <tvm/relay/runtime.h>
 #include <tvm/relay/transform.h>
 #include <tvm/runtime/logging.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/runtime/vm/vm.h>
 #include <tvm/te/operation.h>
 #include <tvm/tir/function.h>
@@ -513,7 +514,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   }
 
   Index AddPrimFuncToContext(const std::string& name, const DictAttrs& attrs) {
-    // std::cout << "[CO] Contexting " << name << std::endl;
+    std::cout << "[CO] Contexting " << name << std::endl;
     Index op_index;
     auto itr = context_->primitive_map.find(name);
     if (itr == context_->primitive_map.end()) {
@@ -540,7 +541,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     for (auto callee_name : callees) {
       AddPrimFuncToContext(callee_name, attrs);
       if (batched_execution_) {
-        AddPrimFuncToContext(callee_name + "_batched", attrs);
+        AddPrimFuncToContext(GetBatchedName(callee_name), attrs);
       }
     }
   }
@@ -576,7 +577,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
     auto op_index = AddPrimFuncToContext(global_var_node->name_hint, attrs);
     if (batched_execution_) {
-      AddPrimFuncToContext(global_var_node->name_hint + "_batched", attrs);
+      AddPrimFuncToContext(GetBatchedName(global_var_node->name_hint), attrs);
     }
 
     Emit(Instruction::InvokePacked(op_index, argument_registers.size(), output_tuple->fields.size(),
@@ -998,10 +999,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     exec_->primitive_map.insert(pair);
   }
 
-  auto arg_modes = context_.module
-                       ->GetAttr<Map<GlobalVar, Array<Integer>>>("batched_prim_func_arg_mode",
-                                                                 Map<GlobalVar, Array<Integer>>())
-                       .value();
+  auto arg_modes = context_.module->batched_arg_modes;
   std::cout << "[CO] ARGMODES2" << std::endl;
   for (auto it : arg_modes) {
     std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
@@ -1077,7 +1075,6 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Compute away possibly introduced constant computation.
   pass_seqs.push_back(transform::FoldConstant());
-  // pass_seqs.push_back(transform::PrintCurrentIR("FoldConstant", true, false));
 
   // Lift constants to the top-level of the block to simplify VM code generation.
   // TODO(@icemelon9, @jroesch): Remove this pass for now because some
@@ -1094,6 +1091,8 @@ transform::Sequential VMCompiler::FuseAndLowerOperators(const SEScope& host_se_s
   // Give each "primitive" Function a hash.
   pass_seqs.push_back(LabelOps());
   // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
+
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
   // Lower "primitive" Functions to PrimFuncs and rewrite calls.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
@@ -1102,7 +1101,8 @@ transform::Sequential VMCompiler::FuseAndLowerOperators(const SEScope& host_se_s
                                          }
                                        },
                                        host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass2", true, false));
+
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
@@ -1175,7 +1175,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE1", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1184,6 +1184,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // Now that we have PrimFuncs, flow and solve SEScope constraints again to account for
   // any memory scopes which lowering has settled on.
   pass_seqs.push_back(transform::PlanDevices(config_));
+  // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, false));
 
   // Inline the functions that are lifted to the module scope. We perform this
   // pass after all other optimization passes but before the memory allocation
@@ -1199,7 +1200,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
-    pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity());
+    bool batched_execution =
+        pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value();
+    pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity(batched_execution));
   }
   // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
@@ -1262,7 +1265,7 @@ void VMCompiler::Codegen() {
       //   std::cout << "[CO]   Function: " << iit.first->name_hint << std::endl;
       // }
     }
-    lib = tvm::build(per_tvm_target_modules, config_->host_target);
+    lib = tvm::build(per_tvm_target_modules, config_->host_target, true);
   }
 
   lib = codegen::CreateMetadataModule(params_, lib, ext_mods, config_->host_target,

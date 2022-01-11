@@ -59,6 +59,13 @@ class IRModuleNode : public Object {
   Map<GlobalTypeVar, TypeData> type_definitions;
   /*! \brief The source map for the module. */
   parser::SourceMap source_map;
+  /*! \brief A map from global vars to the global vars of the
+      correspnding batched prim func. Applicable only when dynamic
+      batching is turned on. */
+  Map<GlobalVar, GlobalVar> batched_prim_funcs;
+  /*! \brief A Arg modes for batched prim funcs. Applicable only when
+      dynamic batching is turned on */
+  Map<GlobalVar, Array<Integer>> batched_arg_modes;
   /* \brief Additional attributes storing meta-data about the module. */
   DictAttrs attrs;
 
@@ -122,6 +129,8 @@ class IRModuleNode : public Object {
     v->Visit("global_var_map_", &global_var_map_);
     v->Visit("global_type_var_map_", &global_type_var_map_);
     v->Visit("source_map", &source_map);
+    v->Visit("batched_prim_funcs", &batched_prim_funcs);
+    v->Visit("batched_arg_modes", &batched_arg_modes);
     v->Visit("attrs", &attrs);
   }
 
@@ -174,6 +183,20 @@ class IRModuleNode : public Object {
    * \param func The new function.
    */
   TVM_DLL void Update(const GlobalVar& var, const BaseFunc& func);
+
+  /*!
+   * \brief Update the mapping between a prim func and its corresponding batched prim func.
+   * \param var The global var corresponding to the prim func.
+   * \param func The global var corresponding to the batched prim func.
+   */
+  TVM_DLL void UpdateBatchedPrimFunc(const GlobalVar& func, const GlobalVar& batched);
+
+  /*!
+   * \brief Update the mapping between a function and its arg modes.
+   * \param var The global var corresponding to the function.
+   * \param func The arg modes.
+   */
+  TVM_DLL void UpdateArgMode(const GlobalVar& batched, const Array<Integer>& arg_modes);
 
   /*!
    * \brief Update a type definition in the global environment.
@@ -368,6 +391,8 @@ class IRModule : public ObjectRef {
   TVM_DLL explicit IRModule(Map<GlobalVar, BaseFunc> functions,
                             Map<GlobalTypeVar, TypeData> type_definitions = {},
                             std::unordered_set<String> import_set = {}, parser::SourceMap map = {},
+                            Map<GlobalVar, GlobalVar> batched_prim_funcs = {},
+                            Map<GlobalVar, Array<Integer>> batched_arg_modes = {},
                             DictAttrs attrs = {});
 
   /*! \brief default constructor */

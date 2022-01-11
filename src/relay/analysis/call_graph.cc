@@ -67,9 +67,7 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   // post-order visitor will visit each AST node of the current function to
   // figure out the dependencies between functions.
 
-  auto batched_prim_funcs =
-      module->GetAttr<Map<GlobalVar, GlobalVar>>("batched_prim_funcs", Map<GlobalVar, GlobalVar>())
-          .value();
+  auto batched_prim_funcs = module->batched_prim_funcs;
   PostOrderVisit(func, [&](const Expr& expr) {
     // TODO(mbs): Cleanup shapes functions.
     if (const auto* call_node = expr.as<CallNode>()) {

@@ -107,9 +107,9 @@ class PrimFuncNode : public BaseFuncNode {
   bool SEqualReduce(const PrimFuncNode* other, SEqualReducer equal) const {
     // visit params and buffer_map first as they contains defs.
     return equal.DefEqual(params, other->params) && equal(buffer_map, other->buffer_map) &&
-      equal(scatter_buffer_map, other->scatter_buffer_map) &&
-      equal(ret_type, other->ret_type) && equal(body, other->body) &&
-      equal(attrs, other->attrs);
+           equal(scatter_buffer_map, other->scatter_buffer_map) &&
+           equal(ret_type, other->ret_type) && equal(body, other->body) &&
+           equal(attrs, other->attrs);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
@@ -301,6 +301,13 @@ constexpr const char* kLinkedParams = "tir.linked_params";
  * Type: Integer
  */
 constexpr const char* kIsGlobalFunc = "tir.is_global_func";
+
+/*! \brief Mark the function as a coarsened wrapper that calls into
+    leaf prim funcs that actually perform tensor computations. */
+constexpr const char* kDBCoarseWrapperPrimFunc = "db.coarsened_wrapper_prim_func";
+
+/*! \brief Mark the function as a batched version of a prim func. */
+constexpr const char* kDBBatchedPrimFunc = "db.batched_prim_func";
 
 }  // namespace attr
 }  // namespace tir

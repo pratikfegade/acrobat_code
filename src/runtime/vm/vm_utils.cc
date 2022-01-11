@@ -168,6 +168,8 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
     }
   }
 
+  std::cout << "[VMU]   Invoke " << counter << std::endl;
+
   if (!is_empty_output) {
     TVMRetValue rv;
     func.CallPacked(TVMArgs(values.data(), codes.data(), counter), &rv);

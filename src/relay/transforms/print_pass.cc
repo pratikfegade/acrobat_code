@@ -44,13 +44,13 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
                                                                             PassContext pc) {
     std::cout << "[PRINT] IR after " << previous_pass << std::endl;
 
-    auto arg_modes = m->GetAttr<Map<GlobalVar, Array<Integer>>>("batched_prim_func_arg_mode",
-                                                                Map<GlobalVar, Array<Integer>>())
-                         .value();
-    for (auto it : arg_modes) {
-      std::cout << "[CO]  " << it.first->name_hint << " " << it.second.size() << std::endl;
-    }
+    // auto arg_modes = m->batched_arg_modes;
 
+    // for (auto it : arg_modes) {
+    //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second.size() << std::endl;
+    // }
+
+    std::cout << "[PP] Hypernovae " << m->batched_prim_funcs.size() << std::endl;
     // if (clean_up_on_device) {
     //   for (auto kv : m->functions) {
     //     if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {

@@ -45,10 +45,13 @@ namespace tvm {
 IRModule::IRModule(tvm::Map<GlobalVar, BaseFunc> functions,
                    tvm::Map<GlobalTypeVar, TypeData> type_definitions,
                    std::unordered_set<String> import_set, parser::SourceMap source_map,
-                   DictAttrs attrs) {
+                   Map<GlobalVar, GlobalVar> batched_prim_funcs,
+                   Map<GlobalVar, Array<Integer>> batched_arg_modes, DictAttrs attrs) {
   auto n = make_object<IRModuleNode>();
   n->functions = std::move(functions);
   n->type_definitions = std::move(type_definitions);
+  n->batched_prim_funcs = std::move(batched_prim_funcs);
+  n->batched_arg_modes = std::move(batched_arg_modes);
   n->global_type_var_map_ = {};
   n->global_var_map_ = {};
   n->constructor_tag_map_ = {};
@@ -253,6 +256,14 @@ void IRModuleNode::Update(const GlobalVar& var, const BaseFunc& func) {
   this->Add(var, func, true);
 }
 
+void IRModuleNode::UpdateBatchedPrimFunc(const GlobalVar& func, const GlobalVar& batched) {
+  this->batched_prim_funcs.Set(func, batched);
+}
+
+void IRModuleNode::UpdateArgMode(const GlobalVar& batched, const Array<Integer>& arg_modes) {
+  this->batched_arg_modes.Set(batched, arg_modes);
+}
+
 void IRModuleNode::UpdateTypeDef(const GlobalTypeVar& var, const TypeData& type) {
   this->AddTypeDef(var, type, true);
 }
@@ -375,7 +386,7 @@ void IRModuleNode::Update(const IRModule& mod) {
 
 IRModule IRModuleNode::ShallowCopy() {
   return IRModule(this->functions, this->type_definitions, this->Imports(), this->source_map,
-                  this->attrs);
+                  this->batched_prim_funcs, this->batched_arg_modes, this->attrs);
 }
 
 std::pair<IRModule, GlobalVar> IRModule::FromExprInContext(

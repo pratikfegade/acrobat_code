@@ -28,6 +28,7 @@
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/op_attr_types.h>
 #include <tvm/relay/transform.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/op.h>
@@ -245,38 +246,6 @@ class LetLifter : public ExprMutator {
 
 class TupleInliner : public ExprMutator {
  public:
-  // Expr VisitExpr_(const LetNode* let) override {
-  //   Var var = let->var;
-  //   Expr value = let->value;
-  //   Expr body = let->body;
-
-  //   if (value.as<TupleNode>()) {
-  //     var_values_.Set(var, VisitExpr(value));
-  //     return VisitExpr(body);
-  //     // return Let(var, VisitExpr(value), VisitExpr(body));
-  //   } else {
-  //     return Let(var, VisitExpr(value), VisitExpr(body));
-  //   }
-  // }
-
-  // Expr VisitExpr_(const VarNode* var) override {
-  //   auto it = var_values_.find(GetRef<Var>(var));
-  //   if (it != var_values_.end()) {
-  //     return (*it).second;
-  //   } else {
-  //     return ExprMutator::VisitExpr_(var);
-  //   }
-  // }
-
-  // Expr VisitExpr_(const TupleGetItemNode* op) override {
-  //   Expr tuple = VisitExpr(op->tuple);
-  //   if (auto tn = tuple.as<TupleNode>()) {
-  //     return tn->fields[op->index];
-  //   } else {
-  //     return TupleGetItem(tuple, op->index);
-  //   }
-  // }
-
   Expr VisitExpr_(const CallNode* op) override {
     auto on_device_props = GetOnDeviceProps(op);
     if (on_device_props.body.defined()) {
@@ -380,6 +349,13 @@ struct TIRLowererResult {
 
 class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
  public:
+  TIRLowerer(bool create_batched, const IRModule& mod)
+      : create_batched_(create_batched), mod_(mod) {
+    if (create_batched) {
+      batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
+    }
+  }
+
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) {
     RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
@@ -388,7 +364,6 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     std::vector<Expr> flattened_call_args;
 
     for (auto var : free_vars) {
-      // std::cout << "[TL]   FreeVar " << var->vid->name_hint << " " << var.get() << std::endl;
       FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
     }
 
@@ -402,7 +377,11 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       // std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
         ICHECK(call->op == GetInvokeTVMOp());
-        tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
+        if (create_batched_) {
+          tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvokeBatched(call)));
+        } else {
+          tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
+        }
       } else if (auto tuple = rvalue.as<TupleNode>()) {
         tuple_var_values_.Set(rvar, tuple->fields);
       } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
@@ -440,6 +419,9 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     // std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
     Array<tir::Var> prim_func_params;
+    if (create_batched_) {
+      prim_func_params.push_back(batch_size_var_);
+    }
     for (auto rvar : flattened_free_vars) {
       prim_func_params.push_back(GetOrCreateVar(rvar));
     }
@@ -481,40 +463,53 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
   }
 
   PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) {
+    auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+    std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
-    args.push_back(tir::StringImm(call->args[0].as<GlobalVarNode>()->name_hint));
+    args.push_back(tir::StringImm(name));
+
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
-
-    Expr inputs_tuple = call->args[1];
-    Expr outputs_tuple = call->args[2];
-    // std::cout << "[TL] Call inputs " << inputs_tuple << std::endl;
-    for (auto arg : FlattenTuple(inputs_tuple)) {
-      ICHECK(arg.as<relay::VarNode>());
-      // std::cout << "[TL]   Field " << arg << std::endl;
-      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    }
-    // std::cout << "[TL] Call outputs " << outputs_tuple << std::endl;
-    for (auto arg : FlattenTuple(outputs_tuple)) {
-      ICHECK(arg.as<relay::VarNode>());
-      // std::cout << "[TL]   Field " << arg << std::endl;
-      args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    }
+    auto push_args = [&](const Expr& tuple) {
+      for (auto arg : FlattenTuple(tuple)) {
+        ICHECK(arg.as<relay::VarNode>());
+        args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+      }
+    };
+    push_args(call->args[1]);
+    push_args(call->args[2]);
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+  }
 
-    // ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
+  PrimExpr ConvertTVMOpInvokeBatched(const relay::CallNode* call) {
+    auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+    std::string name = runtime::vm::GetBatchedName(callee_gv->name_hint);
+    Array<PrimExpr> args;
+    args.push_back(tir::StringImm(name));
+    args.push_back(batch_size_var_);
 
-    // Expr inputs_tuple = call->args[1];
-    // Expr outputs_tuple = call->args[2];
-    // Array<PrimExpr> args;
-    // for (auto arg : FlattenTuple(inputs_tuple)) {
-    //   ICHECK(arg.as<relay::VarNode>());
-    //   args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    // }
-    // for (auto arg : FlattenTuple(outputs_tuple)) {
-    //   ICHECK(arg.as<relay::VarNode>());
-    //   args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
-    // }
-    // return tir::Call(DataType::Void(), call->args[0], args);
+    auto batched_func_map = mod_->batched_prim_funcs;
+    auto iit = mod_->batched_prim_funcs.find(callee_gv);
+    ICHECK(iit != mod_->batched_prim_funcs.end()) << callee_gv->name_hint;
+    auto batched_callee_gv = (*iit).second;
+    auto it = mod_->batched_arg_modes.find(batched_callee_gv);
+    ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
+    auto& arg_modes = (*it).second;
+
+    int idx = 0;
+    auto push_args = [&](const Expr& tuple) {
+      for (auto arg : FlattenTuple(tuple)) {
+        if (arg_modes[idx++]->value == static_cast<int>(runtime::vm::kIgnore)) {
+          continue;
+        }
+        ICHECK(arg.as<relay::VarNode>());
+        args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+      }
+    };
+
+    ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
+    push_args(call->args[1]);
+    push_args(call->args[2]);
+    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
   }
 
   Type RelayTypeToTIRType(const Type& type) {
@@ -570,13 +565,17 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
   }
 
  private:
+  bool create_batched_;
+  const IRModule& mod_;
+  tir::Var batch_size_var_;
   Map<relay::Var, tir::Var> var_to_var_mapping_;
   Map<relay::Var, Array<Expr>> tuple_var_values_;
 };
 
 class Coarsener : public ExprMutator {
  public:
-  Coarsener(const Groups& groups) : groups_(groups) {}
+  Coarsener(const Groups& groups, const IRModule& mod, bool batched_execution)
+      : groups_(groups), mod_(mod), batched_execution_(batched_execution) {}
 
  private:
   Expr VisitExpr(const Expr& expr) override {
@@ -592,32 +591,60 @@ class Coarsener : public ExprMutator {
 
   Expr HandleExpr(const Expr& expr) {
     if (groups_.count(expr)) {
+      auto add_attrs_to_wrapper_func = [](const tir::PrimFunc& func, const std::string& name,
+                                          bool batched) {
+        // format hash as fixed length hex string so it is easier to read
+        size_t hash = StructuralHash()(func);
+        std::stringstream s;
+        s << std::setfill('0') << std::setw(sizeof(size_t) * 2) << std::hex << hash;
+        Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
+        Map<String, ObjectRef> attrs;
+        attrs.Set("global_symbol", runtime::String(name));
+        attrs.Set("hash", String(s.str()));
+        attrs.Set(tvm::attr::kTarget, target);
+        attrs.Set(tir::attr::kDBCoarseWrapperPrimFunc, Bool(true));
+        if (batched) {
+          attrs.Set(tir::attr::kDBBatchedPrimFunc, Bool(true));
+        }
+        return WithAttrs(std::move(func), attrs);
+      };
+
       auto tmp_expr = transform::ToANormalForm(expr);
       tmp_expr = TupleInliner()(expr);
       tmp_expr = LetLifter()(tmp_expr);
       Serializer serializer;
       serializer.Serialize(tmp_expr);
-      auto res = TIRLowerer().LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+      auto res =
+          TIRLowerer(false, mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
       auto prim_func = res.func;
       auto call_args = res.call_args;
       auto replacement = res.replacement;
       std::string name = "prim_func" + std::to_string(ctr++);
       GlobalVar prim_func_var(name, VoidType());
       auto call = InvokeTVMOp(prim_func_var, Tuple(call_args), Tuple(Array<Expr>()),
-                              DictAttrs({{"Primitive", tvm::Integer(1)}}));
-      Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
-
-      size_t hash = StructuralHash()(prim_func);
-
-      // format hash as fixed length hex string so it is easier to read
-      std::stringstream s;
-      s << std::setfill('0') << std::setw(sizeof(size_t) * 2) << std::hex << hash;
-
-      prim_func = WithAttrs(std::move(prim_func), {{"global_symbol", runtime::String(name)},
-                                                   {tvm::attr::kTarget, target},
-                                                   {"hash", String(s.str())},
-                                                   {"coarsened_prim_func", Bool(true)}});
+                              DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
+                                         {tir::attr::kDBCoarseWrapperPrimFunc, Bool(true)}}));
+      prim_func = add_attrs_to_wrapper_func(prim_func, name, false);
       prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
+
+      if (batched_execution_) {
+        auto batched_res =
+            TIRLowerer(true, mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+        auto batched_func = batched_res.func;
+        std::string batched_name = runtime::vm::GetBatchedName(name);
+        GlobalVar batched_func_var(batched_name, VoidType());
+        batched_func = add_attrs_to_wrapper_func(batched_func, batched_name, true);
+        std::cout << "batched_func " << batched_func << std::endl;
+        prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
+        batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
+        Array<Integer> arg_modes;
+
+        for (size_t i = 0; i < batched_func->params.size() - 1; ++i) {
+          arg_modes.push_back(Integer(static_cast<int>(runtime::vm::kConcat)));
+        }
+        batched_arg_modes_.push_back(std::make_pair(batched_func_var, arg_modes));
+      }
+
       return Let(Var("dummy", VoidType()), call, replacement);
     } else {
       return ExprMutator::VisitExpr(expr);
@@ -626,18 +653,25 @@ class Coarsener : public ExprMutator {
 
  public:
   std::vector<std::pair<GlobalVar, tir::PrimFunc>> prim_funcs_;
+  std::vector<std::pair<GlobalVar, GlobalVar>> batched_func_pairs_;
+  std::vector<std::pair<GlobalVar, Array<Integer>>> batched_arg_modes_;
 
  private:
   const Groups& groups_;
+  const IRModule& mod_;
+  const bool batched_execution_;
   static int ctr;
 };
 
 int Coarsener::ctr = 0;
 
-IRModule CoarsenGranularity(const IRModule& mod) {
+IRModule CoarsenGranularity(IRModule& mod, bool batched_execution) {
   // std::cout << "Coarsening now!" << std::endl;
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
+
+  std::cout << "[CG] Supernovae " << mod->batched_prim_funcs.size() << std::endl;
+
   auto funcs = mod->functions;
   for (const auto& it : funcs) {
     if (const auto* n = it.second.as<FunctionNode>()) {
@@ -646,13 +680,22 @@ IRModule CoarsenGranularity(const IRModule& mod) {
       Function func = GetRef<Function>(n);
 
       auto groups = GroupFinder().FindGroups(func);
-      Coarsener coarsener(groups);
+      Coarsener coarsener(groups, mod, batched_execution);
       Function ret = Downcast<Function>(coarsener(func));
 
       updates.Set(it.first, ret);
 
       for (auto it : coarsener.prim_funcs_) {
         new_prim_funcs.Set(it.first, it.second);
+      }
+
+      if (batched_execution) {
+        for (auto it : coarsener.batched_func_pairs_) {
+          mod->UpdateBatchedPrimFunc(it.first, it.second);
+        }
+        for (auto it : coarsener.batched_arg_modes_) {
+          mod->UpdateArgMode(it.first, it.second);
+        }
       }
     }
   }
@@ -668,15 +711,10 @@ IRModule CoarsenGranularity(const IRModule& mod) {
   return mod;
 }
 
-//   322 GlobalVar(vm_mod_fused_nn_dense_nn_bias_add): PrimFunc([placeholder, placeholder,
-//   placeholder, T_add]) attrs={"
-// 322 from_legacy_te_schedule": (bool)1, "global_symbol": "vm_mod_fused_nn_dense_nn_bias_add",
-// "tir.noalias": (bool)1 322 , "target": llvm -keys=cpu -link-params=0} {
-
 namespace transform {
-Pass CoarsenPrimitiveFuncGranularity() {
+Pass CoarsenPrimitiveFuncGranularity(bool batched_execution) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
-      [=](IRModule m, PassContext pc) { return CoarsenGranularity(m); };
+      [=](IRModule m, PassContext pc) { return CoarsenGranularity(m, batched_execution); };
   return CreateModulePass(pass_func, 0, "CoarsenPrimitiveFuncGranularity", {});
 }
 

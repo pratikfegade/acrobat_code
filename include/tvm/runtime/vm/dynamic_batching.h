@@ -41,6 +41,8 @@ enum DBBatchedArgMode {
   kReuse = 2,
 };
 
+inline std::string GetBatchedName(std::string name) { return name + "_batched"; }
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

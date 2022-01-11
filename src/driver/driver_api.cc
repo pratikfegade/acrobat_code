@@ -444,20 +444,21 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
  * device and host. Then it also applies transformations on the new splitted modules.
  */
 std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target& target_arg,
-                                               const Target& target_host_arg,
+                                               const Target& target_host_arg, bool for_execution,
                                                const Array<String>& print_after_passes) {
   Target target = target_arg, target_host = target_host_arg;
   CheckAndUpdateHostConsistency(&target, &target_host);
 
   ICHECK(mod_mixed.defined()) << "This module must be defined";
 
-  mod_mixed = ApplyPasses(mod_mixed, MixedModulePassManager(mod_mixed, target, print_after_passes));
+  mod_mixed = ApplyPasses(
+      mod_mixed, MixedModulePassManager(mod_mixed, target, for_execution, print_after_passes));
 
-  IRModule host_mod =
-      ApplyPasses(mod_mixed, HostModulePassManager(mod_mixed, target_host, print_after_passes));
+  IRModule host_mod = ApplyPasses(
+      mod_mixed, HostModulePassManager(mod_mixed, target_host, for_execution, print_after_passes));
 
-  IRModule device_mod =
-      ApplyPasses(mod_mixed, DeviceModulePassManager(mod_mixed, target, print_after_passes));
+  IRModule device_mod = ApplyPasses(
+      mod_mixed, DeviceModulePassManager(mod_mixed, target, for_execution, print_after_passes));
   // exit(0);
   // return {};
 
@@ -502,12 +503,13 @@ runtime::Module PreProcessModuleForBuild(const Map<Target, IRModule>& inputs_arg
   // Take the attrs from the first module so the eventual modules have them.
   // Ideally this would just be one unified module all the way through;
   IRModule first_module = (*inputs.begin()).second;
-  IRModule mhost_all = IRModule(Map<GlobalVar, BaseFunc>(), {}, {}, {}, first_module->attrs);
+  IRModule mhost_all =
+      IRModule(Map<GlobalVar, BaseFunc>(), {}, {}, {}, {}, {}, first_module->attrs);
   ICHECK(mhost_all.defined()) << "The host module must be defined";
 
   for (const auto& it : inputs) {
     if (it.second.defined()) {
-      auto pair = SplitMixedModule(it.second, it.first, target_host, print_after_passes);
+      auto pair = SplitMixedModule(it.second, it.first, target_host, false, print_after_passes);
       auto& host_mod = pair.first;
       auto& device_mod = pair.second;
 
@@ -538,7 +540,8 @@ TVM_REGISTER_GLOBAL("driver.preprocess_module")
       return PreProcessModuleForBuild(inputs_arg, host_target, print_after_passes);
     });
 
-runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& target_host_arg) {
+runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& target_host_arg,
+                      bool for_execution) {
   auto pass_ctx = transform::PassContext::Current();
 
   std::vector<runtime::Module> device_modules;
@@ -567,7 +570,8 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
   // Take the attrs from the first module so the eventual modules have them.
   // Ideally this would just be one unified module all the way through;
   IRModule first_module = (*inputs.begin()).second;
-  IRModule mhost_all = IRModule(Map<GlobalVar, BaseFunc>(), {}, {}, {}, first_module->attrs);
+  IRModule mhost_all =
+      IRModule(Map<GlobalVar, BaseFunc>(), {}, {}, {}, {}, {}, first_module->attrs);
 
   ICHECK(mhost_all.defined()) << "The host module must be defined";
 
@@ -575,12 +579,11 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
     if (it.second.defined()) {
       const Target& target = it.first;
       const IRModule& ir_module = it.second;
-      // std::cout << "[DA] Target " << target << std::endl;
-      // for (auto pair : ir_module->functions) {
-      // std::cout << "[DA]  Func " << pair.first->name_hint << " " << pair.second.defined()
-      // << std::endl;
-      // }
-      auto pair = SplitMixedModule(ir_module, target, target_host, Array<String>());
+      std::cout << "[DA] Target " << target << std::endl;
+      for (auto pair : ir_module->functions) {
+        std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+      }
+      auto pair = SplitMixedModule(ir_module, target, target_host, for_execution, Array<String>());
       auto& host_mod = pair.first;
       auto& device_mod = pair.second;
 
@@ -617,7 +620,8 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
 }
 
 // Build for heterogeneous execution when target is a string.
-runtime::Module build(const Map<String, IRModule>& inputs_arg, const Target& target_host_arg) {
+runtime::Module build(const Map<String, IRModule>& inputs_arg, const Target& target_host_arg,
+                      bool for_execution) {
   Map<Target, IRModule> updated_inputs;
   Target target_host = target_host_arg;
   for (const auto& it : inputs_arg) {
@@ -629,20 +633,20 @@ runtime::Module build(const Map<String, IRModule>& inputs_arg, const Target& tar
     }
     updated_inputs.Set(target, it.second);
   }
-  return build(updated_inputs, target_host);
+  return build(updated_inputs, target_host, for_execution);
 }
 
 // Build for homogeneous execution.
 runtime::Module build(const IRModule& funcs, const Target& target_arg,
-                      const Target& target_host_arg) {
+                      const Target& target_host_arg, bool for_execution) {
   auto target = target_arg, target_host = target_host_arg;
   CheckAndUpdateHostConsistency(&target, &target_host);
   // More maps of target and target host
   Map<Target, IRModule> inputs = {{target, funcs}};
-  return build(inputs, target_host);
+  return build(inputs, target_host, for_execution);
 }
 
-transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target,
+transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, bool for_execution,
                                              const Array<String>& print_after_passes) {
   transform::PassContext pass_ctx = transform::PassContext::Current();
 
@@ -677,8 +681,10 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target,
   bool unpacked_api = (mixed_mod->GetAttr<relay::Executor>(tvm::attr::kExecutor)
                            .value_or(relay::Executor::Create("graph", {}))
                            ->GetAttr<Bool>("unpacked-api")
-                           .value_or(Bool(false)));
+                           .value_or(Bool(false))) ||
+                      (target->GetAttr("unpacked-api", Bool(false)) && for_execution);
   if (unpacked_api) {
+    std::cout << "[DA]   Unpacked API" << std::endl;
     mixed_pass_list.push_back(tir::transform::MakeUnpackedAPI());
   } else {
     mixed_pass_list.push_back(tir::transform::MakePackedAPI(-1));
@@ -694,6 +700,7 @@ TVM_REGISTER_GLOBAL("driver.mixed_mod_passes")
     });
 
 transform::Sequential HostModulePassManager(IRModule mixed_mod, Target target_host,
+                                            bool for_execution,
                                             const Array<String>& print_after_passes) {
   Array<tvm::transform::Pass> host_pass_list;
   host_pass_list.push_back(Filter([](const tir::PrimFunc& f) {
@@ -719,7 +726,7 @@ TVM_REGISTER_GLOBAL("driver.host_mod_passes")
       return HostModulePassManager(mixed_mod, target_host);
     });
 
-transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target,
+transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target, bool for_execution,
                                               const Array<String>& print_after_passes) {
   Array<Pass> device_pass_list;
   device_pass_list.push_back(Filter([](const tir::PrimFunc& f) {

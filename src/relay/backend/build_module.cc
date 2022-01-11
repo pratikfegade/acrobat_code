@@ -447,8 +447,8 @@ class RelayBuildModule : public runtime::ModuleNode {
       auto prim = tir::PrimFunc(Array<tir::Var>(), tir::SeqStmt(Array<tir::Stmt>()), VoidType(),
                                 Map<tir::Var, tir::Buffer>(), Map<tir::Var, tir::Buffer>(), attrs);
       if (lowered_funcs.find(host_target) == lowered_funcs.end()) {
-        lowered_funcs.Set(host_target,
-                          IRModule(Map<GlobalVar, BaseFunc>({}), {}, {}, {}, func_module->attrs));
+        lowered_funcs.Set(host_target, IRModule(Map<GlobalVar, BaseFunc>({}), {}, {}, {}, {}, {},
+                                                func_module->attrs));
       }
       lowered_funcs[host_target]->Add(GlobalVar(::tvm::runtime::symbol::tvm_lookup_linked_param),
                                       prim);

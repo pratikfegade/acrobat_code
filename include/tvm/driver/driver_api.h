@@ -55,6 +55,7 @@ using tvm::transform::Pass;
  * \return The composite Pass for the fused module.
 //  */
 TVM_DLL transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target,
+                                                     bool for_execution = false,
                                                      const Array<String>& print_after_passes = {});
 
 /*!
@@ -66,6 +67,7 @@ TVM_DLL transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target 
  * \return The composite Pass for the device module.
  */
 TVM_DLL transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target target,
+                                                      bool for_execution = false,
                                                       const Array<String>& print_after_passes = {});
 
 /*!
@@ -77,6 +79,7 @@ TVM_DLL transform::Sequential DeviceModulePassManager(IRModule mixed_mod, Target
  * \return The composite Pass for the host module.
  */
 TVM_DLL transform::Sequential HostModulePassManager(IRModule mixed_mod, Target target_host,
+                                                    bool for_execution = false,
                                                     const Array<String>& print_after_passes = {});
 
 /*!
@@ -153,7 +156,7 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
  * \return The built module.
  */
 TVM_DLL runtime::Module build(const IRModule& funcs, const Target& target,
-                              const Target& target_host);
+                              const Target& target_host, bool for_execution = false);
 
 /*!
  * \brief Build a device and host module for a specific target from a map
@@ -164,7 +167,8 @@ TVM_DLL runtime::Module build(const IRModule& funcs, const Target& target,
  *        pass Target().
  * \return The built module that contains code for different processors.
  */
-TVM_DLL runtime::Module build(const Map<Target, IRModule>& input, const Target& target_host);
+TVM_DLL runtime::Module build(const Map<Target, IRModule>& input, const Target& target_host,
+                              bool for_execution = false);
 
 /*!
  * \brief Build a device and host module for a specific target from a map
@@ -175,7 +179,8 @@ TVM_DLL runtime::Module build(const Map<Target, IRModule>& input, const Target& 
  *        pass Target().
  * \return The built module that contains code for different processors.
  */
-TVM_DLL runtime::Module build(const Map<String, IRModule>& input, const Target& target_host);
+TVM_DLL runtime::Module build(const Map<String, IRModule>& input, const Target& target_host,
+                              bool for_execution = false);
 
 }  // namespace tvm
 
