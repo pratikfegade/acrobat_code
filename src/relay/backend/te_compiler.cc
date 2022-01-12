@@ -394,14 +394,16 @@ class TECompilerImpl : public TECompilerNode {
                                      ? cached_func->prim_fn_var
                                      : kv.first;
           auto func = kv.second;
-          if (func.as<tir::PrimFuncNode>() && batched) {
-            func = WithAttr(std::move(Downcast<tir::PrimFunc>(func)), tir::attr::kDBBatchedPrimFunc,
-                            Bool(true));
+          if (func.as<tir::PrimFuncNode>()) {
+            Map<String, ObjectRef> attrs;
+            if (batched) {
+              attrs.Set(tir::attr::kDBBatchedPrimFunc, Bool(true));
+            }
+            attrs.Set(tir::attr::kDBKernelPrimFunc, Bool(true));
+            std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
+            func = WithAttrs(std::move(Downcast<tir::PrimFunc>(func)), attrs);
           }
           cached_func->funcs->Add(global_var, func);
-          if (batched && global_var->name_hint == "vm_mod_fused_zeros_batched") {
-            std::cout << "[BATCHED] " << global_var << ": " << func << std::endl;
-          }
         }
         ICHECK(cached_func->funcs->Lookup(cached_func->prim_fn_var).as<tir::PrimFuncNode>());
       };
@@ -1207,7 +1209,7 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
   return updated_module;
 }
 
-Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
+Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
   std::unordered_map<Target, IRModule, backend::TargetStrHash, backend::TargetStrEqual>
       per_target_modules;
   for (const auto& kv : mod->functions) {
@@ -1216,19 +1218,27 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod) {
     if (func->IsInstance<tir::PrimFuncNode>()) {
       // std::cout << "[PTM] Func " << var->name_hint << std::endl;
       // Extract target
-      Optional<Target> target = func->GetAttr<Target>(tvm::attr::kTarget);
-      ICHECK(target) << "Target should be set at this point";
+      Optional<Target> opt_target = func->GetAttr<Target>(tvm::attr::kTarget);
+      ICHECK(opt_target) << "Target should be set at this point";
+
+      Target target = opt_target.value();
+      if (for_execution && func->HasNonzeroAttr(tvm::tir::attr::kDBKernelPrimFunc)) {
+        auto target_map = target->Export();
+        target_map.Set("db-unpacked-api", Bool(true));
+        target = Target(target_map);
+        std::cout << "FCKFCKFCK " << var->name_hint << std::endl;
+      }
 
       // Put the function in per_target_modules
-      if (!per_target_modules.count(target.value())) {
+      if (!per_target_modules.count(target)) {
         // Initialize the IRModule for this target with the attributes from the input IRModule
         IRModule target_module = IRModule({}, {}, {}, {}, {}, {}, mod->attrs);
         // Add the function to the IRModule
         target_module->Add(var, func);
-        per_target_modules[target.value()] = target_module;
+        per_target_modules[target] = target_module;
       } else {
         // The IRModule for this target is initialized, so just add the function.
-        IRModule target_module = per_target_modules.at(target.value());
+        IRModule target_module = per_target_modules.at(target);
         target_module->Add(var, func);
       }
     } else if (!func->IsInstance<relay::FunctionNode>()) {

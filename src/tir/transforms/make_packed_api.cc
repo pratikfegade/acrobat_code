@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../support/utils.h"
 #include "arg_binder.h"
 #include "ir_utils.h"
 
@@ -109,6 +110,8 @@ inline Stmt MakeAssertEQ(PrimExpr lhs, PrimExpr rhs, std::string msg) {
 
 PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
   auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
+  bool print = support::StartsWith(global_symbol.value(), "prim_func");
+
   ICHECK(global_symbol) << "MakePackedAPI: Expect PrimFunc to have the global_symbol attribute";
 
   auto target = func->GetAttr<Target>(tvm::attr::kTarget);
@@ -193,7 +196,8 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
     }
     if (i < num_packed_args) {
       // Value loads
-      seq_init.emplace_back(LetStmt(v_arg, f_arg_value(v_arg.dtype(), i), nop));
+      auto value = f_arg_value(v_arg.dtype(), i);
+      seq_init.emplace_back(LetStmt(v_arg, value, nop));
       // type code checks
       Var tcode(v_arg->name_hint + ".code", DataType::Int(32));
       seq_init.emplace_back(LetStmt(tcode,

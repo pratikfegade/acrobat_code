@@ -253,6 +253,8 @@ class TIRCalleeCollector : public tir::StmtExprVisitor {
   void VisitExpr_(const tir::CallNode* op) override {
     if (auto callee = op->args[0].as<tir::StringImmNode>()) {
       callees_.push_back(callee->value);
+    } else if (auto gvn = op->op.as<GlobalVarNode>()) {
+      callees_.push_back(gvn->name_hint);
     }
   }
 
@@ -1006,6 +1008,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
   // update batched arg modes
   for (auto pair : arg_modes) {
+    ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
     auto index = exec_->primitive_map.at(pair.first->name_hint);
     if (exec_->batched_func_arg_mode.size() <= index) {
       exec_->batched_func_arg_mode.resize(index + 1);
@@ -1242,7 +1245,7 @@ void VMCompiler::Codegen() {
   //    in the "external_mods" attribute
   //  - PrimFuncs annotated with their targets.
   // Only the PrimFuncs will appear in per_target_modules, and there may legitimately be none.
-  Map<Target, IRModule> per_tvm_target_modules = tec::GetPerTargetModules(context_.module);
+  Map<Target, IRModule> per_tvm_target_modules = tec::GetPerTargetModules(context_.module, true);
   for (const auto& kv : per_tvm_target_modules) {
     ICHECK(kv.first->kind->device_type != kDLExtDev);
   }

@@ -347,9 +347,9 @@ void VirtualMachine::InvokePacked(Index packed_index, const PackedFunc& func, In
   } else {
     if (batched) {
       InvokePackedFn(func, arg_count, output_size, args, batched_func_arg_mode_[packed_index],
-                     batched);
+                     batched, this->scattered_kernels_);
     } else {
-      InvokePackedFn(func, arg_count, output_size, args, {}, batched);
+      InvokePackedFn(func, arg_count, output_size, args, {}, batched, this->scattered_kernels_);
     }
   }
 }
@@ -368,6 +368,13 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
     std::cout << "[VM] Executing unbatched" << std::endl;
   }
   this->batched_execution_ = options->batched_execution;
+
+  if (options->scattered_kernels) {
+    std::cout << "[VM] Executing scattered kernels" << std::endl;
+  } else {
+    std::cout << "[VM] Executing unscattered kernels" << std::endl;
+  }
+  this->scattered_kernels_ = options->scattered_kernels;
 }
 
 void VirtualMachine::LoadExecutable(Executable* exec) {

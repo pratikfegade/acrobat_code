@@ -185,9 +185,12 @@ backend::FunctionInfo UpdateMainWorkspaceSize(const IRModule& mod, tec::TargetMa
  * per \p Target.
  *
  * \param mod The IRModule to extract the per target module from
+ * \param for_execution If this function is invoked to compile a
+ * function for final execution as opposed to execution during
+ * compilation (say during constant folding)
  * \return The map from Target to IRModule
  */
-Map<Target, IRModule> GetPerTargetModules(IRModule mod);
+Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution = false);
 
 /*! \brief Lower an IRModule's primitive functions to TIR.
  *

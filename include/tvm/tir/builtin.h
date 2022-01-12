@@ -449,6 +449,29 @@ TVM_DLL const Op& tvm_call_cpacked_lowered();
 TVM_DLL const Op& tvm_call_trace_packed_lowered();
 
 /*!
+ * \brief See pesudo code (this lowering is done during compilation)
+ *
+ *  return_type tvm_call_unpacked_from_packed(name, arg0, arg1, ...) {
+ *    unpacked_args = []
+ *    unpacked_arg0 = tvm_struct_get(arg0, 0, kArrData)
+ *    unpacked_arg1 = tvm_struct_get(arg1, 0, kArrData)
+ *    ...
+ *    return global_var(name, unpacked_arg0, unpacked_arg1, ...)
+ *  }
+ */
+TVM_DLL const Op& tvm_call_unpacked_from_packed();
+
+/*!
+ * \brief See pesudo code (this lowering is done during compilation)
+ *
+ *  return_type tvm_call_unpacked_from_packed_lowered(name, arg0, arg1, ...) {
+ *    global_var = GetGlobalVar(name);
+ *    return global_var(unpacked_arg0, unpacked_arg1, ...)
+ *  }
+ */
+TVM_DLL const Op& tvm_call_unpacked_from_packed_lowered();
+
+/*!
  * \brief See pseudo code
  *
  *  int tvm_storage_sync(std::string storage_scope) {

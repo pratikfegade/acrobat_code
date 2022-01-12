@@ -22,6 +22,7 @@
  * \file tir/transforms/lower_tvm_buildin.cc
  */
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/tir/builtin.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/stmt_functor.h>
@@ -38,6 +39,8 @@ namespace tir {
 // These information are needed during codegen.
 class BuiltinLower : public StmtExprMutator {
  public:
+  BuiltinLower(const IRModule& mod) : mod_(mod) {}
+
   // Record stack frame for existing scope.
   struct AllocaScope {
     Var stack_shape = Var("stack_shape", DataType::Handle());
@@ -209,6 +212,8 @@ class BuiltinLower : public StmtExprMutator {
       return MakeArray(op);
     } else if (op->op.same_as(builtin::tvm_context_id())) {
       return make_zero(op->dtype);
+    } else if (op->op.same_as(builtin::tvm_call_unpacked_from_packed())) {
+      return MakeUnpackedCallInPackedFunc(op);
     } else {
       return StmtExprMutator::VisitExpr_(op);
     }
@@ -383,6 +388,39 @@ class BuiltinLower : public StmtExprMutator {
     return Call(op->dtype, builtin::tvm_call_trace_packed_lowered(), packed_args);
   }
 
+  bool IsDBBatchedPrimFuncCall(const CallNode* op) {
+    auto str_imm_n = op->args[0].as<StringImmNode>();
+    ICHECK(str_imm_n);
+    return tvm::runtime::vm::IsBatchedName(str_imm_n->value);
+  }
+
+  PrimExpr MakeUnpackedCallInPackedFunc(const CallNode* op) {
+    ICHECK_GE(op->args.size(), 1);
+    Array<PrimExpr> raw_args;
+    raw_args.push_back(op->args[0]);
+    bool batched = IsDBBatchedPrimFuncCall(op);
+    size_t tensor_arg_start = 1;
+    if (batched) {
+      tensor_arg_start = 2;
+      raw_args.push_back(op->args[1]);
+    }
+
+    std::vector<std::pair<Var, PrimExpr>> let_binds;
+    for (size_t i = tensor_arg_start; i < op->args.size(); ++i) {
+      Var raw_arg("raw_" + std::to_string(i), PointerType(PrimType(DataType::Float(32))));
+      let_binds.push_back({raw_arg, TVMStructGet(DataType::Handle(), Downcast<Var>(op->args[i]), 0,
+                                                 builtin::kArrData)});
+      raw_args.push_back(raw_arg);
+    }
+
+    PrimExpr body =
+        Call(op->dtype, builtin::tvm_call_unpacked_from_packed_lowered(), raw_args, op->span);
+    for (auto& pair : let_binds) {
+      body = Let(pair.first, pair.second, body);
+    }
+    return body;
+  }
+
   Stmt MakeTextureAlloc(const LetStmtNode* let, const CallNode* call) {
     ICHECK(device_type_.defined()) << "Unknown device type in current IR";
     ICHECK(device_id_.defined()) << "Unknown device id in current IR";
@@ -428,6 +466,7 @@ class BuiltinLower : public StmtExprMutator {
   }
 
   // The prepration sequence to be emitted before the current statement.
+  const IRModule& mod_;
   std::vector<std::vector<Stmt>> prep_seq_stack_;
   PrimExpr device_type_;
   PrimExpr device_id_;
@@ -441,7 +480,7 @@ namespace transform {
 Pass LowerTVMBuiltin() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
     auto* n = f.CopyOnWrite();
-    n->body = BuiltinLower().Build(n->body);
+    n->body = BuiltinLower(m).Build(n->body);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerTVMBuiltin", {});

@@ -398,6 +398,8 @@ class CodeGenLLVM : public ExprFunctor<llvm::Value*(const PrimExpr&)>,
   const Op& builtin_call_pure_extern_ = builtin::call_pure_extern();
   const Op& builtin_call_llvm_intrin_ = builtin::call_llvm_intrin();
   const Op& builtin_call_llvm_pure_intrin_ = builtin::call_llvm_pure_intrin();
+  const Op& builtin_call_unpacked_from_packed_lowered_ =
+      builtin::tvm_call_unpacked_from_packed_lowered();
 
   /*! \brief Helper struct for debug infos. */
   struct DebugInfo {

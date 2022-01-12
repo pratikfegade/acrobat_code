@@ -309,6 +309,10 @@ constexpr const char* kDBCoarseWrapperPrimFunc = "db.coarsened_wrapper_prim_func
 /*! \brief Mark the function as a batched version of a prim func. */
 constexpr const char* kDBBatchedPrimFunc = "db.batched_prim_func";
 
+/*! \brief Mark the function as a kernel function i.e. a function
+    invoked by a coarse wrapper. */
+constexpr const char* kDBKernelPrimFunc = "db.kernel_prim_func";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

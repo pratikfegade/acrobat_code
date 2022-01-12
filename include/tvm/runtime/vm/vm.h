@@ -52,7 +52,7 @@ class VMExecutionOptionsNode : public Object {
   bool lazy_execution;
   /*! \brief whether to execute tensor operations in a batched manner */
   bool batched_execution;
-  /*! \brief whether the batched kernels oeprate on scattered tensors */
+  /*! \brief whether the batched kernels operate on scattered tensors */
   bool scattered_kernels;
 
   VMExecutionOptionsNode() {}
@@ -371,6 +371,10 @@ class VirtualMachine : public runtime::ModuleNode {
    * \brief Whether to execute tensor ops in a batched manner.
    */
   bool batched_execution_ = true;
+  /*!
+   * \brief Whether the batched kernels operate on scattered tensors
+   */
+  bool scattered_kernels_;
   /*!
    * \brief A mapping from packed_funcs to there batched counterparts.
    */

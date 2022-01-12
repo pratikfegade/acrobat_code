@@ -197,6 +197,12 @@ TIR_DEFINE_BUILTIN_FUNC(tvm_call_cpacked_lowered)
 TIR_DEFINE_BUILTIN_FUNC(tvm_call_trace_packed_lowered)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
 
+TIR_DEFINE_BUILTIN_FUNC(tvm_call_unpacked_from_packed)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(tvm_call_unpacked_from_packed_lowered)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 // TODO(tvm-team) revisit storage sync once we have a good memory hierachy structure.
 TIR_DEFINE_BUILTIN_FUNC(tvm_storage_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));

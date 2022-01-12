@@ -70,7 +70,8 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
  */
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args,
-                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched = false);
+                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched = false,
+                    bool scattered_kernels = false);
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

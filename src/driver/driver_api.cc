@@ -579,10 +579,6 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
     if (it.second.defined()) {
       const Target& target = it.first;
       const IRModule& ir_module = it.second;
-      std::cout << "[DA] Target " << target << std::endl;
-      for (auto pair : ir_module->functions) {
-        std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
-      }
       auto pair = SplitMixedModule(ir_module, target, target_host, for_execution, Array<String>());
       auto& host_mod = pair.first;
       auto& device_mod = pair.second;
@@ -673,20 +669,26 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
   mixed_pass_list.push_back(tir::transform::InferFragment());
   mixed_pass_list.push_back(tir::transform::LowerThreadAllreduce());
 
-  // bool unpacked_api = (mixed_mod->GetAttr<relay::Executor>(tvm::attr::kExecutor)
-  // .value_or(relay::Executor::Create("graph", {}))
-  // ->GetAttr<Bool>("unpacked-api")
-  // .value_or(Bool(false))) ||
-  // (target->GetAttr<Bool>("unpacked-api", Bool(false)).value().operator bool());
-  bool unpacked_api = (mixed_mod->GetAttr<relay::Executor>(tvm::attr::kExecutor)
-                           .value_or(relay::Executor::Create("graph", {}))
-                           ->GetAttr<Bool>("unpacked-api")
-                           .value_or(Bool(false))) ||
-                      (target->GetAttr("unpacked-api", Bool(false)) && for_execution);
-  if (unpacked_api) {
-    std::cout << "[DA]   Unpacked API" << std::endl;
+  bool module_unpacked_api = mixed_mod->GetAttr<relay::Executor>(tvm::attr::kExecutor)
+                                 .value_or(relay::Executor::Create("graph", {}))
+                                 ->GetAttr<Bool>("unpacked-api")
+                                 .value_or(Bool(false));
+  bool target_unpacked_api =
+      target->GetAttr("db-unpacked-api", Bool(false)).value().operator bool() && for_execution;
+
+  if (target_unpacked_api || module_unpacked_api) {
+    std::cout << "[DA] Unpacked API for " << target << std::endl;
+    for (auto pair : mixed_mod->functions) {
+      std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    }
+
     mixed_pass_list.push_back(tir::transform::MakeUnpackedAPI());
   } else {
+    std::cout << "[DA] Packed API for " << target << std::endl;
+    for (auto pair : mixed_mod->functions) {
+      std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    }
+
     mixed_pass_list.push_back(tir::transform::MakePackedAPI(-1));
   }
   mixed_pass_list.push_back(tir::transform::SplitHostDevice());

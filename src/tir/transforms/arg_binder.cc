@@ -176,8 +176,9 @@ void ArgBinder::BindDLTensor(const Buffer& buffer, const PrimExpr& device_type,
     asserts_.emplace_back(AssertStmt(cond, type_msg, nop));
   }
   // data field
-  if (Bind_(buffer->data, TVMArrayGet(DataType::Handle(), handle, builtin::kArrData),
-            arg_name + ".data", true)) {
+  auto value = TVMArrayGet(DataType::Handle(), handle, builtin::kArrData);
+  std::cout << "[HELLO] " << buffer->data << " " << value << std::endl;
+  if (Bind_(buffer->data, value, arg_name + ".data", true)) {
     Var vptr(buffer->data);
     def_handle_dtype_.Set(vptr, tir::TypeAnnotation(buffer->dtype));
     // mark alignment of external bufs

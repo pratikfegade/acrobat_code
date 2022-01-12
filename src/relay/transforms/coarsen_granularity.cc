@@ -467,6 +467,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(name));
+    // args.push_back(callee_gv);
 
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     auto push_args = [&](const Expr& tuple) {
@@ -477,15 +478,15 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     };
     push_args(call->args[1]);
     push_args(call->args[2]);
-    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+    // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+    // return tir::Call(DataType::Void(), callee_gv, args, call->span);
+    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
+                     call->span);
   }
 
   PrimExpr ConvertTVMOpInvokeBatched(const relay::CallNode* call) {
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
-    std::string name = runtime::vm::GetBatchedName(callee_gv->name_hint);
-    Array<PrimExpr> args;
-    args.push_back(tir::StringImm(name));
-    args.push_back(batch_size_var_);
+    std::string batched_name = runtime::vm::GetBatchedName(callee_gv->name_hint);
 
     auto batched_func_map = mod_->batched_prim_funcs;
     auto iit = mod_->batched_prim_funcs.find(callee_gv);
@@ -494,6 +495,11 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     auto it = mod_->batched_arg_modes.find(batched_callee_gv);
     ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
     auto& arg_modes = (*it).second;
+
+    Array<PrimExpr> args;
+    args.push_back(tir::StringImm(batched_name));
+    // args.push_back(batched_callee_gv);
+    args.push_back(batch_size_var_);
 
     int idx = 0;
     auto push_args = [&](const Expr& tuple) {
@@ -509,7 +515,10 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     push_args(call->args[1]);
     push_args(call->args[2]);
-    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+    // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
+    // return tir::Call(DataType::Void(), batched_callee_gv, args, call->span);
+    return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
+                     call->span);
   }
 
   Type RelayTypeToTIRType(const Type& type) {

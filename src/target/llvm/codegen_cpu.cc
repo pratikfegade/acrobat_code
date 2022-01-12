@@ -288,6 +288,13 @@ CodeGenLLVM::TypedPointer CodeGenCPU::CreateStructRefPtr(DataType t, llvm::Value
     if (buf->getType() == t_void_p_) {
       buf = builder_->CreatePointerCast(buf, t_tvm_array_->getPointerTo());
     } else {
+      if (buf->getType() != t_tvm_array_->getPointerTo()) {
+        llvm::outs() << "What Happened? ";
+        buf->getType()->print(llvm::outs());
+        llvm::outs() << " ";
+        t_tvm_array_->getPointerTo()->print(llvm::outs());
+        llvm::outs() << "Oh! \n";
+      }
       ICHECK_EQ(buf->getType(), t_tvm_array_->getPointerTo());
     }
   }

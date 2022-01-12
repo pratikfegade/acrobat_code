@@ -81,7 +81,7 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
   //   std::cout << "[BR]   OutputOps " << tensor->op << std::endl;
   // }
 
-  tir::Var batch_size = tir::Var("batch_size", DataType::Int(64));
+  tir::Var batch_size = tir::Var("batch_size", DataType::Int(32));
   Map<te::Operation, te::Operation> rewritten;
   Map<te::Operation, te::Operation> ret;
   for (auto op : graph_ops) {

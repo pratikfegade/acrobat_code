@@ -41,7 +41,17 @@ enum DBBatchedArgMode {
   kReuse = 2,
 };
 
-inline std::string GetBatchedName(std::string name) { return name + "_batched"; }
+#define DB_BATCHED_SUFFIX "_batched"
+
+inline std::string GetBatchedName(std::string name) { return name + DB_BATCHED_SUFFIX; }
+
+inline bool IsBatchedName(std::string name) {
+  std::string suffix = DB_BATCHED_SUFFIX;
+  if (suffix.size() <= name.size()) {
+    return std::equal(suffix.rbegin(), suffix.rend(), name.rbegin());
+  }
+  return false;
+}
 
 }  // namespace vm
 }  // namespace runtime

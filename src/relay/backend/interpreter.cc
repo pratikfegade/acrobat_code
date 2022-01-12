@@ -392,6 +392,11 @@ class Interpreter : public ExprFunctor<ObjectRef(const Expr& n)>,
     std::unordered_map<Target, IRModule, backend::TargetStrHash, backend::TargetStrEqual>
         per_target_module_std_map = backend::TargetModuleMapToTargetStrModuleMap(per_target_module);
     auto mod_itr = per_target_module_std_map.find(target);
+    if (mod_itr == per_target_module_std_map.end()) {
+      for (auto pair : per_target_module) {
+        std::cout << "WUTWUT " << pair.first << " " << tir_fn_var << " " << target << std::endl;
+      }
+    }
     ICHECK(mod_itr != per_target_module_std_map.end())
         << "No target module for target " << target->ToDebugString();
     const IRModule& target_module = (*mod_itr).second;

@@ -73,7 +73,8 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args,
-                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched) {
+                    const std::vector<DBBatchedArgMode>& arg_modes, bool batched,
+                    bool scattered_kernels) {
   size_t arity = 0;
   if (batched) {
     arity++;
@@ -158,7 +159,7 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
     }
   }
 
-  if (batched) {
+  if (scattered_kernels) {
     int total_args = new_args.size();
     for (auto i = 0; i < total_args; ++i) {
       auto nd_array = Downcast<NDArray>(new_args[i]);
