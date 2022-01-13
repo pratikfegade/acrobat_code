@@ -50,6 +50,7 @@
 #include "../transforms/device_aware_visitors.h"
 #include "./te_compiler_cache.h"
 #include "./utils.h"
+#include "model_parameter_taint_analysis.h"
 
 namespace tvm {
 namespace relay {
@@ -141,8 +142,9 @@ class TECompilerImpl : public TECompilerNode {
             auto gv2 = lowered_func->batched_cached_func->funcs->GetGlobalVar(batched_name);
             mod->UpdateBatchedPrimFunc(gv1, gv2);
             mod->UpdateArgMode(gv2, lowered_func->batched_cached_func->batched_arg_mode);
-            std::cout << "[TE] Batched " << gv2->name_hint << " " << mod->batched_prim_funcs.size()
-                      << std::endl;
+            // std::cout << "[TE] Batched " << gv2->name_hint << " " <<
+            // mod->batched_prim_funcs.size()
+            // << std::endl;
           }
         }
       }
@@ -351,7 +353,8 @@ class TECompilerImpl : public TECompilerNode {
     } else {
       auto create_pointer_buffer = [](const te::Tensor& tensor) {
         std::string name = tensor->op->name + "ptr";
-        auto var_type = PointerType(PointerType(PrimType(tensor->dtype)));
+        auto var_type = PointerType(PointerType(PrimType(tensor->dtype), ""), "");
+        // std::cout << "[BATCHED]   Buffer: " << name << " " << var_type << std::endl;
         return tir::Buffer(tir::Var(name, var_type), DataType::Handle(),
                            Array<PrimExpr>({tensor->shape[0]}), Array<PrimExpr>(), 0, name, 0, 0,
                            tir::kDefault);
@@ -364,7 +367,11 @@ class TECompilerImpl : public TECompilerNode {
         all_args.push_back_all(cached_func->inputs);
         all_args.push_back_all(cached_func->outputs);
         Map<te::Tensor, tir::Buffer> scatter_buffers;
-        if (scattered_kernels) {
+        if (batched && scattered_kernels) {
+          if (batched) {
+            // std::cout << "[BATCHED] Scheduling: " << cached_func->prim_fn_var->name_hint
+            // << std::endl;
+          }
           for (te::Tensor arg : cached_func->inputs) {
             auto scatter_buffer = create_pointer_buffer(arg);
             all_args.push_back(scatter_buffer);
@@ -380,10 +387,6 @@ class TECompilerImpl : public TECompilerNode {
         std::unordered_map<te::Tensor, tir::Buffer> binds;
         auto func_name = cached_func->prim_fn_var->name_hint;
         VLOG(1) << "scheduling";
-        if (batched) {
-          std::cout << "[BATCHED] Scheduling: " << cached_func->prim_fn_var->name_hint << ": "
-                    << scatter_buffers.size() << std::endl;
-        }
         IRModule scheduled_module =
             tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds, scatter_buffers);
         // Unfortunately the above machinery creates its own GlobalVars instead of using *the*
@@ -400,7 +403,7 @@ class TECompilerImpl : public TECompilerNode {
               attrs.Set(tir::attr::kDBBatchedPrimFunc, Bool(true));
             }
             attrs.Set(tir::attr::kDBKernelPrimFunc, Bool(true));
-            std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
+            // std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
             func = WithAttrs(std::move(Downcast<tir::PrimFunc>(func)), attrs);
           }
           cached_func->funcs->Add(global_var, func);
@@ -1117,6 +1120,8 @@ void UpdateFunctionMetadata(BaseFunc func,
 
 IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn process_fn,
                  SEScope host_se_scope) {
+  auto parameter_taints = ModelParameterTaintAnalysis(module);
+
   TECompiler compiler(module);
 
   // TODO(mbs): This is all unnecessarily convoluted. Better would be to accumulate the rewritten
@@ -1226,7 +1231,6 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
         auto target_map = target->Export();
         target_map.Set("db-unpacked-api", Bool(true));
         target = Target(target_map);
-        std::cout << "FCKFCKFCK " << var->name_hint << std::endl;
       }
 
       // Put the function in per_target_modules

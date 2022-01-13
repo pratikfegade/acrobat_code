@@ -337,7 +337,7 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
       }
     }
   }
-  // std::cout << "[STM] Var map size " << var_scatter_buffer_mapping.size() << std::endl;
+  // std::cout << "[STM] Func " << name << std::endl;
   tir::PrimFunc f = te::SchedulePostProcToPrimFunc(out_arg_list, std::move(stmt), out_binds,
                                                    var_scatter_buffer_mapping);
   f = WithAttr(std::move(f), "global_symbol", runtime::String(name));
@@ -677,17 +677,17 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
       target->GetAttr("db-unpacked-api", Bool(false)).value().operator bool() && for_execution;
 
   if (target_unpacked_api || module_unpacked_api) {
-    std::cout << "[DA] Unpacked API for " << target << std::endl;
-    for (auto pair : mixed_mod->functions) {
-      std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
-    }
+    // std::cout << "[DA] Unpacked API for " << target << std::endl;
+    // for (auto pair : mixed_mod->functions) {
+    // std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    // }
 
     mixed_pass_list.push_back(tir::transform::MakeUnpackedAPI());
   } else {
-    std::cout << "[DA] Packed API for " << target << std::endl;
-    for (auto pair : mixed_mod->functions) {
-      std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
-    }
+    // std::cout << "[DA] Packed API for " << target << std::endl;
+    // for (auto pair : mixed_mod->functions) {
+    // std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    // }
 
     mixed_pass_list.push_back(tir::transform::MakePackedAPI(-1));
   }

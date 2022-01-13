@@ -22,6 +22,7 @@ Adapted from:
 https://gist.github.com/merrymercy/5eb24e3b019f84200645bd001e9caae9
 """
 
+from tvm import ir
 from tvm import relay
 from . import layers
 from .init import create_workload
@@ -271,7 +272,10 @@ def get_net_relay_batched(iterations, num_hidden, batch_size=1, dtype="float32")
 
     builder.ret(relay.Tuple(outs))
     body = builder.get()
-    return relay.Function(args, body, relay.TupleType([input_type] * batch_size))
+    attr_dict = {"model_parameters": [1, 1, 1, 1] + [0] * (batch_size * iterations)}
+    attrs = ir.make_node("DictAttrs", **attr_dict)
+    return relay.Function(args, body, relay.TupleType([input_type] * batch_size),
+                          attrs=attrs)
 
 
 def get_workload(iterations, num_hidden, batch_size=1, dtype="float32"):

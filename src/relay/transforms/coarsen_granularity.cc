@@ -643,7 +643,7 @@ class Coarsener : public ExprMutator {
         std::string batched_name = runtime::vm::GetBatchedName(name);
         GlobalVar batched_func_var(batched_name, VoidType());
         batched_func = add_attrs_to_wrapper_func(batched_func, batched_name, true);
-        std::cout << "batched_func " << batched_func << std::endl;
+        // std::cout << "batched_func " << batched_func << std::endl;
         prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
         batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
         Array<Integer> arg_modes;
@@ -679,7 +679,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution) {
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
 
-  std::cout << "[CG] Supernovae " << mod->batched_prim_funcs.size() << std::endl;
+  // std::cout << "[CG] Supernovae " << mod->batched_prim_funcs.size() << std::endl;
 
   auto funcs = mod->functions;
   for (const auto& it : funcs) {

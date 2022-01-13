@@ -516,7 +516,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   }
 
   Index AddPrimFuncToContext(const std::string& name, const DictAttrs& attrs) {
-    std::cout << "[CO] Contexting " << name << std::endl;
+    // std::cout << "[CO] Contexting " << name << std::endl;
     Index op_index;
     auto itr = context_->primitive_map.find(name);
     if (itr == context_->primitive_map.end()) {
@@ -1002,10 +1002,10 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
 
   auto arg_modes = context_.module->batched_arg_modes;
-  std::cout << "[CO] ARGMODES2" << std::endl;
-  for (auto it : arg_modes) {
-    std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  }
+  // std::cout << "[CO] ARGMODES2" << std::endl;
+  // for (auto it : arg_modes) {
+  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  // }
   // update batched arg modes
   for (auto pair : arg_modes) {
     ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
@@ -1137,12 +1137,15 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   Array<Pass> pass_seqs = relay::backend::GetPassPrefix(
       /*is_homogenous=*/config_->optional_homogeneous_target.defined(), /*is_vm=*/true);
 
+  // pass_seqs.push_back(transform::PrintCurrentIR("Beginning", true, true));
+
   // Always plan devices so the remaining passes don't need to distinguish homogeneous vs
   // hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
+  // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
 
   pass_seqs.push_back(transform::FuseOps());
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
 
   // Do layout rewrite for auto-scheduler.
   transform::PassContext pass_ctx = PassContext::Current();
@@ -1162,6 +1165,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   }
 
   pass_seqs.push_back(transform::ToANormalForm());
+  // pass_seqs.push_back(transform::PrintCurrentIR("ToANormalForm", true, true));
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::LambdaLift());
 
@@ -1170,7 +1174,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
 
-  // Lower all functions annotated as "primitive" by FuseOps.
+  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1178,7 +1183,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE1", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.

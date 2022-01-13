@@ -37,6 +37,19 @@ Function::Function(tvm::Array<Var> params, Expr body, Type ret_type,
   n->type_params = std::move(type_params);
   n->attrs = std::move(attrs);
   n->span = std::move(span);
+
+  // auto model_parameter_list =
+  //     n->attrs.GetAttr<Array<Var>>("model_parameters", Array<Var>()).value();
+  // if (model_parameter_list.size() > 0) {
+  //   std::cout << "[PP] Func param " << model_parameter_list.size() << std::endl;
+  //   for (auto model_param : model_parameter_list) {
+  //     std::cout << "[MPTA]  MP " << model_param << " " << model_param.get() << std::endl;
+  //   }
+  //   for (auto param : n->params) {
+  //     std::cout << "[MPTA]  " << param << " " << param.get() << std::endl;
+  //   }
+  // }
+
   data_ = std::move(n);
 }
 

@@ -116,8 +116,8 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
   bool batched_function = f->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc);
   if (support::StartsWith(name, "vm_") || support::StartsWith(name, "prim_func")) {
-    std::cout << "[LLVM] Function: " << name << " " << batched_function << std::endl;
-    std::cout << "[FUNC]\n" << f << std::endl;
+    // std::cout << "[LLVM] Function: " << name << " " << batched_function << std::endl;
+    // std::cout << "[FUNC]\n" << f << std::endl;
   }
   this->InitFuncState();
 
@@ -127,7 +127,8 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   std::vector<llvm::Type*> param_types;
   is_restricted_ = f->HasNonzeroAttr(tir::attr::kNoAlias);
   for (Var param : f->params) {
-    // std::cout << "ARG TYPE " << param << " " << GetType(param) << std::endl;
+    // std::cout << "ARG TYPE " << param << " " << GetType(param) << " "
+    // << f->scatter_buffer_map.count(param) << std::endl;
     param_types.push_back(GetLLVMType(param));
     if (!is_restricted_ && param.dtype().is_handle()) {
       alias_var_set_.insert(param.get());
@@ -356,7 +357,7 @@ void CodeGenLLVM::InitPassManagerBuilder(llvm::PassManagerBuilder* builder) {}
 
 void CodeGenLLVM::Optimize() {
   if (llvm::verifyModule(*module_, &llvm::outs())) {
-    module_->print(llvm::outs(), 0);
+    // module_->print(llvm::outs(), 0);
     ICHECK(false) << "LLVM module verification failed";
   }
 
@@ -1324,7 +1325,7 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const CallNode* op) {
       return this->CreateCallExtern(GetType(GetRef<PrimExpr>(op)), op_attr_global_symbol_[call_op],
                                     op->args, false);
     } else if (op->op.same_as(builtin_call_unpacked_from_packed_lowered_)) {
-      std::cout << "[CALL] " << GetRef<PrimExpr>(op) << std::endl;
+      // std::cout << "[CALL] " << GetRef<PrimExpr>(op) << std::endl;
       auto callee_name = op->args[0].as<StringImmNode>()->value;
       auto it = functions_map_.find(callee_name);
       ICHECK(it != functions_map_.end());
@@ -1334,7 +1335,7 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const CallNode* op) {
       callee->getFunctionType()->print(llvm::outs());
       llvm::outs() << "\n";
       for (size_t i = 1; i < op->args.size(); ++i) {
-        std::cout << "[CALL]  Arg " << op->args[i] << " " << GetType(op->args[i]) << std::endl;
+        // std::cout << "[CALL]  Arg " << op->args[i] << " " << GetType(op->args[i]) << std::endl;
         llvm::Value* loaded_void_ptr_arg = MakeValue(op->args[i]);
         llvm::Value* loaded_float_ptr_arg = builder_->CreateBitCast(
             loaded_void_ptr_arg, callee->getFunctionType()->getParamType(i - 1));
@@ -1345,18 +1346,13 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const CallNode* op) {
       return CreateIntrinsic(op);
     }
   } else {
-    std::cout << "[CALL] " << GetRef<PrimExpr>(op) << std::endl;
     const GlobalVarNode* callee_gvn = op->op.as<GlobalVarNode>();
     ICHECK(callee_gvn);
     auto it = functions_map_.find(callee_gvn->name_hint);
     ICHECK(it != functions_map_.end());
     llvm::Function* callee = it->second;
     std::vector<llvm::Value*> arg_value;
-    llvm::outs() << "FUNC: " << callee_gvn->name_hint.c_str() << ": ";
-    callee->getFunctionType()->print(llvm::outs());
-    llvm::outs() << "\n";
     for (size_t i = 0; i < op->args.size(); ++i) {
-      std::cout << "[CALL]  Arg " << op->args[i] << " " << GetType(op->args[i]) << std::endl;
       arg_value.push_back(MakeValue(op->args[i]));
     }
     return builder_->CreateCall(callee->getFunctionType(), callee, arg_value);

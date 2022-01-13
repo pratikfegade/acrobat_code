@@ -44,36 +44,29 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
                                                                             PassContext pc) {
     std::cout << "[PRINT] IR after " << previous_pass << std::endl;
 
-    // auto arg_modes = m->batched_arg_modes;
-
-    // for (auto it : arg_modes) {
-    //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second.size() << std::endl;
-    // }
-
-    std::cout << "[PP] Hypernovae " << m->batched_prim_funcs.size() << std::endl;
-    // if (clean_up_on_device) {
-    //   for (auto kv : m->functions) {
-    //     if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
-    //       if (!clean_up_prim_funcs) {
-    //         std::cout << kv.first << ": " << kv.second << std::endl;
-    //         // std::cout << kv.first << std::endl;
-    //       }
-    //     } else {
-    //       std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
-    //       // std::cout << kv.first << std::endl;
-    //     }
-    //   }
-    // } else {
-    //   for (auto kv : m->functions) {
-    //     if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
-    //       if (!clean_up_prim_funcs) {
-    //         std::cout << kv.first << ": " << kv.second << std::endl;
-    //       }
-    //     } else {
-    //       std::cout << kv.first << ": " << kv.second << std::endl;
-    //     }
-    //   }
-    // }
+    if (clean_up_on_device) {
+      for (auto kv : m->functions) {
+        if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
+          if (!clean_up_prim_funcs) {
+            std::cout << kv.first << ": " << kv.second << std::endl;
+            // std::cout << kv.first << std::endl;
+          }
+        } else {
+          std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+          // std::cout << kv.first << std::endl;
+        }
+      }
+    } else {
+      for (auto kv : m->functions) {
+        if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
+          if (!clean_up_prim_funcs) {
+            std::cout << kv.first << ": " << kv.second << std::endl;
+          }
+        } else {
+          std::cout << kv.first << ": " << kv.second << std::endl;
+        }
+      }
+    }
     return m;
   };
   return CreateModulePass(pass_func, 1, "PrintCurrentIR", {});
