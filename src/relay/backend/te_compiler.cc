@@ -65,7 +65,9 @@ TVM_REGISTER_OBJECT_TYPE(TECompilerNode);
 
 class TECompilerImpl : public TECompilerNode {
  public:
-  explicit TECompilerImpl(Optional<IRModule> opt_mod) {
+  explicit TECompilerImpl(Optional<IRModule> opt_mod,
+                          Map<Function, Array<Bool>> model_parameter_taints)
+      : model_parameter_taints_(model_parameter_taints) {
     // Make sure we don't collide with any existing globals in the module.
     if (opt_mod) {
       for (const auto& kv : opt_mod.value()->functions) {
@@ -336,13 +338,16 @@ class TECompilerImpl : public TECompilerNode {
     bool scattered_kernels =
         PassContext::Current()->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
     ICHECK(!value->cached_func.defined());
+    auto iit = model_parameter_taints_.find(key->source_func);
+    ICHECK(iit != model_parameter_taints_.end());
+    auto func_model_parameter_taints = (*iit).second;
     auto lowered_cached_funcs = PrimFuncFor(
         key->source_func, key->target,
         [&](std::string name) {
           auto mangled = mangle_fn(name);
           return GetUniqueName(mangled, &name_map_);
         },
-        batched_execution);
+        func_model_parameter_taints, batched_execution, scattered_kernels);
     value->cached_func = lowered_cached_funcs.first;
     value->batched_cached_func = lowered_cached_funcs.second;
 
@@ -368,14 +373,23 @@ class TECompilerImpl : public TECompilerNode {
         all_args.push_back_all(cached_func->outputs);
         Map<te::Tensor, tir::Buffer> scatter_buffers;
         if (batched && scattered_kernels) {
-          if (batched) {
-            // std::cout << "[BATCHED] Scheduling: " << cached_func->prim_fn_var->name_hint
-            // << std::endl;
-          }
-          for (te::Tensor arg : cached_func->inputs) {
-            auto scatter_buffer = create_pointer_buffer(arg);
-            all_args.push_back(scatter_buffer);
-            scatter_buffers.Set(arg, scatter_buffer);
+          size_t flattened_size = func_model_parameter_taints.size();
+          size_t unflattened_size = key->source_func->params.size();
+          size_t flattened_useful_size = key->source_func->params.size();
+          ICHECK_GE(flattened_size, flattened_useful_size)
+              << cached_func->prim_fn_var->name_hint
+              << " Maybe the function has a parameter that contains nested tuples? The model "
+                 "parameter taint analysis currently does not support those!";
+          ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
+          int ctr = 0;
+          for (size_t i = 0; i < flattened_size; ++i) {
+            if (cached_func->batched_arg_mode[i]->value > 0 && !func_model_parameter_taints[i]) {
+              te::Tensor arg = cached_func->inputs[ctr++];
+              // std::cout << "[TEC] Making scatter arg " << arg->op->name << std::endl;
+              auto scatter_buffer = create_pointer_buffer(arg);
+              all_args.push_back(scatter_buffer);
+              scatter_buffers.Set(arg, scatter_buffer);
+            }
           }
           for (te::Tensor arg : cached_func->outputs) {
             auto scatter_buffer = create_pointer_buffer(arg);
@@ -488,17 +502,23 @@ class TECompilerImpl : public TECompilerNode {
   CCacheKey cur_ccache_key_;
   /*! \brief Map of GlobalVar to C Device API context names */
   Map<GlobalVar, String> device_contexts_;
+  // Identifies what parameters to a given prim func are model
+  // parameters and hence can be reused across batch elements in
+  // dynamic batching
+  Map<Function, Array<Bool>> model_parameter_taints_;
 };
 
-TECompiler::TECompiler(Optional<IRModule> opt_mod) {
-  auto object = make_object<TECompilerImpl>(std::move(opt_mod));
+TECompiler::TECompiler(Optional<IRModule> opt_mod,
+                       Map<Function, Array<Bool>> model_parameter_taints) {
+  auto object = make_object<TECompilerImpl>(std::move(opt_mod), model_parameter_taints);
   data_ = object;
 }
 
 /*! \brief The global TE compiler */
 // TODO(mbs): To be terminated with extreme prejudice.
 TECompiler& TECompiler::Global() {
-  static TECompiler* inst = new TECompiler(make_object<TECompilerImpl>(Optional<IRModule>()));
+  static TECompiler* inst = new TECompiler(
+      make_object<TECompilerImpl>(Optional<IRModule>(), Map<Function, Array<Bool>>()));
   return *inst;
 }
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.backend.use_auto_scheduler", Bool);
@@ -847,7 +867,8 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
    * must live.
    */
   SEScope host_se_scope_;
-  // Cache ops that need to be frequently used later to reduce lookup overhead.
+  // Cache ops that need to be frequently used later to reduce lookup
+  // overhead.
   const Op& debug_op_;
 };
 
@@ -1122,7 +1143,7 @@ IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn pr
                  SEScope host_se_scope) {
   auto parameter_taints = ModelParameterTaintAnalysis(module);
 
-  TECompiler compiler(module);
+  TECompiler compiler(module, parameter_taints);
 
   // TODO(mbs): This is all unnecessarily convoluted. Better would be to accumulate the rewritten
   // module as we go (including rewritten Functions, lowered primitives, and runtime modules

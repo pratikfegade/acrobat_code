@@ -39,6 +39,8 @@
 namespace tvm {
 namespace relay {
 namespace tec {
+
+namespace {
 Array<Bool> ConstructBoolArray(size_t size, bool value) {
   Array<Bool> result;
   for (size_t i = 0; i < size; ++i) {
@@ -100,9 +102,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
   }
 
   void MergeAndSet(Var var, Array<Bool> vals2) {
-    if (var->vid->name_hint == "i2h_weight" && !(vals2[0].operator bool())) {
-      std::cout << "[MPTA]     VarSet " << var->vid->name_hint << " " << vals2 << std::endl;
-    }
+    // if (var->vid->name_hint == "i2h_weight" && !(vals2[0].operator bool())) {
+    //   std::cout << "[MPTA]     VarSet " << var->vid->name_hint << " " << vals2 << std::endl;
+    // }
     MergeAndSet<Var>(p_var_state_, var, vals2);
   }
 
@@ -123,16 +125,16 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
 
   Array<Bool> VisitExpr_(const VarNode* op) {
     auto var = GetRef<Var>(op);
-    std::cout << "[MPTA]    Visiting var " << var->vid->name_hint << std::endl;
+    // std::cout << "[MPTA]    Visiting var " << var->vid->name_hint << std::endl;
     auto it = p_var_state_->find(var);
     if (it == p_var_state_->end()) {
       Array<Bool> state = CreateStateForType(op->checked_type(), true);
       changed |= true;
       p_var_state_->Set(var, state);
-      std::cout << "[MPTA]     NoFound " << state << std::endl;
+      // std::cout << "[MPTA]     NoFound " << state << std::endl;
       return state;
     } else {
-      std::cout << "[MPTA]     Found " << (*it).second << std::endl;
+      // std::cout << "[MPTA]     Found " << (*it).second << std::endl;
       return (*it).second;
     }
   };
@@ -175,7 +177,7 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
       auto it = let_shortcuts_.find(Downcast<Var>(op->op));
       if (it != let_shortcuts_.end()) {
         callee_func = get_function(it->second);
-        std::cout << "[MPTA]  Found shortcut " << it->second << " " << callee_func << std::endl;
+        // std::cout << "[MPTA]  Found shortcut " << it->second << " " << callee_func << std::endl;
       }
     }
     if (callee_func == nullptr) {
@@ -188,8 +190,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
 
     for (size_t i = 0; i < op->args.size(); ++i) {
       Array<Bool> param_state = VisitExpr(op->args[i]);
-      std::cout << "[MPTA]   Setting callee arg " << op->args[i] << " " << op->args[i].get() << " "
-                << callee_func->params[i]->vid->name_hint << " " << param_state << std::endl;
+      // std::cout << "[MPTA]   Setting callee arg " << op->args[i] << " " << op->args[i].get() << "
+      // "
+      // << callee_func->params[i]->vid->name_hint << " " << param_state << std::endl;
       MergeAndSet(callee_func->params[i], param_state);
     }
 
@@ -254,18 +257,28 @@ class ResultGatherer : public ExprVisitor {
  public:
   ResultGatherer(const Map<Var, Array<Bool>>& var_states) : var_states_(var_states) {}
 
+  void Flatten(Array<Bool>* p_param_states, const Var& var) {
+    size_t state_size = 1;
+    if (auto ttn = var->checked_type().as<TupleTypeNode>()) {
+      state_size = ttn->fields.size();
+    }
+    auto it = var_states_.find(var);
+    Array<Bool> state =
+        (it != var_states_.end()) ? (*it).second : ConstructBoolArray(state_size, false);
+    ICHECK_EQ(state.size(), state_size);
+    p_param_states->push_back_all(state);
+  }
+
   void VisitExpr_(const FunctionNode* op) {
     // if (op->HasNonzeroAttr(attr::kPrimitive)) {
     // std::cout << "[MPTA]   Func " << GetRef<Function>(op) << std::endl;
     auto hash = op->GetAttr<String>("hash", "no_hash");
-    std::cout << "[MPTA]   Func " << hash << std::endl;
+    // std::cout << "[MPTA]   Func " << hash << std::endl;
     Array<Bool> param_states;
     for (auto param : op->params) {
-      auto it = var_states_.find(param);
-      Bool state = (it != var_states_.end()) ? AndState((*it).second) : Bool(false);
-      param_states.push_back(state);
+      Flatten(&param_states, param);
     }
-    std::cout << "[MPTA]    Result: " << param_states << std::endl;
+    // std::cout << "[MPTA]    Result: " << param_states << std::endl;
     result.Set(GetRef<Function>(op), param_states);
     // } else {
     ExprVisitor::VisitExpr_(op);
@@ -275,14 +288,15 @@ class ResultGatherer : public ExprVisitor {
   const Map<Var, Array<Bool>>& var_states_;
   Map<Function, Array<Bool>> result;
 };
+}  // namespace
 
 Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
-  std::cout << "[MPTA] Starting taint analysis" << std::endl;
+  // std::cout << "[MPTA] Starting taint analysis" << std::endl;
   auto call_graph = CallGraph(mod);
 
   Map<Var, Array<Bool>> var_states;
   Map<Function, Array<Bool>> function_states;
-  std::cout << "[MPTA]  Initing func params" << std::endl;
+  // std::cout << "[MPTA]  Initing func params" << std::endl;
   for (auto pair : mod->functions) {
     auto function = pair.second;
     auto model_parameter_list =
@@ -291,13 +305,13 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
       continue;
     }
     if (auto func_node = function.as<FunctionNode>()) {
-      std::cout << "[MPTA]   Func " << pair.first->name_hint << std::endl;
+      // std::cout << "[MPTA]   Func " << pair.first->name_hint << std::endl;
       for (size_t i = 0; i < func_node->params.size(); ++i) {
         auto param = func_node->params[i];
         bool is_model_parameter = model_parameter_list[i]->value > 0;
         var_states.Set(param, CreateStateForType(param->checked_type(), is_model_parameter));
-        std::cout << "[MPTA]    Param " << param->vid->name_hint << " " << param.get() << " "
-                  << var_states.at(param) << std::endl;
+        // std::cout << "[MPTA]    Param " << param->vid->name_hint << " " << param.get() << " "
+        // << var_states.at(param) << std::endl;
       }
     }
   }
@@ -307,7 +321,7 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
     ModelParameterTaintVisitor visitor(mod, &var_states, &function_states);
     for (auto cge : call_graph->TopologicalOrder()) {
       auto func = mod->Lookup(cge->GetGlobalVar());
-      std::cout << "[MPTA]  Visiting " << cge->GetGlobalVar()->name_hint << std::endl;
+      // std::cout << "[MPTA]  Visiting " << cge->GetGlobalVar()->name_hint << std::endl;
       if (func.as<FunctionNode>()) {
         visitor.Run(Downcast<Function>(func));
       }
@@ -317,15 +331,16 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
     }
   }
 
-  std::cout << "[MPTA]  Gathering final results" << std::endl;
+  // std::cout << "[MPTA]  Gathering final results" << std::endl;
   ResultGatherer gatherer(var_states);
   for (auto pair : mod->functions) {
-    if (auto func_node = pair.second.as<FunctionNode>()) {
+    if (pair.second.as<FunctionNode>()) {
       gatherer(Downcast<Function>(pair.second));
     }
   }
   return gatherer.result;
 }
+
 }  // namespace tec
 }  // namespace relay
 }  // namespace tvm

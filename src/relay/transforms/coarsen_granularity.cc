@@ -244,21 +244,6 @@ class LetLifter : public ExprMutator {
   }
 };
 
-class TupleInliner : public ExprMutator {
- public:
-  Expr VisitExpr_(const CallNode* op) override {
-    auto on_device_props = GetOnDeviceProps(op);
-    if (on_device_props.body.defined()) {
-      return VisitExpr(on_device_props.body);
-    } else {
-      return ExprMutator::VisitExpr_(op);
-    }
-  }
-
- private:
-  Map<Var, Expr> var_values_;
-};
-
 class Serializer : public ExprVisitor {
  public:
   void Serialize(const Expr& expr) {
@@ -329,7 +314,6 @@ void FlattenVar(const relay::Var& var, Map<relay::Var, Array<Expr>>* p_tuple_var
       if (field_type.as<TupleTypeNode>()) {
         FlattenVar(flattened_var, p_tuple_var_values, p_flattened_free_vars, p_flattened_call_args);
       }
-      // std::cout << "[TL]  Flattened " << flattened_var << std::endl;
     }
     tuple_var_values.Set(var, tir_tuple_vars);
   } else {
@@ -337,7 +321,6 @@ void FlattenVar(const relay::Var& var, Map<relay::Var, Array<Expr>>* p_tuple_var
     tuple_var_values.Set(var, {flattened_var});
     flattened_free_vars.push_back(flattened_var);
     flattened_call_args.push_back(var);
-    // std::cout << "[TL]  Flattened " << flattened_var << std::endl;
   }
 }
 
@@ -347,17 +330,120 @@ struct TIRLowererResult {
   Expr replacement;
 };
 
-class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
+class AbstractTIRLowerer {
  public:
-  TIRLowerer(bool create_batched, const IRModule& mod)
-      : create_batched_(create_batched), mod_(mod) {
-    if (create_batched) {
-      batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
+  AbstractTIRLowerer(const IRModule& mod) : mod_(mod) {}
+
+  ~AbstractTIRLowerer() {}
+
+  virtual TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
+                                      const std::vector<std::pair<relay::Var, Expr>> bindings) = 0;
+
+ protected:
+  virtual PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) = 0;
+
+  Expr ExpressBodyWithFreeVars(const Expr& body, const RelayVarSet& free_vars,
+                               const Map<relay::Var, Expr>& bindings_map) {
+    class Visitor : public ExprMutator {
+     public:
+      Visitor(const RelayVarSet& free_vars, const Map<relay::Var, Expr>& bindings_map)
+          : free_vars_(free_vars), bindings_map_(bindings_map) {}
+      Expr VisitExpr_(const VarNode* op) {
+        // std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
+        auto var = GetRef<relay::Var>(op);
+        if (free_vars_.count(var)) {
+          // std::cout << "[TL]   FreeVar" << std::endl;
+          return var;
+        } else {
+          auto it = bindings_map_.find(var);
+          // if (it == bindings_map_.end()) {
+          //   for (auto var : free_vars_) {
+          //     std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
+          //   }
+          // }
+          ICHECK(it != bindings_map_.end()) << var;
+          // std::cout << "[TL]   Value " << (*it).second << std::endl;
+          return VisitExpr((*it).second);
+        }
+      }
+
+      const RelayVarSet& free_vars_;
+      const Map<relay::Var, Expr>& bindings_map_;
+    };
+    // std::cout << "[TL] Expressing " << body << std::endl;
+    return Visitor(free_vars, bindings_map)(body);
+  }
+
+  Array<Expr> FlattenTuple(const Expr& expr) {
+    Array<Expr> tir_fields;
+    if (auto tuple = expr.as<TupleNode>()) {
+      for (auto field : tuple->fields) {
+        for (auto field_field : FlattenTuple(field)) {
+          tir_fields.push_back(field_field);
+        }
+      }
+      return tir_fields;
+    } else if (expr.as<relay::VarNode>()) {
+      auto var = Downcast<relay::Var>(expr);
+      if (tuple_var_values_.count(var)) {
+        Array<Expr> tuple_value = tuple_var_values_.at(var);
+        for (auto field : tuple_value) {
+          for (auto field_field : FlattenTuple(field)) {
+            tir_fields.push_back(field_field);
+          }
+        }
+        return tir_fields;
+      } else {
+        tir_fields.push_back(expr);
+      }
+    }
+    return tir_fields;
+  }
+
+  Type RelayTypeToTIRType(const Type& type, bool one_more_pointer = false) {
+    if (type.as<PrimTypeNode>()) {
+      return type;
+    } else if (auto ttn = type.as<TensorTypeNode>()) {
+      Type type = PointerType(PrimType(ttn->dtype), "");
+      if (one_more_pointer) {
+        type = PointerType(type, "");
+      }
+      return type;
+    } else {
+      ICHECK(false) << "Do not know how to convert type " << type;
+      return type;
     }
   }
 
+  tir::Var CreateTIRVar(relay::Var rvar) {
+    auto it = var_to_var_mapping_.find(rvar);
+    ICHECK(it == var_to_var_mapping_.end())
+        << "A TIR variable corresponding to the relay variable " << rvar << " already exists.";
+    Type var_type = GetVarType(rvar);
+    tir::Var tvar = tir::Var(rvar->vid->name_hint, RelayTypeToTIRType(var_type));
+    var_to_var_mapping_.Set(rvar, tvar);
+    return tvar;
+  }
+
+  tir::Var GetTIRVar(relay::Var rvar) {
+    auto it = var_to_var_mapping_.find(rvar);
+    ICHECK(it != var_to_var_mapping_.end())
+        << "No TIR variable corresponding to the relay variable " << rvar << " exists.";
+    tir::Var tvar = (*it).second;
+    return tvar;
+  }
+
+  const IRModule& mod_;
+  Map<relay::Var, tir::Var> var_to_var_mapping_;
+  Map<relay::Var, Array<Expr>> tuple_var_values_;
+};
+
+class TIRLowererUnbatched : public AbstractTIRLowerer {
+ public:
+  TIRLowererUnbatched(const IRModule& mod) : AbstractTIRLowerer(mod) {}
+
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
-                              const std::vector<std::pair<relay::Var, Expr>> bindings) {
+                              const std::vector<std::pair<relay::Var, Expr>> bindings) final {
     RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
     std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
     std::vector<Var> flattened_free_vars;
@@ -365,6 +451,11 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
 
     for (auto var : free_vars) {
       FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
+    }
+
+    Array<tir::Var> prim_func_params;
+    for (auto rvar : flattened_free_vars) {
+      prim_func_params.push_back(CreateTIRVar(rvar));
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -377,11 +468,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
       // std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
         ICHECK(call->op == GetInvokeTVMOp());
-        if (create_batched_) {
-          tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvokeBatched(call)));
-        } else {
-          tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
-        }
+        tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
       } else if (auto tuple = rvalue.as<TupleNode>()) {
         tuple_var_values_.Set(rvar, tuple->fields);
       } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
@@ -418,51 +505,13 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     }
     // std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
-    Array<tir::Var> prim_func_params;
-    if (create_batched_) {
-      prim_func_params.push_back(batch_size_var_);
-    }
-    for (auto rvar : flattened_free_vars) {
-      prim_func_params.push_back(GetOrCreateVar(rvar));
-    }
 
     return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
                              flattened_call_args, body_in_free_vars});
   }
 
-  Expr ExpressBodyWithFreeVars(const Expr& body, const RelayVarSet& free_vars,
-                               const Map<relay::Var, Expr>& bindings_map) {
-    class Visitor : public ExprMutator {
-     public:
-      Visitor(const RelayVarSet& free_vars, const Map<relay::Var, Expr>& bindings_map)
-          : free_vars_(free_vars), bindings_map_(bindings_map) {}
-      Expr VisitExpr_(const VarNode* op) {
-        // std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
-        auto var = GetRef<relay::Var>(op);
-        if (free_vars_.count(var)) {
-          // std::cout << "[TL]   FreeVar" << std::endl;
-          return var;
-        } else {
-          auto it = bindings_map_.find(var);
-          // if (it == bindings_map_.end()) {
-          //   for (auto var : free_vars_) {
-          //     std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
-          //   }
-          // }
-          ICHECK(it != bindings_map_.end()) << var;
-          // std::cout << "[TL]   Value " << (*it).second << std::endl;
-          return VisitExpr((*it).second);
-        }
-      }
-
-      const RelayVarSet& free_vars_;
-      const Map<relay::Var, Expr>& bindings_map_;
-    };
-    // std::cout << "[TL] Expressing " << body << std::endl;
-    return Visitor(free_vars, bindings_map)(body);
-  }
-
-  PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) {
+ private:
+  PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) final {
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
     std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
@@ -473,7 +522,7 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     auto push_args = [&](const Expr& tuple) {
       for (auto arg : FlattenTuple(tuple)) {
         ICHECK(arg.as<relay::VarNode>());
-        args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+        args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
       }
     };
     push_args(call->args[1]);
@@ -483,18 +532,168 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
                      call->span);
   }
+};
 
-  PrimExpr ConvertTVMOpInvokeBatched(const relay::CallNode* call) {
+class TIRLowererBatched : public AbstractTIRLowerer {
+ public:
+  TIRLowererBatched(const IRModule& mod) : AbstractTIRLowerer(mod) {
+    batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
+  }
+
+  TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
+                              const std::vector<std::pair<relay::Var, Expr>> bindings) final {
+    /* Prologue: Initialization *************************************************************/
+
+    RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
+    std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
+    std::vector<Var> flattened_free_vars;
+    std::vector<Expr> flattened_call_args;
+
+    for (auto var : free_vars) {
+      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
+    }
+
+    for (auto rvar : flattened_free_vars) {
+      CreateTIRVar(rvar);
+    }
+
+    /* First forward pass *************************************************************/
+
+    for (auto pair : bindings) {
+      auto rvar = pair.first;
+      auto rvalue = pair.second;
+
+      if (auto call = rvalue.as<CallNode>()) {
+        ICHECK(call->op == GetInvokeTVMOp());
+      } else if (auto tuple = rvalue.as<TupleNode>()) {
+        tuple_var_values_.Set(rvar, tuple->fields);
+      } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
+        auto tuple = tuple_get->tuple;
+        ICHECK(tuple.as<relay::VarNode>()) << tuple;
+        auto tuple_var = Downcast<relay::Var>(tuple);
+        ICHECK(tuple_var_values_.count(tuple_var));
+        auto tuple_values = tuple_var_values_.at(tuple_var);
+        ICHECK_GT(tuple_values.size(), tuple_get->index);
+        auto tuple_get_value = tuple_values[tuple_get->index];
+        ICHECK(tuple_get_value.as<relay::VarNode>());
+        auto tuple_get_value_var = Downcast<relay::Var>(tuple_get_value);
+        if (rvalue->checked_type().as<TupleTypeNode>()) {
+          ICHECK(tuple_var_values_.count(tuple_get_value_var));
+          tuple_var_values_.Set(rvar, tuple_var_values_.at(tuple_get_value_var));
+        } else {
+          tuple_var_values_.Set(rvar, {tuple_get_value});
+        }
+      } else if (rvalue.as<relay::VarNode>()) {
+        auto value_var = Downcast<relay::Var>(rvalue);
+        ICHECK(tuple_var_values_.count(value_var));
+        tuple_var_values_.Set(rvar, tuple_var_values_.at(value_var));
+      } else {
+        ICHECK(false) << "Unsupported value type " << rvalue;
+      }
+    }
+
+    /* Backward pass *************************************************************/
+
+    auto merge_and_set_arg_mode = [&](const relay::Var& var, Integer val) {
+      auto it = arg_mode_states_.find(var);
+      if (it != arg_mode_states_.end()) {
+        auto old_val = (*it).second;
+        val = Integer(std::max(val->value, old_val->value));
+      }
+      arg_mode_states_.Set(var, val);
+    };
+
+    for (auto it = bindings.rbegin(); it != bindings.rend(); ++it) {
+      auto rvar = it->first;
+      auto rvalue = it->second;
+
+      if (auto call = rvalue.as<CallNode>()) {
+        auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+        auto iit = mod_->batched_prim_funcs.find(callee_gv);
+        ICHECK(iit != mod_->batched_prim_funcs.end()) << callee_gv->name_hint;
+        auto batched_callee_gv = (*iit).second;
+        auto it = mod_->batched_arg_modes.find(batched_callee_gv);
+        ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
+        auto& arg_modes = (*it).second;
+        int idx = 0;
+        for (auto arg : FlattenTuple(call->args[1])) {
+          ICHECK(arg.as<relay::VarNode>());
+          auto arg_var = Downcast<relay::Var>(arg);
+          auto arg_mode = arg_modes[idx++]->value;
+          merge_and_set_arg_mode(arg_var, arg_mode);
+          std::cout << "[CoG] ArgMode " << arg_var << " " << arg_mode << std::endl;
+        }
+      }
+    }
+
+    /* Final forward pass *************************************************************/
+    var_to_var_mapping_.clear();
+
+    Array<tir::Var> prim_func_params;
+    prim_func_params.push_back(batch_size_var_);
+    for (auto rvar : flattened_free_vars) {
+      auto param = CreateTIRVarWithUpdatedType(rvar);
+      prim_func_params.push_back(param);
+      std::cout << "[CoG]  CreatingVar " << param << " " << param->type_annotation << std::endl;
+    }
+
+    Array<tir::Stmt> tir_stmts;
+    Map<relay::Var, Expr> bindings_map;
+    for (auto pair : bindings) {
+      auto rvar = pair.first;
+      auto rvalue = pair.second;
+      bindings_map.Set(rvar, rvalue);
+
+      if (auto call = rvalue.as<CallNode>()) {
+        tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
+      } else if (auto tuple = rvalue.as<TupleNode>()) {
+        tuple_var_values_.Set(rvar, tuple->fields);
+      } else if (auto tuple_get = rvalue.as<TupleGetItemNode>()) {
+        auto tuple = tuple_get->tuple;
+        auto tuple_var = Downcast<relay::Var>(tuple);
+        auto tuple_values = tuple_var_values_.at(tuple_var);
+        auto tuple_get_value = tuple_values[tuple_get->index];
+        auto tuple_get_value_var = Downcast<relay::Var>(tuple_get_value);
+        if (rvalue->checked_type().as<TupleTypeNode>()) {
+          tuple_var_values_.Set(rvar, tuple_var_values_.at(tuple_get_value_var));
+        } else {
+          tuple_var_values_.Set(rvar, {tuple_get_value});
+        }
+      } else if (rvalue.as<relay::VarNode>()) {
+        auto value_var = Downcast<relay::Var>(rvalue);
+        tuple_var_values_.Set(rvar, tuple_var_values_.at(value_var));
+      } else {
+        ICHECK(false) << "Unsupported value type " << rvalue;
+      }
+    }
+
+    /* Epilogue: Create function *************************************************************/
+
+    Expr body_in_free_vars;
+    if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
+      body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
+    } else {
+      body_in_free_vars = Tuple(Array<Expr>());
+    }
+    tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
+
+    return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
+                             flattened_call_args, body_in_free_vars});
+  }
+
+ private:
+  PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) final {
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
     std::string batched_name = runtime::vm::GetBatchedName(callee_gv->name_hint);
 
-    auto batched_func_map = mod_->batched_prim_funcs;
     auto iit = mod_->batched_prim_funcs.find(callee_gv);
     ICHECK(iit != mod_->batched_prim_funcs.end()) << callee_gv->name_hint;
     auto batched_callee_gv = (*iit).second;
     auto it = mod_->batched_arg_modes.find(batched_callee_gv);
     ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
     auto& arg_modes = (*it).second;
+    std::cout << "[CoG] Arg modes: " << batched_callee_gv->name_hint << " " << arg_modes
+              << std::endl;
 
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(batched_name));
@@ -508,77 +707,39 @@ class TIRLowerer : public ExprFunctor<ObjectRef(const Expr& n)> {
           continue;
         }
         ICHECK(arg.as<relay::VarNode>());
-        args.push_back(GetOrCreateVar(Downcast<relay::Var>(arg)));
+        args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
       }
     };
 
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     push_args(call->args[1]);
     push_args(call->args[2]);
+    std::cout << "[ARGS] " << args << std::endl;
     // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
     // return tir::Call(DataType::Void(), batched_callee_gv, args, call->span);
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
                      call->span);
   }
 
-  Type RelayTypeToTIRType(const Type& type) {
-    if (type.as<PrimTypeNode>()) {
-      return type;
-    } else if (auto ttn = type.as<TensorTypeNode>()) {
-      return PointerType(PrimType(ttn->dtype));
-    } else {
-      ICHECK(false) << "Do not know how to convert type " << type;
-      return type;
-    }
-  }
-
-  Array<Expr> FlattenTuple(const Expr& expr) {
-    Array<Expr> tir_fields;
-    if (auto tuple = expr.as<TupleNode>()) {
-      for (auto field : tuple->fields) {
-        for (auto field_field : FlattenTuple(field)) {
-          tir_fields.push_back(field_field);
-        }
-      }
-      return tir_fields;
-    } else if (expr.as<relay::VarNode>()) {
-      auto var = Downcast<relay::Var>(expr);
-      if (tuple_var_values_.count(var)) {
-        Array<Expr> tuple_value = tuple_var_values_.at(var);
-        for (auto field : tuple_value) {
-          for (auto field_field : FlattenTuple(field)) {
-            tir_fields.push_back(field_field);
-          }
-        }
-        return tir_fields;
-      } else {
-        tir_fields.push_back(expr);
-      }
-    }
-    return tir_fields;
-  }
-
-  tir::Var GetOrCreateVar(relay::Var rvar) {
-    // std::cout << "[TL] Var " << rvar->type_annotation << " " << rvar->vid->name_hint <<
-    // std::endl;
+  tir::Var CreateTIRVarWithUpdatedType(relay::Var rvar) {
     auto it = var_to_var_mapping_.find(rvar);
-    if (it != var_to_var_mapping_.end()) {
-      tir::Var tvar = (*it).second;
-      return tvar;
-    } else {
-      Type var_type = GetVarType(rvar);
-      tir::Var tvar = tir::Var(rvar->vid->name_hint, RelayTypeToTIRType(var_type));
-      var_to_var_mapping_.Set(rvar, tvar);
-      return tvar;
-    }
+    ICHECK(it == var_to_var_mapping_.end())
+        << "A TIR variable corresponding to the relay variable " << rvar << " already exists.";
+    Type var_type = GetVarType(rvar);
+
+    auto iit = arg_mode_states_.find(rvar);
+    bool scattered_tensor =
+        (iit != arg_mode_states_.end() &&
+         (*iit).second->value == static_cast<int>(runtime::vm::DBBatchedArgMode::kScatter));
+
+    std::string name = rvar->vid->name_hint + (scattered_tensor ? "_ptr" : "");
+    tir::Var tvar = tir::Var(name, RelayTypeToTIRType(var_type, scattered_tensor));
+    var_to_var_mapping_.Set(rvar, tvar);
+    return tvar;
   }
 
- private:
-  bool create_batched_;
-  const IRModule& mod_;
   tir::Var batch_size_var_;
-  Map<relay::Var, tir::Var> var_to_var_mapping_;
-  Map<relay::Var, Array<Expr>> tuple_var_values_;
+  Map<relay::Var, Integer> arg_mode_states_;
 };
 
 class Coarsener : public ExprMutator {
@@ -619,12 +780,12 @@ class Coarsener : public ExprMutator {
       };
 
       auto tmp_expr = transform::ToANormalForm(expr);
-      tmp_expr = TupleInliner()(expr);
+      tmp_expr = RemoveOnDeviceCalls(expr);
       tmp_expr = LetLifter()(tmp_expr);
       Serializer serializer;
       serializer.Serialize(tmp_expr);
       auto res =
-          TIRLowerer(false, mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+          TIRLowererUnbatched(mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
       auto prim_func = res.func;
       auto call_args = res.call_args;
       auto replacement = res.replacement;
@@ -638,7 +799,7 @@ class Coarsener : public ExprMutator {
 
       if (batched_execution_) {
         auto batched_res =
-            TIRLowerer(true, mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+            TIRLowererBatched(mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
         auto batched_func = batched_res.func;
         std::string batched_name = runtime::vm::GetBatchedName(name);
         GlobalVar batched_func_var(batched_name, VoidType());

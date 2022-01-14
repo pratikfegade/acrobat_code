@@ -222,7 +222,9 @@ Array<IndexExpr> GetShape(const Array<IndexExpr>& shape);
  */
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
-                                              bool create_batched = false);
+                                              Array<Bool> model_parameter_taints = {},
+                                              bool create_batched = false,
+                                              bool scattered_kernels = false);
 
 CachedFunc ShapeFuncFor(const Function& prim_func, const Target& target,
                         std::function<std::string(std::string)> renamer);

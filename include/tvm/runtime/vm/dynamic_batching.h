@@ -32,13 +32,14 @@ namespace vm {
  * \brief Dynamic batching argument mode.
  *
  * For a batched version of a kernel, this specifies which arguments
- * are to be (logically) concatenated, which ones can be reused and
- * which ones are to be ignored.
+ * are to be (logically or physically) concatenated, which ones can be
+ * reused and which ones are to be ignored.
  */
 enum DBBatchedArgMode {
   kIgnore = 0,
-  kConcat = 1,
-  kReuse = 2,
+  kReuse = 1,
+  kScatter = 2,
+  kConcat = 3,
 };
 
 #define DB_BATCHED_SUFFIX "_batched"

@@ -128,7 +128,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
   std::pair<CachedFunc, CachedFunc> Create(const Function& relay_func,
                                            std::function<std::string(std::string)> renamer,
-                                           bool create_batched) {
+                                           Array<Bool> model_parameter_taints, bool create_batched,
+                                           bool scattered_kernels) {
     // std::cout << "Lowering\n" << relay_func << "\n\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     for (Var param : relay_func->params) {
@@ -227,30 +228,33 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       Map<te::Operation, te::Operation> mapping = res.first;
       tir::Var batch_size_var = res.second;
 
-      auto map_tensors = [&](const Array<te::Tensor>& tensors, Array<Integer>* p_arg_modes) {
+      auto map_tensors = [&](const Array<te::Tensor>& tensors, Array<Integer>* p_arg_modes,
+                             bool inputs) {
         Array<te::Tensor> output;
-        for (auto tensor : tensors) {
+        ICHECK(!inputs || (tensors.size() == model_parameter_taints.size()));
+        for (size_t i = 0; i < tensors.size(); ++i) {
+          auto tensor = tensors[i];
           auto it = mapping.find(tensor->op);
+          runtime::vm::DBBatchedArgMode arg_mode = runtime::vm::DBBatchedArgMode::kIgnore;
           if (it != mapping.end()) {
             auto operation = (*it).second;
             output.push_back(operation.output(tensor->value_index));
-            p_arg_modes->push_back(
-                tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kConcat)));
-            // std::cout << "[AM]  concat " << tensor << std::endl;
-          } else {
-            std::cout << tensor << " " << tensor->op << " " << tensor->op.get() << std::endl;
-            p_arg_modes->push_back(
-                tvm::Integer(static_cast<int>(runtime::vm::DBBatchedArgMode::kIgnore)));
-            // std::cout << "[AM]  ignore " << tensor << std::endl;
+            arg_mode = runtime::vm::DBBatchedArgMode::kConcat;
+            if (inputs && model_parameter_taints[i].operator bool()) {
+              arg_mode = runtime::vm::DBBatchedArgMode::kReuse;
+            } else if (scattered_kernels) {
+              arg_mode = runtime::vm::DBBatchedArgMode::kScatter;
+            }
           }
+          p_arg_modes->push_back(tvm::Integer(static_cast<int>(arg_mode)));
         }
         return output;
       };
 
       // std::cout << "[AM] function " << prim_fn_var->name_hint << std::endl;
       Array<Integer> arg_modes;
-      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes);
-      Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes);
+      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes, true);
+      Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes, false);
 
       Array<te::Operation> output_operations;
       for (auto tensor : batched_outputs) {
@@ -438,8 +442,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
  */
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
-                                              bool create_batched) {
-  return ScheduleBuilder(target).Create(source_func, renamer, create_batched);
+                                              Array<Bool> model_parameter_taints,
+                                              bool create_batched, bool scattered_kernels) {
+  return ScheduleBuilder(target).Create(source_func, renamer, model_parameter_taints,
+                                        create_batched, scattered_kernels);
 }
 
 // Creates shape function from functor.
@@ -816,7 +822,7 @@ std::string GetUniqueName(std::string name, std::unordered_map<std::string, int>
 TVM_REGISTER_GLOBAL("relay.backend.LowerToTE").set_body_typed([](Function prim_func) {
   return ScheduleBuilder(tvm::Target("ext_dev"), false)
       .Create(
-          prim_func, [&](std::string name) { return name; }, false)
+          prim_func, [&](std::string name) { return name; }, {}, false, false)
       .first;
 });
 

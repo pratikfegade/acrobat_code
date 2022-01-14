@@ -1174,7 +1174,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
 
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
@@ -1211,7 +1211,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
         pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value();
     pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity(batched_execution));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
