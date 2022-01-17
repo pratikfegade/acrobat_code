@@ -1211,7 +1211,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
         pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value();
     pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity(batched_execution));
   }
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

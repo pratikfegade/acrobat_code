@@ -459,8 +459,6 @@ std::pair<IRModule, IRModule> SplitMixedModule(IRModule mod_mixed, const Target&
 
   IRModule device_mod = ApplyPasses(
       mod_mixed, DeviceModulePassManager(mod_mixed, target, for_execution, print_after_passes));
-  // exit(0);
-  // return {};
 
   auto keys = target->GetKeys();
 
@@ -584,7 +582,6 @@ runtime::Module build(const Map<Target, IRModule>& inputs_arg, const Target& tar
       auto& device_mod = pair.second;
 
       ICHECK(host_mod.defined()) << "The split host module must be defined";
-
       ICHECK(mhost_all.defined()) << "The host module must be defined";
 
       // We don't want library modules going back into host codegen

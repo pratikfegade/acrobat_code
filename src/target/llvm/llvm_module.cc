@@ -249,12 +249,21 @@ class LLVMModuleNode final : public runtime::ModuleNode {
         continue;
       }
       auto f = Downcast<PrimFunc>(kv.second);
+      auto gv = kv.first;
       auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol);
       ICHECK(global_symbol.defined());
       function_names_.push_back(global_symbol.value());
       if (f->HasNonzeroAttr(tir::attr::kIsEntryFunc)) {
         entry_func = global_symbol.value();
       }
+
+      auto it = mod->batched_arg_modes.find(gv);
+      Array<Integer> arg_modes;
+      if (it != mod->batched_arg_modes.end()) {
+        arg_modes = (*it).second;
+      }
+      f = WithAttr(std::move(f), "batched_arg_modes", arg_modes);
+
       funcs.push_back(f);
     }
     // TODO(@jroesch): follow up on this condition.

@@ -621,7 +621,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
           auto arg_var = Downcast<relay::Var>(arg);
           auto arg_mode = arg_modes[idx++]->value;
           merge_and_set_arg_mode(arg_var, arg_mode);
-          std::cout << "[CoG] ArgMode " << arg_var << " " << arg_mode << std::endl;
+          // std::cout << "[CoG] ArgMode " << arg_var << " " << arg_mode << std::endl;
         }
       }
     }
@@ -634,7 +634,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     for (auto rvar : flattened_free_vars) {
       auto param = CreateTIRVarWithUpdatedType(rvar);
       prim_func_params.push_back(param);
-      std::cout << "[CoG]  CreatingVar " << param << " " << param->type_annotation << std::endl;
+      // std::cout << "[CoG]  CreatingVar " << param << " " << param->type_annotation << std::endl;
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -692,8 +692,8 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     auto it = mod_->batched_arg_modes.find(batched_callee_gv);
     ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
     auto& arg_modes = (*it).second;
-    std::cout << "[CoG] Arg modes: " << batched_callee_gv->name_hint << " " << arg_modes
-              << std::endl;
+    // std::cout << "[CoG] Arg modes: " << batched_callee_gv->name_hint << " " << arg_modes
+    // << std::endl;
 
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(batched_name));

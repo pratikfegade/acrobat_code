@@ -27,6 +27,7 @@
 #include <tvm/runtime/c_runtime_api.h>
 #include <tvm/runtime/crt/error_codes.h>
 #include <tvm/runtime/device_api.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/tir/op.h>
 
 #include <algorithm>
@@ -115,23 +116,64 @@ void CodeGenLLVM::InitFuncState() {
 void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
   bool batched_function = f->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc);
-  if (support::StartsWith(name, "vm_") || support::StartsWith(name, "prim_func")) {
-    // std::cout << "[LLVM] Function: " << name << " " << batched_function << std::endl;
-    // std::cout << "[FUNC]\n" << f << std::endl;
-  }
+  bool coarsened_function = f->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc);
+  bool is_execution_kernel =
+      (support::StartsWith(name, "vm_") || support::StartsWith(name, "prim_func"));
   this->InitFuncState();
+
+  std::vector<tvm::runtime::vm::DBBatchedArgMode> arg_modes;
+  auto arg_modes_arr = f->GetAttr<Array<Integer>>("batched_arg_modes", Array<Integer>()).value();
+  bool is_batched_prim_func = f->GetAttr<Bool>(tir::attr::kDBBatchedPrimFunc, Bool(false)).value();
+  for (auto i : arg_modes_arr) {
+    arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
+  }
+
+  std::vector<bool> param_retain(f->params.size(), true);
+  if (batched_function && !coarsened_function) {
+    std::cout << "[LLVM] Function: " << name << " " << arg_modes_arr << std::endl;
+    std::cout << "[FUNC]\n" << f << std::endl;
+
+    int start = is_batched_prim_func ? 1 : 0;
+    int ctr = 0;
+    for (size_t i = start; i < f->params.size();) {
+      switch (arg_modes[ctr++]) {
+        case tvm::runtime::vm::kIgnore:
+          // std::cout << "Ignoring" << std::endl;
+          param_retain[i] = false;
+          break;
+        case tvm::runtime::vm::kReuse:
+          // std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
+          i += 1;
+          break;
+        case tvm::runtime::vm::kScatter:
+          // std::cout << "Scattering " << f->params[i]->name_hint << std::endl;
+          // std::cout << " Skipping " << f->params[i]->name_hint << std::endl;
+          // std::cout << " Keepping " << f->params[i + 1]->name_hint << std::endl;
+          param_retain[i] = false;
+          i += 2;
+          break;
+        case tvm::runtime::vm::kConcat:
+          // std::cout << "Concating " << f->params[i]->name_hint << std::endl;
+          i += 1;
+          break;
+      }
+    }
+  }
 
   // ICHECK_EQ(f->buffer_map.size(), 0U)
   // << "Cannot codegen function with buffer_map, please lower them first";
 
   std::vector<llvm::Type*> param_types;
   is_restricted_ = f->HasNonzeroAttr(tir::attr::kNoAlias);
-  for (Var param : f->params) {
-    // std::cout << "ARG TYPE " << param << " " << GetType(param) << " "
-    // << f->scatter_buffer_map.count(param) << std::endl;
-    param_types.push_back(GetLLVMType(param));
-    if (!is_restricted_ && param.dtype().is_handle()) {
-      alias_var_set_.insert(param.get());
+  for (size_t i = 0; i < f->params.size(); ++i) {
+    if (param_retain[i]) {
+      Var param = f->params[i];
+      // std::cout << "ARG TYPE " << param << " " << GetType(param) << " "
+      // << f->scatter_buffer_map.count(param) << std::endl;
+      param_types.push_back(GetLLVMType(param));
+      if (!is_restricted_ && param.dtype().is_handle()) {
+        alias_var_set_.insert(param.get());
+      }
     }
   }
   // TODO(tvm-team):
@@ -153,19 +195,24 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
 
   // set var map and align information
   auto arg_it = function_->arg_begin();
-  for (size_t i = 0; i < f->params.size(); ++i, ++arg_it) {
-    llvm::Argument* v = &(*arg_it);
-    const Var& var = f->params[i];
-    var_map_[var.get()] = v;
-    if (is_restricted_) {
-      if (var.dtype().is_handle() && !alias_var_set_.count(var.get())) {
-        // set non alias.
+  int ctr = 0;
+  for (size_t i = 0; i < f->params.size(); ++i) {
+    if (param_retain[i]) {
+      llvm::Argument* v = &(*arg_it);
+      const Var& var = f->params[i];
+      var_map_[var.get()] = v;
+      if (is_restricted_) {
+        if (var.dtype().is_handle() && !alias_var_set_.count(var.get())) {
+          // set non alias.
 #if TVM_LLVM_VERSION >= 50
-        function_->addParamAttr(i, llvm::Attribute::NoAlias);
+          function_->addParamAttr(ctr, llvm::Attribute::NoAlias);
 #else
-        function_->setDoesNotAlias(i + 1);
+          function_->setDoesNotAlias(ctr + 1);
 #endif
+        }
       }
+      ++arg_it;
+      ++ctr;
     }
   }
   llvm::BasicBlock* entry = llvm::BasicBlock::Create(*ctx_, "entry", function_);
@@ -175,15 +222,19 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
 
   // Add alignment attribute if needed.
 #if TVM_LLVM_VERSION >= 50
+  ctr = 0;
   for (size_t i = 0; i < f->params.size(); ++i) {
-    const Var& var = f->params[i];
-    auto f = alloc_storage_info_.find(var.get());
-    if (f != alloc_storage_info_.end()) {
-      unsigned align = f->second.alignment;
-      if (align > 1) {
-        auto attr = llvm::Attribute::get(*ctx_, llvm::Attribute::Alignment, align);
-        function_->addParamAttr(i, attr);
+    if (param_retain[i]) {
+      const Var& var = f->params[i];
+      auto f = alloc_storage_info_.find(var.get());
+      if (f != alloc_storage_info_.end()) {
+        unsigned align = f->second.alignment;
+        if (align > 1) {
+          auto attr = llvm::Attribute::get(*ctx_, llvm::Attribute::Alignment, align);
+          function_->addParamAttr(ctr, attr);
+        }
       }
+      ++ctr;
     }
   }
 #endif

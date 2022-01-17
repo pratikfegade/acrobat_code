@@ -106,8 +106,6 @@ class TECompilerImpl : public TECompilerNode {
   IRModule GetLoweredFunctions() {
     IRModule mod;
 
-    Map<GlobalVar, GlobalVar> batched_prim_funcs;
-    Map<GlobalVar, Array<Integer>> batched_arg_mode;
     // Extract lowered functions from the cache
     for (const auto& it : cache_) {
       // Annotate functions with their target and put them in the return module
@@ -367,10 +365,7 @@ class TECompilerImpl : public TECompilerNode {
 
       // NOTE: array will copy on write.
       auto lower_scheduled_function = [&](const CachedFunc& cached_func, bool batched) {
-        Array<ObjectRef> all_args;
-        all_args.push_back_all(cached_func->input_variables);
-        all_args.push_back_all(cached_func->inputs);
-        all_args.push_back_all(cached_func->outputs);
+        // Create scatter_buffer_map when applicable
         Map<te::Tensor, tir::Buffer> scatter_buffers;
         if (batched && scattered_kernels) {
           size_t flattened_size = func_model_parameter_taints.size();
@@ -383,19 +378,43 @@ class TECompilerImpl : public TECompilerNode {
           ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
           int ctr = 0;
           for (size_t i = 0; i < flattened_size; ++i) {
-            if (cached_func->batched_arg_mode[i]->value > 0 && !func_model_parameter_taints[i]) {
+            if (cached_func->batched_arg_mode[i]->value ==
+                    static_cast<int>(tvm::runtime::vm::kScatter) &&
+                !func_model_parameter_taints[i]) {
               te::Tensor arg = cached_func->inputs[ctr++];
               // std::cout << "[TEC] Making scatter arg " << arg->op->name << std::endl;
               auto scatter_buffer = create_pointer_buffer(arg);
-              all_args.push_back(scatter_buffer);
               scatter_buffers.Set(arg, scatter_buffer);
             }
           }
           for (te::Tensor arg : cached_func->outputs) {
             auto scatter_buffer = create_pointer_buffer(arg);
-            all_args.push_back(scatter_buffer);
             scatter_buffers.Set(arg, scatter_buffer);
           }
+        }
+
+        // Create all_args
+        Array<ObjectRef> all_args;
+        all_args.push_back_all(cached_func->input_variables);
+        if (batched && scattered_kernels) {
+          for (auto input : cached_func->inputs) {
+            all_args.push_back(input);
+            auto it = scatter_buffers.find(input);
+            if (it != scatter_buffers.end()) {
+              auto scatter_input = (*it).second;
+              all_args.push_back(scatter_input);
+            }
+          }
+          for (auto output : cached_func->outputs) {
+            all_args.push_back(output);
+            auto it = scatter_buffers.find(output);
+            ICHECK(it != scatter_buffers.end());
+            auto scatter_output = (*it).second;
+            all_args.push_back(scatter_output);
+          }
+        } else {
+          all_args.push_back_all(cached_func->inputs);
+          all_args.push_back_all(cached_func->outputs);
         }
         // lower the function
         std::unordered_map<te::Tensor, tir::Buffer> binds;
@@ -1254,6 +1273,18 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
         target = Target(target_map);
       }
 
+      auto add_db_meta_data = [](const IRModule& mod, IRModule& target_module,
+                                 const GlobalVar& var) {
+        auto arg_modes_it = mod->batched_arg_modes.find(var);
+        if (arg_modes_it != mod->batched_arg_modes.end()) {
+          target_module->UpdateArgMode(var, (*arg_modes_it).second);
+        }
+        auto batched_func_it = mod->batched_prim_funcs.find(var);
+        if (batched_func_it != mod->batched_prim_funcs.end()) {
+          target_module->UpdateBatchedPrimFunc(var, (*batched_func_it).second);
+        }
+      };
+
       // Put the function in per_target_modules
       if (!per_target_modules.count(target)) {
         // Initialize the IRModule for this target with the attributes from the input IRModule
@@ -1261,10 +1292,12 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
         // Add the function to the IRModule
         target_module->Add(var, func);
         per_target_modules[target] = target_module;
+        add_db_meta_data(mod, target_module, var);
       } else {
         // The IRModule for this target is initialized, so just add the function.
         IRModule target_module = per_target_modules.at(target);
         target_module->Add(var, func);
+        add_db_meta_data(mod, target_module, var);
       }
     } else if (!func->IsInstance<relay::FunctionNode>()) {
       LOG(FATAL)
@@ -1272,6 +1305,7 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
           << func->GetTypeKey();
     }
   }
+
   return per_target_modules;
 }
 

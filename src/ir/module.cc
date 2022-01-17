@@ -382,6 +382,17 @@ void IRModuleNode::Update(const IRModule& mod) {
       this->AddUnchecked(pair.first, pair.second);
     }
   }
+
+  for (auto pair : mod->batched_prim_funcs) {
+    auto gv1 = renamer.defs.at(pair.first->name_hint);
+    auto gv2 = renamer.defs.at(pair.second->name_hint);
+    this->UpdateBatchedPrimFunc(gv1, gv2);
+  }
+
+  for (auto pair : mod->batched_arg_modes) {
+    auto gv = renamer.defs.at(pair.first->name_hint);
+    this->UpdateArgMode(gv, pair.second);
+  }
 }
 
 IRModule IRModuleNode::ShallowCopy() {

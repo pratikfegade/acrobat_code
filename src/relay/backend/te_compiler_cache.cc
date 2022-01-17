@@ -246,12 +246,13 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
               arg_mode = runtime::vm::DBBatchedArgMode::kScatter;
             }
           }
+          std::cout << "[TECC]  Arg Mode " << tensor->op->name << " " << arg_mode << std::endl;
           p_arg_modes->push_back(tvm::Integer(static_cast<int>(arg_mode)));
         }
         return output;
       };
 
-      // std::cout << "[AM] function " << prim_fn_var->name_hint << std::endl;
+      std::cout << "[TECC] Function " << prim_fn_var->name_hint << "_batched" << std::endl;
       Array<Integer> arg_modes;
       Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes, true);
       Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes, false);
