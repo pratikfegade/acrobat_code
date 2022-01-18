@@ -49,7 +49,7 @@ class VirtualMachineDebug : public VirtualMachine {
   ~VirtualMachineDebug() {}
 
  private:
-  void InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count, Index output_size,
+  void InvokePacked(Index packed_index, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args, bool batched = false) final;
   void OpStartHook(Instruction instr) final;
   void OpStopHook() final;

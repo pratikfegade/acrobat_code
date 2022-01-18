@@ -141,7 +141,7 @@ TVM_DLL Pass FuseOps(int fuse_opt_level = -1);
  *
  * \return The pass.
  */
-TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection);
+TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection, bool scattered_kernels);
 
 /*!
  * \brief The inverse operation of FuseOps. It transforms a fused program returned by

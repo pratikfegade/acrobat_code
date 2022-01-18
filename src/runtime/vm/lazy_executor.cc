@@ -44,9 +44,7 @@ using namespace tvm::runtime;
 namespace tvm {
 namespace runtime {
 namespace vm {
-void OpNode::Execute() { InvokePackedFnUnrolled(func_, arg_count_, output_size_, args_); }
-
-void LazyExecutor::AddPackedCall(const PackedFunc& func, const Index arg_count,
+void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
                                  const Index output_size, const std::vector<ObjectRef> args) {
   std::vector<NDArray> args_copy;
   bool is_empty_output = false;
@@ -102,21 +100,20 @@ void LazyExecutor::AddPackedCall(const PackedFunc& func, const Index arg_count,
   // std::cout << " O " << args_copy[i].get() << std::endl;
   // }
 
-  OpNode node(nodes_.size(), func, unrolled_input_size + unrolled_output_size, unrolled_output_size,
-              args_copy);
+  OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
+              unrolled_output_size, args_copy);
   nodes_.push_back(node);
 }
 
 void LazyExecutor::Execute() {
-  // std::cout << "Executing nodes" << std::endl;
   for (OpNode& node : nodes_) {
-    node.Execute();
+    InvokePackedFnUnrolled(vm_->packed_funcs_[node.func_idx_], node.arg_count_, node.output_size_,
+                           node.args_);
   }
   nodes_.clear();
 }
 
 void LazyExecutor::BatchedExecute() {
-  // std::cout << "Batch Executing" << std::endl;
   std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
   for (OpNode& node : nodes_) {
     for (size_t i = node.OutputStart(); i < node.OutputEnd(); ++i) {
@@ -126,25 +123,40 @@ void LazyExecutor::BatchedExecute() {
 
   size_t num_nodes = nodes_.size();
   std::vector<int> node_to_depth(num_nodes);
+  std::vector<std::vector<int>> depth_to_node(num_nodes);
+  int graph_depth = -1;
   for (size_t i = 0; i < num_nodes; ++i) {
     OpNode& node = nodes_[i];
     int max_depth = 0;
-    // std::cout << " Node " << i << std::endl;
     for (size_t j = node.InputStart(); j < node.InputEnd(); ++j) {
-      // std::cout << "   Tensor " << node.args_[j].get() << std::endl;
       auto it = output_tensor_to_node.find(node.args_[j]);
       if (it != output_tensor_to_node.end()) {
         auto input_node_id = it->second;
         max_depth = std::max(max_depth, node_to_depth[input_node_id]);
       }
     }
-    node_to_depth[i] = max_depth + 1;
-    // std::cout << "  Depth " << max_depth << std::endl;
+    int node_depth = max_depth + 1;
+    node_to_depth[i] = node_depth;
+    depth_to_node[node_depth].push_back(i);
+    graph_depth = std::max(graph_depth, node_depth);
   }
 
-  // std::cout << " Executing nodes" << std::endl;
-  for (OpNode& node : nodes_) {
-    node.Execute();
+  for (int i = 0; i <= graph_depth; ++i) {
+    auto& depth_nodes = depth_to_node[i];
+    std::unordered_map<int, std::vector<OpNode*>> func_to_node;
+    for (auto& node_id : depth_nodes) {
+      func_to_node[nodes_[node_id].func_idx_].push_back(&nodes_[node_id]);
+    }
+
+    for (auto& pair : func_to_node) {
+      auto& func_idx = pair.first;
+      auto& nodes = pair.second;
+      std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << " " << sizeof(void*)
+                << std::endl;
+      InvokePackedFnBatchedUnrolled(vm_->packed_funcs_[func_idx], nodes[0]->arg_count_,
+                                    nodes[0]->output_size_, vm_->batched_func_arg_mode_[func_idx],
+                                    nodes);
+    }
   }
   nodes_.clear();
 }

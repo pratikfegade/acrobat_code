@@ -61,7 +61,7 @@ inline void VerifyDataType(DLDataType dtype) {
 
 void ArrayCopyFromBytes(DLTensor* handle, const void* data, size_t nbytes) {
   size_t arr_size = GetDataSize(*handle);
-  ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch";
+  ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " << nbytes;
   ICHECK(IsContiguous(*handle)) << "ArrayCopyFromBytes only support contiguous array for now";
 
   DLTensor from;

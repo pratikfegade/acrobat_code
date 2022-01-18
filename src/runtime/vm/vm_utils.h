@@ -27,6 +27,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
+#include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/vm.h>
 
 #include <algorithm>
@@ -57,6 +58,24 @@ namespace vm {
  */
 void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
                             const std::vector<NDArray>& args);
+
+/*!
+ * \brief Invoke a batch PackedFunction (refactored out to avoid code
+ * duplication) on a batch of OpNodes . This functions assumes that
+ * all ADT args have already been unrolled into their constituent
+ * NDArrays
+ *
+ * \param func The PackedFunction to be invoked.
+ * \param arg_count The number of arguments to the PackedFunction.
+ * \param output_size The number of outputs of the PackedFunction.
+ * \param arg_modes The argument modes of the PackedFunction.
+ * \param nodes The OpNodes as a batch.
+ *
+ * \note The return value will be stored in the last output_size slots of args.
+ */
+void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
+                                   const std::vector<DBBatchedArgMode>& arg_modes,
+                                   const std::vector<OpNode*>& nodes);
 
 /*!
  * \brief Invoke a PackedFunction (refactored out to avoid code duplication)

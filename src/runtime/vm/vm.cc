@@ -278,6 +278,30 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset) {
   inputs_.emplace(func_name, func_args);
 }
 
+void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
+  if (options->lazy_execution) {
+    std::cout << "[VM] Executing lazily" << std::endl;
+  } else {
+    std::cout << "[VM] Executing eagerly" << std::endl;
+  }
+  this->lazy_execution_ = options->lazy_execution;
+
+  if (options->batched_execution) {
+    std::cout << "[VM] Executing batched" << std::endl;
+  } else {
+    std::cout << "[VM] Executing unbatched" << std::endl;
+  }
+  this->batched_execution_ = options->batched_execution;
+
+  if (options->scattered_kernels) {
+    std::cout << "[VM] Executing scattered kernels" << std::endl;
+  } else {
+    std::cout << "[VM] Executing unscattered kernels" << std::endl;
+  }
+  this->scattered_kernels_ = options->scattered_kernels;
+  this->lazy_executor_.vm_ = this;
+}
+
 inline Device VirtualMachine::GetDevice(Index device_index) const {
   ICHECK_GE(devices_.size(), device_index) << "invalid device index: " << device_index;
   return devices_[device_index];
@@ -339,42 +363,19 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
   return Invoke(exec_->functions[func_index], args);
 }
 
-void VirtualMachine::InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
-                                  Index output_size, const std::vector<ObjectRef>& args,
-                                  bool batched) {
+void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index output_size,
+                                  const std::vector<ObjectRef>& args, bool batched) {
   if (lazy_execution_) {
-    lazy_executor_.AddPackedCall(func, arg_count, output_size, args);
+    lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
   } else {
     if (batched) {
-      InvokePackedFn(func, arg_count, output_size, args, batched_func_arg_mode_[packed_index],
-                     batched, this->scattered_kernels_);
+      InvokePackedFn(packed_funcs_[packed_index], arg_count, output_size, args,
+                     batched_func_arg_mode_[packed_index], batched, this->scattered_kernels_);
     } else {
-      InvokePackedFn(func, arg_count, output_size, args, {}, batched, this->scattered_kernels_);
+      InvokePackedFn(packed_funcs_[packed_index], arg_count, output_size, args, {}, batched,
+                     this->scattered_kernels_);
     }
   }
-}
-
-void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
-  if (options->lazy_execution) {
-    std::cout << "[VM] Executing lazily" << std::endl;
-  } else {
-    std::cout << "[VM] Executing eagerly" << std::endl;
-  }
-  this->lazy_execution_ = options->lazy_execution;
-
-  if (options->batched_execution) {
-    std::cout << "[VM] Executing batched" << std::endl;
-  } else {
-    std::cout << "[VM] Executing unbatched" << std::endl;
-  }
-  this->batched_execution_ = options->batched_execution;
-
-  if (options->scattered_kernels) {
-    std::cout << "[VM] Executing scattered kernels" << std::endl;
-  } else {
-    std::cout << "[VM] Executing unscattered kernels" << std::endl;
-  }
-  this->scattered_kernels_ = options->scattered_kernels;
 }
 
 void VirtualMachine::LoadExecutable(Executable* exec) {
@@ -511,7 +512,6 @@ void VirtualMachine::RunLoop() {
   main_loop:
     auto const& instr = code_[this->pc_];
     VLOG(2) << "Executing(" << pc_ << "): " << instr;
-    // std::cout << "Executing(" << pc_ << "): " << instr << std::endl;
 
     switch (instr.op) {
       case Opcode::Move: {
@@ -570,7 +570,6 @@ void VirtualMachine::RunLoop() {
         // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
         // << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
-        const auto& func = packed_funcs_[instr.packed_index];
         const auto& arity = instr.arity;
         std::vector<ObjectRef> args;
         for (Index i = 0; i < arity; ++i) {
@@ -582,14 +581,9 @@ void VirtualMachine::RunLoop() {
         // We no longer need to write the registers back, we write directly
         // through the registers mutably.
         if (batched_funcs_[instr.packed_index] >= 0) {
-          // InvokePacked(instr.packed_index, func, arity, instr.output_size, args);
-          auto& arg_modes = batched_func_arg_mode_[batched_funcs_[instr.packed_index]];
-          // std::cout << "  ArgModes " << arg_modes.size() << std::endl;
-          InvokePacked(batched_funcs_[instr.packed_index],
-                       packed_funcs_[batched_funcs_[instr.packed_index]], arity, instr.output_size,
-                       args, true);
+          InvokePacked(batched_funcs_[instr.packed_index], arity, instr.output_size, args, true);
         } else {
-          InvokePacked(instr.packed_index, func, arity, instr.output_size, args, false);
+          InvokePacked(instr.packed_index, arity, instr.output_size, args, false);
         }
         pc_++;
         goto main_loop;
@@ -751,7 +745,11 @@ void VirtualMachine::RunLoop() {
 
         if (PopFrame() == frame_start) {
           if (lazy_execution_) {
-            lazy_executor_.BatchedExecute();
+            if (batched_execution_) {
+              lazy_executor_.BatchedExecute();
+            } else {
+              lazy_executor_.Execute();
+            }
           }
           return;
           // Otherwise we are just returning from a local call.

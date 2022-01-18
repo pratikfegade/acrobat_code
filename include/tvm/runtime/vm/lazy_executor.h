@@ -43,13 +43,17 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+class VirtualMachine;
+
 class OpNode {
  public:
-  OpNode(const int id, const PackedFunc& func, const Index arg_count, const Index output_size,
+  OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
          const std::vector<NDArray> args)
-      : id_(id), func_(func), arg_count_(arg_count), output_size_(output_size), args_(args) {}
-
-  void Execute();
+      : id_(id),
+        func_idx_(func_idx),
+        arg_count_(arg_count),
+        output_size_(output_size),
+        args_(args) {}
 
   inline Index InputStart() { return 0; }
 
@@ -60,7 +64,7 @@ class OpNode {
   inline Index OutputEnd() { return arg_count_; }
 
   const int id_;
-  const PackedFunc& func_;
+  const Index func_idx_;
   const Index arg_count_;
   const Index output_size_;
   const std::vector<NDArray> args_;
@@ -72,7 +76,7 @@ class OpNode {
  */
 class LazyExecutor {
  public:
-  void AddPackedCall(const PackedFunc& func, const Index arg_count, const Index output_size,
+  void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
                      const std::vector<ObjectRef> args);
 
   void Execute();
@@ -80,6 +84,11 @@ class LazyExecutor {
   void BatchedExecute();
 
  private:
+  friend class VirtualMachine;
+
+  /*! \brief Pointer to the VM this executor is associated with */
+  const VirtualMachine* vm_;
+  /*! \brief list of nodes to execute */
   std::vector<OpNode> nodes_;
 };
 

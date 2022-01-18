@@ -1002,10 +1002,10 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
 
   auto arg_modes = context_.module->batched_arg_modes;
-  // std::cout << "[CO] ARGMODES2" << std::endl;
-  // for (auto it : arg_modes) {
-  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  // }
+  std::cout << "[CO] ARGMODES2" << std::endl;
+  for (auto it : arg_modes) {
+    std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  }
   // update batched arg modes
   for (auto pair : arg_modes) {
     ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
@@ -1208,8 +1208,11 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     bool batched_execution =
-        pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value();
-    pass_seqs.push_back(transform::CoarsenPrimitiveFuncGranularity(batched_execution));
+        pass_ctx->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+    bool scattered_kernels =
+        pass_ctx->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
+    pass_seqs.push_back(
+        transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
   // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 

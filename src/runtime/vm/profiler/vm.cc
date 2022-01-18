@@ -148,9 +148,8 @@ void VirtualMachineDebug::OpStopHook() {
   }
 }
 
-void VirtualMachineDebug::InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
-                                       Index output_size, const std::vector<ObjectRef>& args,
-                                       bool batched) {
+void VirtualMachineDebug::InvokePacked(Index packed_index, Index arg_count, Index output_size,
+                                       const std::vector<ObjectRef>& args, bool batched) {
   ICHECK(exec_);
   ICHECK(!devices_.empty()) << "Device has not been initialized yet.";
   if (prof_ && prof_.operator*().IsRunning()) {
@@ -197,7 +196,7 @@ void VirtualMachineDebug::InvokePacked(Index packed_index, const PackedFunc& fun
 
     prof_.operator*().StartCall(packed_index_map_[packed_index], dev, metrics);
   }
-  VirtualMachine::InvokePacked(packed_index, func, arg_count, output_size, args);
+  VirtualMachine::InvokePacked(packed_index, arg_count, output_size, args);
   if (prof_ && prof_.operator*().IsRunning()) {
     prof_.operator*().StopCall();
   }

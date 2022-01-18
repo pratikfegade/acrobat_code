@@ -269,16 +269,14 @@ class VirtualMachine : public runtime::ModuleNode {
    * \brief Invoke a PackedFunction
    *
    * \param packed_index The offset of the PackedFunction in all functions.
-   * \param func The PackedFunction to be invoked.
    * \param arg_count The number of arguments to the PackedFunction.
    * \param output_size The number of outputs of the PackedFunction.
    * \param args Arguments to the PackedFunction.
    *
    * \note The return value will be stored in the last output_size slots of args.
    */
-  virtual void InvokePacked(Index packed_index, const PackedFunc& func, Index arg_count,
-                            Index output_size, const std::vector<ObjectRef>& args,
-                            bool batched = false);
+  virtual void InvokePacked(Index packed_index, Index arg_count, Index output_size,
+                            const std::vector<ObjectRef>& args, bool batched = false);
 
   /*!
    * \brief Initialize the virtual machine for a set of (physical) devices.
@@ -329,6 +327,8 @@ class VirtualMachine : public runtime::ModuleNode {
   virtual void OpStopHook();
 
  protected:
+  friend class LazyExecutor;
+
   /*! \brief The virtual machine's packed function table. */
   std::vector<PackedFunc> packed_funcs_;
   /*! \brief The current stack of call frames. */
@@ -366,15 +366,15 @@ class VirtualMachine : public runtime::ModuleNode {
   /*!
    * \brief Whether to execute tensor ops lazily.
    */
-  bool lazy_execution_ = true;
+  bool lazy_execution_ = false;
   /*!
    * \brief Whether to execute tensor ops in a batched manner.
    */
-  bool batched_execution_ = true;
+  bool batched_execution_ = false;
   /*!
    * \brief Whether the batched kernels operate on scattered tensors
    */
-  bool scattered_kernels_;
+  bool scattered_kernels_ = false;
   /*!
    * \brief A mapping from packed_funcs to there batched counterparts.
    */

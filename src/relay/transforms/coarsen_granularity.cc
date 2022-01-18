@@ -328,11 +328,13 @@ struct TIRLowererResult {
   tir::PrimFunc func;
   std::vector<Expr> call_args;
   Expr replacement;
+  Array<Integer> arg_modes;
 };
 
 class AbstractTIRLowerer {
  public:
-  AbstractTIRLowerer(const IRModule& mod) : mod_(mod) {}
+  AbstractTIRLowerer(const IRModule& mod, bool scattered_kernels)
+      : mod_(mod), scattered_kernels_(scattered_kernels) {}
 
   ~AbstractTIRLowerer() {}
 
@@ -434,13 +436,15 @@ class AbstractTIRLowerer {
   }
 
   const IRModule& mod_;
+  bool scattered_kernels_;
   Map<relay::Var, tir::Var> var_to_var_mapping_;
   Map<relay::Var, Array<Expr>> tuple_var_values_;
 };
 
 class TIRLowererUnbatched : public AbstractTIRLowerer {
  public:
-  TIRLowererUnbatched(const IRModule& mod) : AbstractTIRLowerer(mod) {}
+  TIRLowererUnbatched(const IRModule& mod, bool scattered_kernels)
+      : AbstractTIRLowerer(mod, scattered_kernels) {}
 
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) final {
@@ -507,7 +511,7 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
-                             flattened_call_args, body_in_free_vars});
+                             flattened_call_args, body_in_free_vars, Array<Integer>()});
   }
 
  private:
@@ -536,7 +540,8 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 
 class TIRLowererBatched : public AbstractTIRLowerer {
  public:
-  TIRLowererBatched(const IRModule& mod) : AbstractTIRLowerer(mod) {
+  TIRLowererBatched(const IRModule& mod, bool scattered_kernels)
+      : AbstractTIRLowerer(mod, scattered_kernels) {
     batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
   }
 
@@ -630,10 +635,18 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     var_to_var_mapping_.clear();
 
     Array<tir::Var> prim_func_params;
+    Array<Integer> prim_func_arg_modes;
     prim_func_params.push_back(batch_size_var_);
     for (auto rvar : flattened_free_vars) {
       auto param = CreateTIRVarWithUpdatedType(rvar);
       prim_func_params.push_back(param);
+
+      auto iit = arg_mode_states_.find(rvar);
+      auto arg_mode = (iit != arg_mode_states_.end()
+                           ? (*iit).second
+                           : (scattered_kernels_ ? runtime::vm::DBBatchedArgMode::kScatter
+                                                 : runtime::vm::DBBatchedArgMode::kConcat));
+      prim_func_arg_modes.push_back(arg_mode);
       // std::cout << "[CoG]  CreatingVar " << param << " " << param->type_annotation << std::endl;
     }
 
@@ -678,7 +691,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
-                             flattened_call_args, body_in_free_vars});
+                             flattened_call_args, body_in_free_vars, prim_func_arg_modes});
   }
 
  private:
@@ -714,7 +727,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     push_args(call->args[1]);
     push_args(call->args[2]);
-    std::cout << "[ARGS] " << args << std::endl;
+    // std::cout << "[ARGS] " << args << std::endl;
     // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
     // return tir::Call(DataType::Void(), batched_callee_gv, args, call->span);
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
@@ -744,8 +757,12 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
 class Coarsener : public ExprMutator {
  public:
-  Coarsener(const Groups& groups, const IRModule& mod, bool batched_execution)
-      : groups_(groups), mod_(mod), batched_execution_(batched_execution) {}
+  Coarsener(const Groups& groups, const IRModule& mod, bool batched_execution,
+            bool scattered_kernels)
+      : groups_(groups),
+        mod_(mod),
+        batched_execution_(batched_execution),
+        scattered_kernels_(scattered_kernels) {}
 
  private:
   Expr VisitExpr(const Expr& expr) override {
@@ -784,8 +801,8 @@ class Coarsener : public ExprMutator {
       tmp_expr = LetLifter()(tmp_expr);
       Serializer serializer;
       serializer.Serialize(tmp_expr);
-      auto res =
-          TIRLowererUnbatched(mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+      auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
+                     .LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
       auto prim_func = res.func;
       auto call_args = res.call_args;
       auto replacement = res.replacement;
@@ -798,8 +815,8 @@ class Coarsener : public ExprMutator {
       prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
       if (batched_execution_) {
-        auto batched_res =
-            TIRLowererBatched(mod_).LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
+        auto batched_res = TIRLowererBatched(mod_, scattered_kernels_)
+                               .LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
         auto batched_func = batched_res.func;
         std::string batched_name = runtime::vm::GetBatchedName(name);
         GlobalVar batched_func_var(batched_name, VoidType());
@@ -807,12 +824,7 @@ class Coarsener : public ExprMutator {
         // std::cout << "batched_func " << batched_func << std::endl;
         prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
         batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
-        Array<Integer> arg_modes;
-
-        for (size_t i = 0; i < batched_func->params.size() - 1; ++i) {
-          arg_modes.push_back(Integer(static_cast<int>(runtime::vm::kConcat)));
-        }
-        batched_arg_modes_.push_back(std::make_pair(batched_func_var, arg_modes));
+        batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
       }
 
       return Let(Var("dummy", VoidType()), call, replacement);
@@ -830,12 +842,13 @@ class Coarsener : public ExprMutator {
   const Groups& groups_;
   const IRModule& mod_;
   const bool batched_execution_;
+  const bool scattered_kernels_;
   static int ctr;
 };
 
 int Coarsener::ctr = 0;
 
-IRModule CoarsenGranularity(IRModule& mod, bool batched_execution) {
+IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
   // std::cout << "Coarsening now!" << std::endl;
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
@@ -850,7 +863,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution) {
       Function func = GetRef<Function>(n);
 
       auto groups = GroupFinder().FindGroups(func);
-      Coarsener coarsener(groups, mod, batched_execution);
+      Coarsener coarsener(groups, mod, batched_execution, scattered_kernels);
       Function ret = Downcast<Function>(coarsener(func));
 
       updates.Set(it.first, ret);
@@ -882,9 +895,11 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution) {
 }
 
 namespace transform {
-Pass CoarsenPrimitiveFuncGranularity(bool batched_execution) {
-  runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
-      [=](IRModule m, PassContext pc) { return CoarsenGranularity(m, batched_execution); };
+Pass CoarsenPrimitiveFuncGranularity(bool batched_execution, bool scattered_kernels) {
+  runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule m,
+                                                                            PassContext pc) {
+    return CoarsenGranularity(m, batched_execution, scattered_kernels);
+  };
   return CreateModulePass(pass_func, 0, "CoarsenPrimitiveFuncGranularity", {});
 }
 

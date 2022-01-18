@@ -128,11 +128,12 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
   }
 
+  if (is_execution_kernel) {
+    std::cout << "[LLVM] Function: " << name << std::endl;
+    std::cout << f << std::endl;
+  }
   std::vector<bool> param_retain(f->params.size(), true);
   if (batched_function && !coarsened_function) {
-    std::cout << "[LLVM] Function: " << name << " " << arg_modes_arr << std::endl;
-    std::cout << "[FUNC]\n" << f << std::endl;
-
     int start = is_batched_prim_func ? 1 : 0;
     int ctr = 0;
     for (size_t i = start; i < f->params.size();) {
@@ -168,14 +169,17 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   for (size_t i = 0; i < f->params.size(); ++i) {
     if (param_retain[i]) {
       Var param = f->params[i];
-      // std::cout << "ARG TYPE " << param << " " << GetType(param) << " "
-      // << f->scatter_buffer_map.count(param) << std::endl;
+      // if (is_execution_kernel) {
+      //   std::cout << param << " ";
+      // }
       param_types.push_back(GetLLVMType(param));
       if (!is_restricted_ && param.dtype().is_handle()) {
         alias_var_set_.insert(param.get());
       }
     }
   }
+  // std::cout << std::endl;
+
   // TODO(tvm-team):
   // Update the function type to respect the ret_type field of f.
   // Once we allow more flexibility in the PrimFunc.
