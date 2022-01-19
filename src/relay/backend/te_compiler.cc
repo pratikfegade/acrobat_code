@@ -371,6 +371,9 @@ class TECompilerImpl : public TECompilerNode {
           size_t flattened_size = func_model_parameter_taints.size();
           size_t unflattened_size = key->source_func->params.size();
           size_t flattened_useful_size = key->source_func->params.size();
+          std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
+                    << cached_func->inputs.size() << " " << cached_func->outputs.size() << " "
+                    << flattened_size << std::endl;
           ICHECK_GE(flattened_size, flattened_useful_size)
               << cached_func->prim_fn_var->name_hint
               << " Maybe the function has a parameter that contains nested tuples? The model "
@@ -378,14 +381,19 @@ class TECompilerImpl : public TECompilerNode {
           ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
           int ctr = 0;
           for (size_t i = 0; i < flattened_size; ++i) {
+            auto arg_mode = cached_func->batched_arg_mode[i]->value;
             if (cached_func->batched_arg_mode[i]->value ==
-                    static_cast<int>(tvm::runtime::vm::kScatter) &&
-                !func_model_parameter_taints[i]) {
-              te::Tensor arg = cached_func->inputs[ctr++];
-              // std::cout << "[TEC] Making scatter arg " << arg->op->name << std::endl;
+                static_cast<int>(tvm::runtime::vm::kIgnore)) {
+              continue;
+            }
+            if (cached_func->batched_arg_mode[i]->value ==
+                static_cast<int>(tvm::runtime::vm::kScatter)) {
+              te::Tensor arg = cached_func->inputs[ctr];
+              std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
               auto scatter_buffer = create_pointer_buffer(arg);
               scatter_buffers.Set(arg, scatter_buffer);
             }
+            ctr++;
           }
           for (te::Tensor arg : cached_func->outputs) {
             auto scatter_buffer = create_pointer_buffer(arg);
@@ -446,6 +454,8 @@ class TECompilerImpl : public TECompilerNode {
 
       lower_scheduled_function(value->cached_func, false);
       if (value->batched_cached_func.defined()) {
+        std::cout << "[TEC] Creating args for " << value->cached_func->prim_fn_var->name_hint
+                  << std::endl;
         lower_scheduled_function(value->batched_cached_func, true);
       }
     }

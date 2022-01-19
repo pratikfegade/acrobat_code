@@ -50,6 +50,10 @@
 namespace tvm {
 namespace relay {
 
+// When enabled, prints additional type and attribute information
+// for various IR objects
+#define VERBOSE_PRINT false
+
 /*!
  * \brief Print additional info about expr in comment.
  * \param expr The expression.
@@ -61,8 +65,10 @@ Doc RelayTextPrinter::PrintOptionalInfo(const Expr& expr) {
   }
   // default annotations
   if (annotate_ == nullptr) {
-    if ((expr.as<ConstantNode>() || expr.as<CallNode>()) && expr->checked_type_.defined()) {
-      doc << " /* ty=" << Print(expr->checked_type()) << " */";
+    if (VERBOSE_PRINT) {
+      if ((expr.as<ConstantNode>() || expr.as<CallNode>()) && expr->checked_type_.defined()) {
+        doc << " /* ty=" << Print(expr->checked_type()) << " */";
+      }
     }
   } else {
     std::string annotated_expr = annotate_(expr);
@@ -442,8 +448,10 @@ Doc RelayTextPrinter::PrintFunc(const Doc& prefix, const relay::Function& fn) {
   for (Var param : fn->params) {
     params.push_back(AllocVar(param));
   }
-  for (const Doc& d : PrintDictAttrs(fn->attrs)) {
-    params.push_back(d);
+  if (VERBOSE_PRINT) {
+    for (const Doc& d : PrintDictAttrs(fn->attrs)) {
+      params.push_back(d);
+    }
   }
   doc << Doc::Concat(params) << ") ";
   if (fn->ret_type.defined()) {
@@ -536,7 +544,9 @@ Doc RelayTextPrinter::VisitExpr_(const CallNode* op) {
   } else {
     doc << "(" << Doc::Concat(args) << ")";
     if (op->span.defined()) {
-      doc << " /* " << PrintSpan(op->span) << " */";
+      if (VERBOSE_PRINT) {
+        doc << " /* " << PrintSpan(op->span) << " */";
+      }
     }
     return doc;
   }
@@ -689,15 +699,27 @@ Doc RelayTextPrinter::VisitType_(const TensorTypeNode* node) {
     return PrintDType(node->dtype);
   }
   Doc doc;
-  doc << "Tensor[(";
-  std::vector<Doc> shapes;
-  for (const PrimExpr& prim_expr : node->shape) {
-    // Though not bound within an attribute the attribute visitor will handle the PrimExprs we
-    // care about.
-    shapes.push_back(PrintAttributeValue(prim_expr));
+  if (VERBOSE_PRINT) {
+    doc << "Tensor[(";
+    std::vector<Doc> shapes;
+    for (const PrimExpr& prim_expr : node->shape) {
+      // Though not bound within an attribute the attribute visitor will handle the PrimExprs we
+      // care about.
+      shapes.push_back(PrintAttributeValue(prim_expr));
+    }
+    doc << Doc::Concat(shapes);
+    return doc << "), " << PrintDType(node->dtype) << "]";
+  } else {
+    doc << "Tensor[";
+    std::vector<Doc> shapes;
+    for (const PrimExpr& prim_expr : node->shape) {
+      // Though not bound within an attribute the attribute visitor will handle the PrimExprs we
+      // care about.
+      shapes.push_back(PrintAttributeValue(prim_expr));
+    }
+    doc << Doc::Concat(shapes);
+    return doc << "]";
   }
-  doc << Doc::Concat(shapes);
-  return doc << "), " << PrintDType(node->dtype) << "]";
 }
 
 Doc RelayTextPrinter::VisitType_(const TupleTypeNode* node) {

@@ -1205,7 +1205,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::InferType());
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("ANormalForm", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     bool batched_execution =
         pass_ctx->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();

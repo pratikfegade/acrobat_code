@@ -377,6 +377,7 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, bool debug_keep_tri
   }
   SchedulePostProc post_proc;
   post_proc.Init(sch);
+  // std::cout << "[SCH] " << body << std::endl;
   return post_proc(std::move(body));
 }
 

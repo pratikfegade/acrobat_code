@@ -128,10 +128,10 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
   }
 
-  if (is_execution_kernel) {
-    std::cout << "[LLVM] Function: " << name << std::endl;
-    std::cout << f << std::endl;
-  }
+  // if (is_execution_kernel) {
+  std::cout << "[LLVM] Function: " << name << std::endl;
+  std::cout << f << std::endl;
+  // }
   std::vector<bool> param_retain(f->params.size(), true);
   if (batched_function && !coarsened_function) {
     int start = is_batched_prim_func ? 1 : 0;
@@ -139,22 +139,22 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     for (size_t i = start; i < f->params.size();) {
       switch (arg_modes[ctr++]) {
         case tvm::runtime::vm::kIgnore:
-          // std::cout << "Ignoring" << std::endl;
+          std::cout << "Ignoring" << std::endl;
           param_retain[i] = false;
           break;
         case tvm::runtime::vm::kReuse:
-          // std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
+          std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
           i += 1;
           break;
         case tvm::runtime::vm::kScatter:
-          // std::cout << "Scattering " << f->params[i]->name_hint << std::endl;
-          // std::cout << " Skipping " << f->params[i]->name_hint << std::endl;
-          // std::cout << " Keepping " << f->params[i + 1]->name_hint << std::endl;
+          std::cout << "Scattering " << f->params[i]->name_hint << std::endl;
+          std::cout << " Skipping " << f->params[i]->name_hint << std::endl;
+          std::cout << " Keepping " << f->params[i + 1]->name_hint << std::endl;
           param_retain[i] = false;
           i += 2;
           break;
         case tvm::runtime::vm::kConcat:
-          // std::cout << "Concating " << f->params[i]->name_hint << std::endl;
+          std::cout << "Concating " << f->params[i]->name_hint << std::endl;
           i += 1;
           break;
       }

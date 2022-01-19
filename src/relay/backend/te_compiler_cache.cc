@@ -132,11 +132,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
                                            bool scattered_kernels) {
     // std::cout << "Lowering\n" << relay_func << "\n\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
+    int ctr = 0;
     for (Var param : relay_func->params) {
       Array<tvm::te::Tensor> inputs;
       for (const auto& ttype : FlattenTupleType(param->checked_type())) {
-        tvm::te::Tensor tensor =
-            tvm::te::placeholder(GetShape(ttype->shape), ttype->dtype, param->vid->name_hint);
+        tvm::te::Tensor tensor = tvm::te::placeholder(
+            GetShape(ttype->shape), ttype->dtype, param->vid->name_hint + std::to_string(ctr++));
         fn_inputs.push_back(tensor);
         inputs.push_back(tensor);
       }
@@ -224,7 +225,22 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     CachedFunc generated_batched_func;
 
     if (create_batched) {
-      auto res = BatchifyTEGraph(fn_inputs, outputs);
+      auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
+                                        std::vector<bool>* p_reuse_taints) {
+        ICHECK(tensors.size() == model_parameter_taints.size());
+        for (size_t i = 0; i < tensors.size(); ++i) {
+          auto tensor = tensors[i];
+          if (model_parameter_taints[i].operator bool()) {
+            p_reuse_taints->push_back(true);
+          } else {
+            p_reuse_taints->push_back(false);
+          }
+        }
+      };
+      std::vector<bool> reuse_taints;
+      construct_reuse_taints(fn_inputs, &reuse_taints);
+
+      auto res = BatchifyTEGraph(fn_inputs, outputs, reuse_taints);
       Map<te::Operation, te::Operation> mapping = res.first;
       tir::Var batch_size_var = res.second;
 

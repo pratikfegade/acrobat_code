@@ -30,8 +30,8 @@ class BatchifyRewriter : public te::ExprMutator {
 
   PrimExpr Rewrite(const PrimExpr& expr) {
     PrimExpr rewritten = this->VisitExpr(expr);
-    // std::cout << "[BR] Rewritten " << expr << std::endl;
-    // std::cout << "[BR]    " << rewritten << std::endl;
+    std::cout << "[BR] Rewritten " << expr << std::endl;
+    std::cout << "[BR]    " << rewritten << std::endl;
     return rewritten;
   }
 
@@ -59,54 +59,67 @@ class BatchifyRewriter : public te::ExprMutator {
 };
 
 std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
-    const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs) {
+    const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
+    const std::vector<bool>& reuse_taints) {
+  // std::cout << "[BR] Batchifying" << std::endl;
   Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
   if (inputs.size() == 0) {
     for (auto tensor : outputs) {
       graph_ops.push_back(tensor->op);
     }
   }
-  // std::cout << "[BR] Batchifying " << graph_ops.size() << " " << inputs.size() << " "
-  //           << outputs.size() << std::endl;
 
-  // for (auto tensor : inputs) {
-  //   std::cout << "[BR]   Input " << tensor << " " << tensor->op.get() << std::endl;
-  // }
+  std::unordered_set<const Object*> no_batchify;
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    if (reuse_taints[i]) {
+      no_batchify.insert(inputs[i]->op.get());
+      // std::cout << "[BR]  NoBatchB " << inputs[i]->op << std::endl;
+    }
+  }
 
-  // for (auto tensor : outputs) {
-  //   std::cout << "[BR]   Output " << tensor << " " << tensor->op.get() << std::endl;
-  // }
-
-  // for (auto tensor : outputs) {
-  //   std::cout << "[BR]   OutputOps " << tensor->op << std::endl;
-  // }
-
+  for (auto op : graph_ops) {
+    if (auto cop = op.as<te::ComputeOpNode>()) {
+      bool reuse = true;
+      for (auto tensor : cop->InputTensors()) {
+        if (!no_batchify.count(tensor->op.get())) {
+          reuse = false;
+          break;
+        }
+      }
+      if (reuse) {
+        no_batchify.insert(cop);
+        // std::cout << "[BR]  NoBatchD " << cop->body[0] << std::endl;
+      }
+    }
+  }
   tir::Var batch_size = tir::Var("batch_size", DataType::Int(32));
   Map<te::Operation, te::Operation> rewritten;
   Map<te::Operation, te::Operation> ret;
   for (auto op : graph_ops) {
-    // std::cout << "[BR]  Op " << op << std::endl;
     auto batchified_op = op;
-    if (auto pop = op.as<te::PlaceholderOpNode>()) {
-      Array<PrimExpr> new_shape;
-      new_shape.push_back(batch_size);
-      new_shape.push_back_all(pop->shape);
-      batchified_op = te::PlaceholderOp(pop->name, new_shape, pop->dtype);
-    } else if (auto cop = op.as<te::ComputeOpNode>()) {
-      te::IterVar batch_iv =
-          te::IterVar(Range(0, batch_size), tir::Var("b_iv", DataType::Int(32)), tir::kDataPar);
-      Array<te::IterVar> new_axis;
-      new_axis.push_back(batch_iv);
-      new_axis.push_back_all(cop->axis);
+    if (!no_batchify.count(op.get())) {
+      if (auto pop = op.as<te::PlaceholderOpNode>()) {
+        Array<PrimExpr> new_shape;
+        new_shape.push_back(batch_size);
+        new_shape.push_back_all(pop->shape);
+        batchified_op = te::PlaceholderOp(pop->name, new_shape, pop->dtype);
+      } else if (auto cop = op.as<te::ComputeOpNode>()) {
+        te::IterVar batch_iv =
+            te::IterVar(Range(0, batch_size), tir::Var("b_iv", DataType::Int(32)), tir::kDataPar);
+        Array<te::IterVar> new_axis;
+        new_axis.push_back(batch_iv);
+        new_axis.push_back_all(cop->axis);
 
-      BatchifyRewriter rewriter(rewritten, batch_iv);
-      Array<PrimExpr> new_body;
-      for (auto e : cop->body) {
-        new_body.push_back(rewriter(e));
+        BatchifyRewriter rewriter(rewritten, batch_iv);
+        Array<PrimExpr> new_body;
+        for (auto e : cop->body) {
+          new_body.push_back(rewriter(e));
+        }
+        batchified_op = te::ComputeOp(cop->name, cop->tag, cop->attrs, new_axis, new_body);
+      } else {
+        ICHECK(false) << "Op " << op << " not supported for batchifying";
       }
-      batchified_op = te::ComputeOp(cop->name, cop->tag, cop->attrs, new_axis, new_body);
     }
-    // std::cout << "[BR]   Rewritten " << batchified_op << std::endl;
     if (!op.same_as(batchified_op)) {
       rewritten.Set(op, batchified_op);
     }
