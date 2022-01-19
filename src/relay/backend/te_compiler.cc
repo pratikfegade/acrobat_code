@@ -371,9 +371,9 @@ class TECompilerImpl : public TECompilerNode {
           size_t flattened_size = func_model_parameter_taints.size();
           size_t unflattened_size = key->source_func->params.size();
           size_t flattened_useful_size = key->source_func->params.size();
-          std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
-                    << cached_func->inputs.size() << " " << cached_func->outputs.size() << " "
-                    << flattened_size << std::endl;
+          // std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
+          // << cached_func->inputs.size() << " " << cached_func->outputs.size() << " "
+          // << flattened_size << std::endl;
           ICHECK_GE(flattened_size, flattened_useful_size)
               << cached_func->prim_fn_var->name_hint
               << " Maybe the function has a parameter that contains nested tuples? The model "
@@ -388,17 +388,19 @@ class TECompilerImpl : public TECompilerNode {
             }
             if (cached_func->batched_arg_mode[i]->value ==
                 static_cast<int>(tvm::runtime::vm::kScatter)) {
-              te::Tensor arg = cached_func->inputs[ctr];
-              std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
+              te::Tensor arg = (ctr < cached_func->inputs.size())
+                                   ? cached_func->inputs[ctr]
+                                   : cached_func->outputs[ctr - cached_func->inputs.size()];
+              // std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
               auto scatter_buffer = create_pointer_buffer(arg);
               scatter_buffers.Set(arg, scatter_buffer);
             }
             ctr++;
           }
-          for (te::Tensor arg : cached_func->outputs) {
-            auto scatter_buffer = create_pointer_buffer(arg);
-            scatter_buffers.Set(arg, scatter_buffer);
-          }
+          // for (te::Tensor arg : cached_func->outputs) {
+          //   auto scatter_buffer = create_pointer_buffer(arg);
+          //   scatter_buffers.Set(arg, scatter_buffer);
+          // }
         }
 
         // Create all_args
@@ -416,9 +418,10 @@ class TECompilerImpl : public TECompilerNode {
           for (auto output : cached_func->outputs) {
             all_args.push_back(output);
             auto it = scatter_buffers.find(output);
-            ICHECK(it != scatter_buffers.end());
-            auto scatter_output = (*it).second;
-            all_args.push_back(scatter_output);
+            if (it != scatter_buffers.end()) {
+              auto scatter_output = (*it).second;
+              all_args.push_back(scatter_output);
+            }
           }
         } else {
           all_args.push_back_all(cached_func->inputs);
@@ -454,8 +457,8 @@ class TECompilerImpl : public TECompilerNode {
 
       lower_scheduled_function(value->cached_func, false);
       if (value->batched_cached_func.defined()) {
-        std::cout << "[TEC] Creating args for " << value->cached_func->prim_fn_var->name_hint
-                  << std::endl;
+        // std::cout << "[TEC] Creating args for " << value->cached_func->prim_fn_var->name_hint
+        // << std::endl;
         lower_scheduled_function(value->batched_cached_func, true);
       }
     }

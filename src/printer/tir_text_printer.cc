@@ -366,7 +366,8 @@ Doc TIRTextPrinter::VisitExpr_(const LoadNode* op) {
   Doc doc;
   doc << "(" << PrintDType(op->dtype) << "*)" << Print(op->buffer_var);
   if (op->scatter_buffer_var.defined()) {
-    doc << "(S)";
+    // doc << "(S)";
+    doc << "(" << Print(op->scatter_batch_index) << ", " << Print(op->scatter_elem_index) << ")";
   }
   doc << "[" << Print(op->index) << "]";
   if (!is_one(op->predicate)) {

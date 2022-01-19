@@ -128,10 +128,11 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
   }
 
-  // if (is_execution_kernel) {
-  std::cout << "[LLVM] Function: " << name << std::endl;
-  std::cout << f << std::endl;
-  // }
+  // if (name == "vm_mod_fused_layout_transform_batched") {
+  if (is_execution_kernel) {
+    std::cout << "[LLVM] Function: " << name << std::endl;
+    std::cout << f << std::endl;
+  }
   std::vector<bool> param_retain(f->params.size(), true);
   if (batched_function && !coarsened_function) {
     int start = is_batched_prim_func ? 1 : 0;
@@ -140,7 +141,6 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
       switch (arg_modes[ctr++]) {
         case tvm::runtime::vm::kIgnore:
           std::cout << "Ignoring" << std::endl;
-          param_retain[i] = false;
           break;
         case tvm::runtime::vm::kReuse:
           std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
@@ -169,16 +169,16 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   for (size_t i = 0; i < f->params.size(); ++i) {
     if (param_retain[i]) {
       Var param = f->params[i];
-      // if (is_execution_kernel) {
-      //   std::cout << param << " ";
-      // }
+      if (is_execution_kernel) {
+        std::cout << param << " ";
+      }
       param_types.push_back(GetLLVMType(param));
       if (!is_restricted_ && param.dtype().is_handle()) {
         alias_var_set_.insert(param.get());
       }
     }
   }
-  // std::cout << std::endl;
+  std::cout << std::endl;
 
   // TODO(tvm-team):
   // Update the function type to respect the ret_type field of f.
@@ -204,6 +204,7 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     if (param_retain[i]) {
       llvm::Argument* v = &(*arg_it);
       const Var& var = f->params[i];
+      std::cout << "[LLVM] Adding to var map " << var << " " << var.get() << std::endl;
       var_map_[var.get()] = v;
       if (is_restricted_) {
         if (var.dtype().is_handle() && !alias_var_set_.count(var.get())) {
@@ -875,7 +876,7 @@ CodeGenLLVM::TypedPointer CodeGenLLVM::CreateBufferPtr(DataType t, llvm::Value* 
 
 llvm::Value* CodeGenLLVM::GetVarValue(const VarNode* v) const {
   auto it = var_map_.find(v);
-  ICHECK(it != var_map_.end()) << "cannot find variable " << v->name_hint;
+  ICHECK(it != var_map_.end()) << "cannot find variable " << v->name_hint << " " << v;
   return it->second;
 }
 

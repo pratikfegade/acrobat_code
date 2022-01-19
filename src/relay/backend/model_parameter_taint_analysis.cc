@@ -282,7 +282,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
 
 class ResultGatherer : public ExprVisitor {
  public:
-  ResultGatherer(const Map<Var, Array<Bool>>& var_states) : var_states_(var_states) {}
+  ResultGatherer(const Map<Var, Array<Bool>>& var_states,
+                 const Map<Function, Array<Bool>>& function_states)
+      : var_states_(var_states), function_states_(function_states) {}
 
   void Flatten(Array<Bool>* p_param_states, const Var& var) {
     size_t state_size = 1;
@@ -296,23 +298,49 @@ class ResultGatherer : public ExprVisitor {
     p_param_states->push_back_all(state);
   }
 
+  size_t FlattenTupleType(const Type& type) {
+    if (auto ttn = type.as<TupleTypeNode>()) {
+      size_t sum = 0;
+      for (auto field : ttn->fields) {
+        sum += FlattenTupleType(field);
+      }
+      return sum;
+    } else {
+      return 1;
+    }
+  }
+
   void VisitExpr_(const FunctionNode* op) {
-    // if (op->HasNonzeroAttr(attr::kPrimitive)) {
-    // std::cout << "[MPTA]   Func " << GetRef<Function>(op) << std::endl;
     auto hash = op->GetAttr<String>("hash", "no_hash");
-    // std::cout << "[MPTA]   Func " << hash << std::endl;
     Array<Bool> param_states;
     for (auto param : op->params) {
       Flatten(&param_states, param);
     }
-    // std::cout << "[MPTA]    Result: " << param_states << std::endl;
+
+    auto it = function_states_.find(GetRef<Function>(op));
+    if (it == function_states_.end()) {
+      size_t flattened_size = FlattenTupleType(op->ret_type);
+      param_states.push_back_all(ConstructBoolArray(flattened_size, false));
+    } else {
+      auto output_state = (*it).second;
+      if (auto ttn = op->ret_type.as<TupleTypeNode>()) {
+        ICHECK_EQ(output_state.size(), ttn->fields.size());
+        for (size_t i = 0; i < ttn->fields.size(); ++i) {
+          size_t flattened_size = FlattenTupleType(ttn->fields[i]);
+          param_states.push_back_all(
+              ConstructBoolArray(flattened_size, output_state[i].operator bool()));
+        }
+      } else {
+        param_states.push_back_all(output_state);
+      }
+    }
+
     result.Set(GetRef<Function>(op), param_states);
-    // } else {
     ExprVisitor::VisitExpr_(op);
-    // }
   }
 
   const Map<Var, Array<Bool>>& var_states_;
+  const Map<Function, Array<Bool>>& function_states_;
   Map<Function, Array<Bool>> result;
 };
 }  // namespace
@@ -362,7 +390,7 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
   // }
 
   // std::cout << "[MPTA]  Gathering final results" << std::endl;
-  ResultGatherer gatherer(var_states);
+  ResultGatherer gatherer(var_states, function_states);
   for (auto pair : mod->functions) {
     if (pair.second.as<FunctionNode>()) {
       gatherer(Downcast<Function>(pair.second));

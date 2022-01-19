@@ -59,6 +59,8 @@ NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
       total_nums *= d;
     }
 
+    std::cout << "[VMU] Array size " << total_nums << std::endl;
+
     for (size_t i = 0; i < size; ++i) {
       for (size_t j = 0; j < total_nums; ++j) {
         static_cast<float**>(result->data)[i][j] = 1.0;
@@ -93,6 +95,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
 
   std::vector<TVMValue> values(arity + 1);
   std::vector<int> codes(arity + 1);
+  std::vector<NDArray> arg_holder(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   // std::cout << "Executing " << arity << std::endl;
   setter(0, batch_size);
@@ -110,7 +113,9 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         for (size_t j = 0; j < batch_size; ++j) {
           to_scatter[j] = nodes[j]->args_[i];
         }
-        setter(i + 1, CreatePointerNDArray(to_scatter));
+        auto ptr_array = CreatePointerNDArray(to_scatter);
+        arg_holder[i] = ptr_array;
+        setter(i + 1, ptr_array);
         break;
       }
       case kConcat: {

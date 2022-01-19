@@ -151,8 +151,7 @@ void LazyExecutor::BatchedExecute() {
     for (auto& pair : func_to_node) {
       auto& func_idx = pair.first;
       auto& nodes = pair.second;
-      std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << " " << sizeof(void*)
-                << std::endl;
+      std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
       InvokePackedFnBatchedUnrolled(vm_->packed_funcs_[func_idx], nodes[0]->arg_count_,
                                     nodes[0]->output_size_, vm_->batched_func_arg_mode_[func_idx],
                                     nodes);

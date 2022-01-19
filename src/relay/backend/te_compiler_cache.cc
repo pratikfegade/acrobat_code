@@ -227,7 +227,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     if (create_batched) {
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
                                         std::vector<bool>* p_reuse_taints) {
-        ICHECK(tensors.size() == model_parameter_taints.size());
+        ICHECK_LE(tensors.size(), model_parameter_taints.size());
         for (size_t i = 0; i < tensors.size(); ++i) {
           auto tensor = tensors[i];
           if (model_parameter_taints[i].operator bool()) {
@@ -245,9 +245,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       tir::Var batch_size_var = res.second;
 
       auto map_tensors = [&](const Array<te::Tensor>& tensors, Array<Integer>* p_arg_modes,
-                             bool inputs) {
+                             size_t offset) {
         Array<te::Tensor> output;
-        ICHECK(!inputs || (tensors.size() == model_parameter_taints.size()));
         for (size_t i = 0; i < tensors.size(); ++i) {
           auto tensor = tensors[i];
           auto it = mapping.find(tensor->op);
@@ -256,7 +255,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
             auto operation = (*it).second;
             output.push_back(operation.output(tensor->value_index));
             arg_mode = runtime::vm::DBBatchedArgMode::kConcat;
-            if (inputs && model_parameter_taints[i].operator bool()) {
+            if (model_parameter_taints[i + offset].operator bool()) {
               arg_mode = runtime::vm::DBBatchedArgMode::kReuse;
             } else if (scattered_kernels) {
               arg_mode = runtime::vm::DBBatchedArgMode::kScatter;
@@ -268,10 +267,11 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         return output;
       };
 
+      ICHECK_EQ(fn_inputs.size() + outputs.size(), model_parameter_taints.size());
       // std::cout << "[TECC] Function " << prim_fn_var->name_hint << "_batched" << std::endl;
       Array<Integer> arg_modes;
-      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes, true);
-      Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes, false);
+      Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes, 0);
+      Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes, fn_inputs.size());
 
       Array<te::Operation> output_operations;
       for (auto tensor : batched_outputs) {

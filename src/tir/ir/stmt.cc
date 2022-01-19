@@ -304,7 +304,8 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->PrintIndent();
       p->stream << op->buffer_var;
       if (op->scatter_buffer_var.defined()) {
-        p->stream << "(S)";
+        // p->stream << "(S)";
+        p->stream << "(" << op->scatter_batch_index << ", " << op->scatter_elem_index << ")";
       }
       p->stream << "[";
       p->Print(op->index);
