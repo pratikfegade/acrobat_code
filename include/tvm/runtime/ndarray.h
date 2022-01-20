@@ -275,15 +275,7 @@ class NDArray::Container : public Object, public NDArray::ContainerBase {
     // Initialize the type index.
     type_index_ = Container::RuntimeTypeIndex();
     dl_tensor.data = data;
-    for (uint32_t i = 0; i < shape.size(); ++i) {
-      std::cout << "[VM]   Shape4 " << shape[i] << std::endl;
-    }
-
-    shape_ = shape;
-    for (uint32_t i = 0; i < shape_.size(); ++i) {
-      std::cout << "[VM]   Shape5 " << shape_[i] << std::endl;
-    }
-
+    shape_ = std::move(shape);
     dl_tensor.ndim = static_cast<int>(shape_.size());
     dl_tensor.shape = const_cast<ShapeTuple::index_type*>(shape_.data());
     dl_tensor.dtype = dtype;

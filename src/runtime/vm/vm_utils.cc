@@ -305,6 +305,7 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
   }
 
   if (!is_empty_output) {
+    std::cout << "YELLO " << std::endl;
     TVMRetValue rv;
     func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
   }
