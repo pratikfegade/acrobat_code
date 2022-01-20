@@ -208,8 +208,16 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       // Use TOPI schedule if user specificed, or the function has no
       // auto_scheduler schedule.
       if (!schedule.defined() && !prim_func.defined()) {
-        ICHECK(anchor_implementation_.defined());
-        schedule = anchor_implementation_.Schedule(anchor_attrs_, tensor_outs, target_);
+        // PPF DEBUG
+        // ICHECK(anchor_implementation_.defined());
+        // schedule = anchor_implementation_.Schedule(anchor_attrs_, tensor_outs, target_);
+        // PPF DEBUG
+
+        Array<te::Operation> output_operations;
+        for (auto tensor : tensor_outs) {
+          output_operations.push_back(tensor->op);
+        }
+        schedule = te::create_schedule(output_operations);
       }
       if (schedule.defined()) {
         for (const auto& scalar : scalars_) {

@@ -119,44 +119,9 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
 
 
 
-    i2h = layers.dense_add_bias(
-        data=inputs, units=num_hidden * 4, weight=i2h_weight, bias=i2h_bias, name="%si2h" % name
-    )
-    h2h = layers.dense_add_bias(
-        data=relay.TupleGetItem(states, 0),
-        units=num_hidden * 4,
-        weight=h2h_weight,
-        bias=h2h_bias,
-        name="%sh2h" % name,
-    )
-
-    gates = relay.add(i2h, h2h)
-    slice_gates = relay.split(gates, indices_or_sections=4, axis=1).astuple()
-
-    in_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 0))
-    forget_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 1))
-    in_transform = relay.tanh(relay.TupleGetItem(slice_gates, 2))
-    out_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 3))
-
-    next_c = relay.add(
-        relay.multiply(forget_gate, relay.TupleGetItem(states, 1)),
-        relay.multiply(in_gate, in_transform),
-    )
-    next_h = relay.multiply(out_gate, relay.tanh(next_c))
-    ret = relay.Tuple([next_h, relay.Tuple([next_h, next_c])])
-    builder.ret(ret)
-
-    body = builder.get()
-
-    return relay.Function(
-        [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
-    )
-
-
-
-
-
-
+    # i2h = layers.dense_add_bias(
+    #     data=inputs, units=num_hidden * 4, weight=i2h_weight, bias=i2h_bias, name="%si2h" % name
+    # )
     # h2h = layers.dense_add_bias(
     #     data=relay.TupleGetItem(states, 0),
     #     units=num_hidden * 4,
@@ -165,16 +130,19 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
     #     name="%sh2h" % name,
     # )
 
-    # gates = h2h
+    # gates = relay.add(i2h, h2h)
     # slice_gates = relay.split(gates, indices_or_sections=4, axis=1).astuple()
 
-    # in_gate = relay.TupleGetItem(slice_gates, 0)
-    # forget_gate = relay.TupleGetItem(slice_gates, 1)
-    # in_transform = relay.TupleGetItem(slice_gates, 2)
-    # out_gate = relay.TupleGetItem(slice_gates, 3)
+    # in_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 0))
+    # forget_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 1))
+    # in_transform = relay.tanh(relay.TupleGetItem(slice_gates, 2))
+    # out_gate = relay.sigmoid(relay.TupleGetItem(slice_gates, 3))
 
-    # next_c = relay.add(forget_gate, in_gate)
-    # next_h = relay.multiply(out_gate, in_transform)
+    # next_c = relay.add(
+    #     relay.multiply(forget_gate, relay.TupleGetItem(states, 1)),
+    #     relay.multiply(in_gate, in_transform),
+    # )
+    # next_h = relay.multiply(out_gate, relay.tanh(next_c))
     # ret = relay.Tuple([next_h, relay.Tuple([next_h, next_c])])
     # builder.ret(ret)
 
@@ -183,6 +151,38 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
     # return relay.Function(
     #     [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
     # )
+
+
+
+
+
+
+    h2h = layers.dense_add_bias(
+        data=relay.TupleGetItem(states, 0),
+        units=num_hidden * 4,
+        weight=h2h_weight,
+        bias=h2h_bias,
+        name="%sh2h" % name,
+    )
+
+    gates = h2h
+    slice_gates = relay.split(gates, indices_or_sections=4, axis=1).astuple()
+
+    in_gate = relay.TupleGetItem(slice_gates, 0)
+    forget_gate = relay.TupleGetItem(slice_gates, 1)
+    in_transform = relay.TupleGetItem(slice_gates, 2)
+    out_gate = relay.TupleGetItem(slice_gates, 3)
+
+    next_c = relay.add(forget_gate, in_gate)
+    next_h = relay.multiply(out_gate, in_transform)
+    ret = relay.Tuple([next_h, relay.Tuple([next_h, next_c])])
+    builder.ret(ret)
+
+    body = builder.get()
+
+    return relay.Function(
+        [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
+    )
 
 
 def get_net(iterations, num_hidden, batch_size=1, dtype="float32"):
@@ -238,7 +238,8 @@ def get_net_relay_batched(iterations, num_hidden, batch_size=1, dtype="float32")
 
     builder = relay.ScopeBuilder()
 
-    zeros = builder.let(("zeros", input_type), relay.zeros((1, num_hidden), dtype))
+    # zeros = builder.let(("zeros", input_type), relay.zeros((1, num_hidden), dtype))
+    zeros = builder.let(("zeros", input_type), relay.ones((1, num_hidden), dtype))
     init_states = builder.let(("init_states", state_type), relay.Tuple([zeros, zeros]))
 
     out = None

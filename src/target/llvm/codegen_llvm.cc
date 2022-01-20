@@ -134,27 +134,36 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     std::cout << f << std::endl;
   }
   std::vector<bool> param_retain(f->params.size(), true);
+  bool print_param_data = false;
   if (batched_function && !coarsened_function) {
     int start = is_batched_prim_func ? 1 : 0;
     int ctr = 0;
     for (size_t i = start; i < f->params.size();) {
       switch (arg_modes[ctr++]) {
         case tvm::runtime::vm::kIgnore:
-          std::cout << "Ignoring" << std::endl;
+          if (print_param_data) {
+            std::cout << "Ignoring" << std::endl;
+          }
           break;
         case tvm::runtime::vm::kReuse:
-          std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
+          if (print_param_data) {
+            std::cout << "Reusing " << f->params[i]->name_hint << std::endl;
+          }
           i += 1;
           break;
         case tvm::runtime::vm::kScatter:
-          std::cout << "Scattering " << f->params[i]->name_hint << std::endl;
-          std::cout << " Skipping " << f->params[i]->name_hint << std::endl;
-          std::cout << " Keepping " << f->params[i + 1]->name_hint << std::endl;
+          if (print_param_data) {
+            std::cout << "Scattering " << f->params[i]->name_hint << std::endl;
+            std::cout << " Skipping " << f->params[i]->name_hint << std::endl;
+            std::cout << " Keepping " << f->params[i + 1]->name_hint << std::endl;
+          }
           param_retain[i] = false;
           i += 2;
           break;
         case tvm::runtime::vm::kConcat:
-          std::cout << "Concating " << f->params[i]->name_hint << std::endl;
+          if (print_param_data) {
+            std::cout << "Concating " << f->params[i]->name_hint << std::endl;
+          }
           i += 1;
           break;
       }
@@ -169,8 +178,10 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   for (size_t i = 0; i < f->params.size(); ++i) {
     if (param_retain[i]) {
       Var param = f->params[i];
-      if (is_execution_kernel) {
-        std::cout << param << " ";
+      if (print_param_data) {
+        if (is_execution_kernel) {
+          std::cout << param << " ";
+        }
       }
       param_types.push_back(GetLLVMType(param));
       if (!is_restricted_ && param.dtype().is_handle()) {
@@ -178,7 +189,9 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
       }
     }
   }
-  std::cout << std::endl;
+  if (print_param_data) {
+    std::cout << std::endl;
+  }
 
   // TODO(tvm-team):
   // Update the function type to respect the ret_type field of f.
@@ -204,7 +217,9 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     if (param_retain[i]) {
       llvm::Argument* v = &(*arg_it);
       const Var& var = f->params[i];
-      std::cout << "[LLVM] Adding to var map " << var << " " << var.get() << std::endl;
+      if (print_param_data) {
+        std::cout << "[LLVM] Adding to var map " << var << " " << var.get() << std::endl;
+      }
       var_map_[var.get()] = v;
       if (is_restricted_) {
         if (var.dtype().is_handle() && !alias_var_set_.count(var.get())) {
@@ -429,7 +444,10 @@ void CodeGenLLVM::Optimize() {
   llvm::PassManagerBuilder builder;
 
   // Use the same opt-level as specified in TargetMachine for running passes
-  llvm::CodeGenOpt::Level opt_level = target_machine_->getOptLevel();
+  // llvm::CodeGenOpt::Level opt_level = target_machine_->getOptLevel();
+  // PPF DEBUG
+  llvm::CodeGenOpt::Level opt_level = llvm::CodeGenOpt::Level::None;
+  // PPF DEBUG
 
   switch (opt_level) {
     case llvm::CodeGenOpt::Level::None:

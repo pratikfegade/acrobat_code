@@ -401,8 +401,12 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     packed_funcs_[packed_index] = pf;
 
-    std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-              << exec_->batched_func_arg_mode[packed_index].size() << std::endl;
+    if (batched_execution_) {
+      std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
+                << exec_->batched_func_arg_mode[packed_index].size() << std::endl;
+    } else {
+      std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
+    }
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
@@ -567,8 +571,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
-        // << std::endl;
+        std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
+                  << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& arity = instr.arity;
         std::vector<ObjectRef> args;
@@ -580,11 +584,8 @@ void VirtualMachine::RunLoop() {
 
         // We no longer need to write the registers back, we write directly
         // through the registers mutably.
-        if (batched_funcs_[instr.packed_index] >= 0) {
-          InvokePacked(batched_funcs_[instr.packed_index], arity, instr.output_size, args, true);
-        } else {
-          InvokePacked(instr.packed_index, arity, instr.output_size, args, false);
-        }
+        InvokePacked(instr.packed_index, arity, instr.output_size, args,
+                     (batched_execution_ && (batched_funcs_[instr.packed_index] >= 0)));
         pc_++;
         goto main_loop;
       }
@@ -643,8 +644,10 @@ void VirtualMachine::RunLoop() {
         OpStartHook(instr);
         auto shape = std::vector<int64_t>(instr.alloc_tensor.ndim);
 
+        // std::cout << "[VM] AllocTensor " << pc_ << std::endl;
         for (uint32_t i = 0; i < instr.alloc_tensor.ndim; ++i) {
           shape[i] = instr.alloc_tensor.shape[i];
+          // std::cout << "[VM]   Shape1 " << shape[i] << std::endl;
         }
 
         auto storage_obj = ReadRegister(instr.alloc_tensor.storage);
@@ -662,6 +665,9 @@ void VirtualMachine::RunLoop() {
         os << ", dtype=" << DLDataType2String(instr.alloc_tensor.dtype);
         VLOG(2) << os.str();
 #endif
+        // for (uint32_t i = 0; i < shape.size(); ++i) {
+        // std::cout << "[VM]   Shape2 " << shape[i] << std::endl;
+        // }
         auto obj = storage->AllocNDArray(offset, shape, instr.alloc_tensor.dtype);
 
         WriteRegister(instr.dst, obj);

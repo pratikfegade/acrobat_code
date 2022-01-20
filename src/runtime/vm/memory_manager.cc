@@ -84,6 +84,9 @@ NDArray StorageObj::AllocNDArray(size_t offset, std::vector<int64_t> shape, DLDa
   // new NDArray::Container(this->buffer.data, shape, dtype, this->buffer.device);
   // container->dl_tensor.byte_offset = offset;
 
+  // for (uint32_t i = 0; i < shape.size(); ++i) {
+  // std::cout << "[VM]   Shape3.5 " << shape[i] << std::endl;
+  // }
   NDArray::Container* container = new NDArray::Container(
       static_cast<uint8_t*>(this->buffer.data) + offset, shape, dtype, this->buffer.device);
   container->dl_tensor.byte_offset = 0;

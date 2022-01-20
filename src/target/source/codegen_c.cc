@@ -149,7 +149,11 @@ void CodeGenC::PrintExtraAttrs(const PrimFunc& f) {}
 
 void CodeGenC::PrintFinalReturn() {}
 
-std::string CodeGenC::Finish() { return decl_stream.str() + stream.str(); }
+std::string CodeGenC::Finish() {
+  auto res = decl_stream.str() + stream.str();
+  std::cout << "[HELLO] " << res << std::endl;
+  return res;
+}
 
 void CodeGenC::PrintExpr(const PrimExpr& n, std::ostream& os) {  // NOLINT(*)
   if (print_ssa_form_) {

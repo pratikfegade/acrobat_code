@@ -164,6 +164,9 @@ class ShapeTuple : public ObjectRef {
 };
 
 inline ShapeTuple::ShapeTuple(std::vector<index_type> shape) {
+  for (uint32_t i = 0; i < shape.size(); ++i) {
+    std::cout << "[VM]   Shape3 " << shape[i] << std::endl;
+  }
   auto ptr = make_object<ShapeTupleObj::FromStd>(std::move(shape));
   ptr->size = ptr->data_container.size();
   ptr->data = ptr->data_container.data();

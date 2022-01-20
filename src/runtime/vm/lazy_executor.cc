@@ -151,10 +151,25 @@ void LazyExecutor::BatchedExecute() {
     for (auto& pair : func_to_node) {
       auto& func_idx = pair.first;
       auto& nodes = pair.second;
-      std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-      InvokePackedFnBatchedUnrolled(vm_->packed_funcs_[func_idx], nodes[0]->arg_count_,
-                                    nodes[0]->output_size_, vm_->batched_func_arg_mode_[func_idx],
-                                    nodes);
+
+      for (size_t i = 0; i < nodes.size(); ++i) {
+        ICHECK_EQ(func_idx, nodes[i]->func_idx_);
+        ICHECK_EQ(nodes[0]->arg_count_, nodes[i]->arg_count_);
+        ICHECK_EQ(nodes[0]->output_size_, nodes[i]->output_size_);
+        ICHECK_EQ(nodes[0]->args_.size(), nodes[i]->args_.size());
+      }
+
+      if (nodes.size() == 1) {
+        std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
+        InvokePackedFnUnrolled(vm_->packed_funcs_[func_idx], nodes[0]->arg_count_,
+                               nodes[0]->output_size_, nodes[0]->args_);
+      } else {
+        auto batched_func_idx = vm_->batched_funcs_[func_idx];
+        std::cout << "[VMU] Executing " << batched_func_idx << " " << nodes.size() << std::endl;
+        InvokePackedFnBatchedUnrolled(vm_->packed_funcs_[batched_func_idx], nodes[0]->arg_count_,
+                                      nodes[0]->output_size_,
+                                      vm_->batched_func_arg_mode_[batched_func_idx], nodes);
+      }
     }
   }
   nodes_.clear();
