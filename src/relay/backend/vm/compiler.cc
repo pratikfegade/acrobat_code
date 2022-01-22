@@ -1002,10 +1002,10 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
 
   auto arg_modes = context_.module->batched_arg_modes;
-  std::cout << "[CO] ARGMODES2" << std::endl;
-  for (auto it : arg_modes) {
-    std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  }
+  // std::cout << "[CO] ARGMODES2" << std::endl;
+  // for (auto it : arg_modes) {
+  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  // }
   // update batched arg modes
   for (auto pair : arg_modes) {
     ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;

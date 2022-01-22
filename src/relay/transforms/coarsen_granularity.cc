@@ -547,7 +547,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) final {
-    bool print = (bindings.size() < 5);
+    bool print = false;  //(bindings.size() < 5);
 
     if (print) {
       for (auto pair : bindings) {

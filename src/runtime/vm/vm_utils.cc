@@ -62,10 +62,8 @@ NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
   for (size_t i = 0; i < size; ++i) {
     raw_ptrs[i] = arrays[i]->data;
   }
-  std::cout << "[VMU] Allocating pointer array " << size << std::endl;
   auto result = NDArray::Empty(
       ShapeTuple({size}), DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, arrays[0]->device);
-  std::cout << "[VMU] Allocated pointer array " << size << std::endl;
   result.CopyFromBytes(raw_ptrs.data(), size * sizeof(void*));
 
   // {

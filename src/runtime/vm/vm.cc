@@ -401,12 +401,12 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     packed_funcs_[packed_index] = pf;
 
-    if (batched_execution_) {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                << exec_->batched_func_arg_mode[packed_index].size() << std::endl;
-    } else {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
-    }
+    // if (batched_execution_) {
+    //   std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
+    //             << exec_->batched_func_arg_mode[packed_index].size() << std::endl;
+    // } else {
+    //   std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
+    // }
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
