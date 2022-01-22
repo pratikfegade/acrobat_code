@@ -168,6 +168,48 @@ struct VMFrame {
 };
 
 /*!
+ * \brief A srtuct that aggregates all global state of the vm
+ * i.e. everything except the current runtime state (the pc, stacks,
+ * etc).
+ */
+struct VMSharedState {
+  /*! \brief The executable the VM will operate on. */
+  Executable* exec_ = nullptr;
+  /*! \brief The virtual machine's packed function table. */
+  std::vector<PackedFunc> packed_funcs_;
+  /*!
+   * \brief The "physical" devices the VM can execute primitives on. All "device indexes"
+   * are w.r.t. this vector. Each entry in this vector must match the corresponding entry
+   * in the executable's "virtual" devices vector.
+   */
+  std::vector<Device> devices_;
+  /*! \brief The cached memory allocators, one per device. */
+  std::vector<Allocator*> allocators_;
+  /*!
+   * \brief The constant pool for runtime. It caches the device dependent
+   * object to avoid rellocation of constants during inference.
+   */
+  std::vector<ObjectRef> const_pool_;
+  /*!
+   * \brief A lazy executor which maintains a computational graph of
+   * all the packed funcs executed.
+   */
+  LazyExecutor lazy_executor_;
+  /*!
+   * \brief A mapping from packed_funcs to there batched counterparts.
+   */
+  std::vector<Index> batched_funcs_;
+  /*!
+   * \brief A mapping from packed_funcs to there batched counterparts.
+   */
+  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
+  /*! \brief The function name to inputs mapping. */
+  std::unordered_map<std::string, std::vector<ObjectRef>> inputs_;
+};
+
+class ConcurrentVirtualMachine;
+
+/*!
  * \brief The virtual machine.
  *
  * The virtual machine contains all the current execution state,
@@ -203,7 +245,7 @@ class VirtualMachine : public runtime::ModuleNode {
 
   const char* type_key() const final { return "VirtualMachine"; }
 
-  VirtualMachine() : frames_(), func_index_(0), code_(nullptr), pc_(0), exec_(nullptr) {}
+  VirtualMachine() : frames_(), func_index_(0), code_(nullptr), pc_(0) {}
 
   /*!
    * \brief load the executable for the virtual machine.
@@ -216,6 +258,11 @@ class VirtualMachine : public runtime::ModuleNode {
    * \param The options.
    */
   virtual void SetExecutionOptions(VMExecutionOptions options);
+
+  /*!
+   * \brief Initialize the shared state if needed.
+   */
+  virtual void InitSharedState();
 
  protected:
   /*! \brief Push a call frame on to the call stack. */
@@ -283,11 +330,14 @@ class VirtualMachine : public runtime::ModuleNode {
    * \param physical_devices The set of TVM devices.
    * \param alloc_types The allocator types for each device.
    */
-  void Init(const std::vector<Device>& physical_devices,
-            const std::vector<AllocatorType>& alloc_types);
+  virtual void Init(const std::vector<Device>& physical_devices,
+                    const std::vector<AllocatorType>& alloc_types);
 
   /*! \brief Run VM dispatch loop. */
-  void RunLoop();
+  virtual void RunLoop();
+
+  /*! \brief Run one iteration of the VM dispatch loop. */
+  virtual bool RunOneIteration(int frame_start);
 
   /*! \brief Get device from the device list based on a given device index. */
   Device GetDevice(Index device_index) const;
@@ -298,7 +348,7 @@ class VirtualMachine : public runtime::ModuleNode {
    *
    * This does not begin execution of the VM.
    */
-  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args);
+  virtual void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args);
 
   /*!
    * \brief Set inputs to a function.
@@ -308,7 +358,7 @@ class VirtualMachine : public runtime::ModuleNode {
    * they will be copied to the device.
    * \param offset Starting offset of the arguments in `args`.
    */
-  void SetInput(std::string name, TVMArgs args, int offset);
+  virtual void SetInput(std::string name, TVMArgs args, int offset);
 
   /*!
    * \brief Internal hook for profiling the start of an op.
@@ -328,9 +378,12 @@ class VirtualMachine : public runtime::ModuleNode {
 
  protected:
   friend class LazyExecutor;
+  friend class ConcurrentVirtualMachine;
 
-  /*! \brief The virtual machine's packed function table. */
-  std::vector<PackedFunc> packed_funcs_;
+  /*! \brief The global state excluding all runtime state. Aggregated
+      in a struct for easier shared across multiple vm instances when
+      executing multiple concurrent batch elements */
+  VMSharedState* shared_state_;
   /*! \brief The current stack of call frames. */
   std::vector<VMFrame> frames_;
   /*! \brief The fuction table index of the current function. */
@@ -341,28 +394,6 @@ class VirtualMachine : public runtime::ModuleNode {
   Index pc_;
   /*! \brief The special return register. */
   ObjectRef return_register_;
-  /*! \brief The executable the VM will operate on. */
-  Executable* exec_;
-  /*! \brief The function name to inputs mapping. */
-  std::unordered_map<std::string, std::vector<ObjectRef>> inputs_;
-  /*!
-   * \brief The "physical" devices the VM can execute primitives on. All "device indexes"
-   * are w.r.t. this vector. Each entry in this vector must match the corresponding entry
-   * in the executable's "virtual" devices vector.
-   */
-  std::vector<Device> devices_;
-  /*! \brief The cached memory allocators, one per device. */
-  std::vector<Allocator*> allocators_;
-  /*!
-   * \brief The constant pool for runtime. It caches the device dependent
-   * object to avoid rellocation of constants during inference.
-   */
-  std::vector<ObjectRef> const_pool_;
-  /*!
-   * \brief A lazy executor which maintains a computational graph of
-   * all the packed funcs executed.
-   */
-  LazyExecutor lazy_executor_;
   /*!
    * \brief Whether to execute tensor ops lazily.
    */
@@ -376,13 +407,71 @@ class VirtualMachine : public runtime::ModuleNode {
    */
   bool scattered_kernels_ = false;
   /*!
-   * \brief A mapping from packed_funcs to there batched counterparts.
+   * \brief Whether the current VM object is a concurrent VM object
    */
-  std::vector<Index> batched_funcs_;
+  bool concurrent_vm_ = false;
+};
+
+class ConcurrentVirtualMachine : public VirtualMachine {
+ public:
+  // const char* type_key() const final { return "ConcurrentVirtualMachine"; }
+
+  ConcurrentVirtualMachine() : VirtualMachine() {}
+
   /*!
-   * \brief A mapping from packed_funcs to there batched counterparts.
+   * \brief load the executable for the virtual machine.
+   * \param exec The executable.
    */
-  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
+  void LoadExecutable(Executable* exec) override;
+
+  /*!
+   * \brief set runtime options for the VM.
+   * \param The options.
+   */
+  void SetExecutionOptions(VMExecutionOptions options) override;
+
+  /*!
+   * \brief Initialize the shared state if needed.
+   */
+  void InitSharedState() override;
+
+ protected:
+  /*!
+   * \brief Initialize the virtual machine for a set of (physical) devices.
+   * \param physical_devices The set of TVM devices.
+   * \param alloc_types The allocator types for each device.
+   */
+  void Init(const std::vector<Device>& physical_devices,
+            const std::vector<AllocatorType>& alloc_types) override;
+
+  /*! \brief Run VM dispatch loop. */
+  void RunLoop() override;
+
+  /*! \brief Run one iteration of the VM dispatch loop. */
+  bool RunOneIteration(int frame_start) override;
+
+  /*!
+   * \brief Invoke a global setting up the VM state to execute.
+   *
+   * This does not begin execution of the VM.
+   */
+  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args);
+
+  /*!
+   * \brief Set inputs to a function.
+   * \param name The function name
+   * \param args args[offset:] are arguments to the
+   * function. If the arguments are not of the correct device for the function,
+   * they will be copied to the device.
+   * \param offset Starting offset of the arguments in `args`.
+   */
+  void SetInput(std::string name, TVMArgs args, int offset) override;
+
+ protected:
+  friend class LazyExecutor;
+
+  /*! \brief The vms representing multiple concurrent executions. */
+  std::vector<runtime::Module> vms_;
 };
 
 }  // namespace vm

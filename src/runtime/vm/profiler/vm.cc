@@ -48,7 +48,7 @@ PackedFunc VirtualMachineDebug::GetFunction(const std::string& name,
     return TypedPackedFunc<profiling::Report(String, Array<profiling::MetricCollector>)>(
         [sptr_to_self, this](String arg_name, Array<profiling::MetricCollector> collectors) {
           std::vector<Device> devices;
-          for (auto dev : devices_) {
+          for (auto dev : shared_state_->devices_) {
             if (dev.device_type > 0) {
               devices.push_back(dev);
             }
@@ -92,8 +92,8 @@ PackedFunc VirtualMachineDebug::GetFunction(const std::string& name,
 
 void VirtualMachineDebug::LoadExecutable(Executable* exec) {
   VirtualMachine::LoadExecutable(exec);
-  ICHECK(exec_);
-  for (auto kv : exec_->primitive_map) {
+  ICHECK(shared_state_->exec_);
+  for (auto kv : shared_state_->exec_->primitive_map) {
     packed_index_map_[kv.second] = kv.first;
   }
 }
@@ -101,13 +101,15 @@ void VirtualMachineDebug::LoadExecutable(Executable* exec) {
 void VirtualMachineDebug::OpStartHook(Instruction instr) {
   if (prof_ && prof_.operator*().IsRunning()) {
     if (instr.op == Opcode::LoadConst) {
-      Device dev = GetDevice(exec_->const_device_indexes[instr.const_index]);
+      Device dev = GetDevice(shared_state_->exec_->const_device_indexes[instr.const_index]);
       prof_.operator*().StartCall("VM::LoadConst", dev, {});
     } else if (instr.op == Opcode::DeviceCopy) {
       Device dst_dev = GetDevice(instr.device_copy.dst_device_index);
       prof_.operator*().StartCall("VM::DeviceCopy", dst_dev, {});
     } else if (instr.op == Opcode::ReshapeTensor) {
-      prof_.operator*().StartCall("VM::ReshapeTensor", devices_[exec_->host_device_index], {});
+      prof_.operator*().StartCall("VM::ReshapeTensor",
+                                  shared_state_->devices_[shared_state_->exec_->host_device_index],
+                                  {});
     } else if (instr.op == Opcode::AllocTensor) {
       auto shape = std::vector<int64_t>(instr.alloc_tensor.ndim);
 
@@ -122,7 +124,7 @@ void VirtualMachineDebug::OpStartHook(Instruction instr) {
     } else if (instr.op == Opcode::AllocTensorReg) {
       auto storage_obj = ReadRegister(instr.alloc_tensor_reg.storage);
       auto storage = Downcast<Storage>(storage_obj);
-      Device cpu_dev = GetDevice(exec_->host_device_index);
+      Device cpu_dev = GetDevice(shared_state_->exec_->host_device_index);
       auto shape_obj = ReadRegister(instr.alloc_tensor_reg.shape_register);
       NDArray shape_tensor = Downcast<NDArray>(shape_obj).CopyTo(cpu_dev);
       prof_.operator*().StartCall(
@@ -137,7 +139,7 @@ void VirtualMachineDebug::OpStartHook(Instruction instr) {
       prof_.operator*().StartCall("VM::AllocStorage", dev,
                                   {{"VM::Argument Shapes", String(shape.str())}});
     } else {
-      prof_.operator*().StartCall("VM::UnknownOp", devices_[1], {});
+      prof_.operator*().StartCall("VM::UnknownOp", shared_state_->devices_[1], {});
     }
   }
 }
@@ -150,8 +152,8 @@ void VirtualMachineDebug::OpStopHook() {
 
 void VirtualMachineDebug::InvokePacked(Index packed_index, Index arg_count, Index output_size,
                                        const std::vector<ObjectRef>& args, bool batched) {
-  ICHECK(exec_);
-  ICHECK(!devices_.empty()) << "Device has not been initialized yet.";
+  ICHECK(shared_state_->exec_);
+  ICHECK(!shared_state_->devices_.empty()) << "Device has not been initialized yet.";
   if (prof_ && prof_.operator*().IsRunning()) {
     // The device of any input of the operator is used for synchronization.
     ICHECK_GT(arg_count, 0U);
@@ -179,10 +181,11 @@ void VirtualMachineDebug::InvokePacked(Index packed_index, Index arg_count, Inde
 
     std::unordered_map<std::string, ObjectRef> metrics;
 
-    ICHECK(exec_->op_attrs.find(packed_index) != exec_->op_attrs.end())
+    ICHECK(shared_state_->exec_->op_attrs.find(packed_index) !=
+           shared_state_->exec_->op_attrs.end())
         << packed_index_map_[packed_index] << " not found in op attrs";
 
-    auto& op_attrs = exec_->op_attrs.at(packed_index);
+    auto& op_attrs = shared_state_->exec_->op_attrs.at(packed_index);
     for (auto p : op_attrs) {
       if (std::string(p.first).find("layout") != std::string::npos) {
         metrics[p.first] = p.second;

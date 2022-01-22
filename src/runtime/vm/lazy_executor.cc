@@ -107,8 +107,8 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
 
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
-    InvokePackedFnUnrolled(vm_->packed_funcs_[node.func_idx_], node.arg_count_, node.output_size_,
-                           node.args_);
+    InvokePackedFnUnrolled(vm_->shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
+                           node.output_size_, node.args_);
   }
   nodes_.clear();
 }
@@ -161,17 +161,18 @@ void LazyExecutor::BatchedExecute() {
 
       // if (nodes.size() == 1) {
       //   // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-      //   InvokePackedFnUnrolled(vm_->packed_funcs_[func_idx], nodes[0]->arg_count_,
+      //   InvokePackedFnUnrolled(vm_->shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
       //                          nodes[0]->output_size_, nodes[0]->args_);
       // } else {
-      auto batched_func_idx = vm_->batched_funcs_[func_idx];
+      auto batched_func_idx = vm_->shared_state_->batched_funcs_[func_idx];
       // std::cout << "[VMU] Executing " << batched_func_idx << " " << nodes.size() << std::endl;
-      // for (auto i : vm_->batched_func_arg_mode_[batched_func_idx]) {
+      // for (auto i : vm_->shared_state_->batched_func_arg_mode_[batched_func_idx]) {
       //   std::cout << "[VMU]   ArgMode " << i << std::endl;
       // }
-      InvokePackedFnBatchedUnrolled(vm_->packed_funcs_[batched_func_idx], nodes[0]->arg_count_,
-                                    nodes[0]->output_size_,
-                                    vm_->batched_func_arg_mode_[batched_func_idx], nodes);
+      InvokePackedFnBatchedUnrolled(vm_->shared_state_->packed_funcs_[batched_func_idx],
+                                    nodes[0]->arg_count_, nodes[0]->output_size_,
+                                    vm_->shared_state_->batched_func_arg_mode_[batched_func_idx],
+                                    nodes);
       // }
     }
   }
