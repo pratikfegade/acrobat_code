@@ -203,8 +203,6 @@ struct VMSharedState {
    * \brief A mapping from packed_funcs to there batched counterparts.
    */
   std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
-  /*! \brief The function name to inputs mapping. */
-  std::unordered_map<std::string, std::vector<ObjectRef>> inputs_;
 };
 
 class ConcurrentVirtualMachine;
@@ -313,6 +311,13 @@ class VirtualMachine : public runtime::ModuleNode {
   ObjectRef Invoke(const std::string& name, const std::vector<ObjectRef>& args);
 
   /*!
+   * \brief A packed API wrapper to the invoke functions above.
+   * \param args The function.
+   * \param rv Pointer to storage for the return value .
+   */
+  virtual void InvokeWrapper(TVMArgs args, TVMRetValue* rv);
+
+  /*!
    * \brief Invoke a PackedFunction
    *
    * \param packed_index The offset of the PackedFunction in all functions.
@@ -357,8 +362,9 @@ class VirtualMachine : public runtime::ModuleNode {
    * function. If the arguments are not of the correct device for the function,
    * they will be copied to the device.
    * \param offset Starting offset of the arguments in `args`.
+   * \param num_args Number of args to consume from args.
    */
-  virtual void SetInput(std::string name, TVMArgs args, int offset);
+  virtual void SetInput(std::string name, TVMArgs args, int offset, int num_args);
 
   /*!
    * \brief Internal hook for profiling the start of an op.
@@ -390,6 +396,8 @@ class VirtualMachine : public runtime::ModuleNode {
   Index func_index_;
   /*! \brief The current pointer to the code section. */
   const Instruction* code_;
+  /*! \brief The function name to inputs mapping. */
+  std::unordered_map<std::string, std::vector<ObjectRef>> inputs_;
   /*! \brief The virtual machine PC. */
   Index pc_;
   /*! \brief The special return register. */
@@ -451,11 +459,18 @@ class ConcurrentVirtualMachine : public VirtualMachine {
   bool RunOneIteration(int frame_start) override;
 
   /*!
+   * \brief A packed API wrapper to invoke functions.
+   * \param args The function.
+   * \param rv Pointer to storage for the return value .
+   */
+  void InvokeWrapper(TVMArgs args, TVMRetValue* rv) override;
+
+  /*!
    * \brief Invoke a global setting up the VM state to execute.
    *
    * This does not begin execution of the VM.
    */
-  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args);
+  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args) override;
 
   /*!
    * \brief Set inputs to a function.
@@ -464,8 +479,9 @@ class ConcurrentVirtualMachine : public VirtualMachine {
    * function. If the arguments are not of the correct device for the function,
    * they will be copied to the device.
    * \param offset Starting offset of the arguments in `args`.
+   * \param num_args Number of args to consume from args.
    */
-  void SetInput(std::string name, TVMArgs args, int offset) override;
+  void SetInput(std::string name, TVMArgs args, int offset, int num_args) override;
 
  protected:
   friend class LazyExecutor;

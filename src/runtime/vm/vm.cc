@@ -130,27 +130,30 @@ std::vector<int64_t> ToShape(NDArray shape_tensor) {
 void VirtualMachine::OpStartHook(Instruction instr) {}
 void VirtualMachine::OpStopHook() {}
 
+void VirtualMachine::InvokeWrapper(TVMArgs args, TVMRetValue* rv) {
+  ICHECK(shared_state_->exec_) << "The executable is not created yet.";
+
+  std::string func_name = args[0];
+  auto git = shared_state_->exec_->global_map.find(func_name);
+  ICHECK(git != shared_state_->exec_->global_map.end())
+      << "Cannot find function " << func_name << " in the executable";
+  auto func = shared_state_->exec_->functions[git->second];
+  if (func.params.empty()) {
+    *rv = Invoke(func, {});
+  } else {
+    auto it = inputs_.find(func_name);
+    ICHECK(it != inputs_.end()) << "Input has not been set for function " << func_name
+                                << " in concurrent? " << concurrent_vm_;
+    const std::vector<ObjectRef>& func_args = it->second;
+    *rv = Invoke(func, func_args);
+  }
+}
+
 PackedFunc VirtualMachine::GetFunction(const std::string& name,
                                        const ObjectPtr<Object>& sptr_to_self) {
   if (name == "invoke") {
-    return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
-      ICHECK(shared_state_->exec_) << "The executable is not created yet.";
-
-      std::string func_name = args[0];
-      auto git = shared_state_->exec_->global_map.find(func_name);
-      ICHECK(git != shared_state_->exec_->global_map.end())
-          << "Cannot find function " << func_name << " in the executable";
-      auto func = shared_state_->exec_->functions[git->second];
-      if (func.params.empty()) {
-        *rv = Invoke(func, {});
-      } else {
-        auto it = shared_state_->inputs_.find(func_name);
-        ICHECK(it != shared_state_->inputs_.end())
-            << "Input has not been set for function " << func_name;
-        const std::vector<ObjectRef>& func_args = it->second;
-        *rv = Invoke(func, func_args);
-      }
-    });
+    return PackedFunc(
+        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { this->InvokeWrapper(args, rv); });
   } else if (name == "invoke_stateful") {
     // TODO(tkonolige, jroesch, tqchen): invoke_stateful and get_output are
     // stop-gap measure to allow using vm over a remote connection.
@@ -163,7 +166,7 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       Device host{static_cast<DLDeviceType>(args[1].operator int()), args[2].operator int()};
 
-      SetInput(args[0].operator std::string(), args, 3);
+      SetInput(args[0].operator std::string(), args, 3, args.size() - 3);
       PackedFunc invoke = GetFunction("invoke", sptr_to_self);
       TVMRetValue rv_;
       invoke.CallPacked(args, &rv_);  // Invoke only uses the first arg, so the rest of the args
@@ -231,8 +234,9 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
       this->Init(devices, alloc_types);
     });
   } else if (name == "set_input") {
-    return PackedFunc(
-        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { SetInput(args[0], args, 1); });
+    return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+      SetInput(args[0], args, 1, args.size() - 1);
+    });
   } else if (name == "load_late_bound_consts") {
     return PackedFunc([this](TVMArgs args, TVMRetValue* rv) {
       CHECK_EQ(args.size(), 1);
@@ -245,20 +249,20 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
   }
 }
 
-void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset) {
+void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, int num_args) {
   ICHECK(shared_state_->exec_) << "The executable is not created yet.";
   auto gvit = shared_state_->exec_->global_map.find(func_name);
   ICHECK(gvit != shared_state_->exec_->global_map.end()) << "Cannot find function " << func_name;
   auto func_index = gvit->second;
   const auto& vm_func = shared_state_->exec_->functions[func_index];
   const auto& param_names = vm_func.params;
-  ICHECK_EQ(args.size() - offset, param_names.size())
-      << "The number of provided parameters doesn't match the number of arguments " << args.size()
+  ICHECK_EQ(num_args, param_names.size())
+      << "The number of provided parameters doesn't match the number of arguments " << num_args
       << " " << offset << " " << param_names.size();
   ICHECK_EQ(param_names.size(), vm_func.param_device_indexes.size())
       << "The number of provided parameters doesn't match the number of assigned devices";
   std::vector<ObjectRef> func_args(param_names.size());
-  for (int i = offset; i < args.size(); ++i) {
+  for (int i = offset; i < num_args; ++i) {
     Device dev = GetDevice(vm_func.param_device_indexes[i - offset]);
 
     if (args[i].type_code() == kTVMDLTensorHandle) {
@@ -276,14 +280,13 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset) {
       func_args[i - offset] = obj;
     }
   }
-  shared_state_->inputs_.erase(func_name);
-  shared_state_->inputs_.emplace(func_name, func_args);
+  inputs_.erase(func_name);
+  inputs_.emplace(func_name, func_args);
 }
 
 void VirtualMachine::InitSharedState() {
   if (!shared_state_) {
     shared_state_ = new VMSharedState();
-    std::cout << "[VM] Setting shared state: " << this << " " << this->shared_state_ << std::endl;
   }
 }
 
@@ -848,6 +851,39 @@ inline VirtualMachine* GetVMFromModule(const Module& mod) {
   return static_cast<VirtualMachine*>(const_cast<ModuleNode*>(mod.operator->()));
 }
 
+void ConcurrentVirtualMachine::InvokeWrapper(TVMArgs args, TVMRetValue* rv) {
+  ICHECK(shared_state_->exec_) << "The executable is not created yet.";
+
+  std::string func_name = args[0];
+  auto git = shared_state_->exec_->global_map.find(func_name);
+  ICHECK(git != shared_state_->exec_->global_map.end())
+      << "Cannot find function " << func_name << " in the executable";
+  auto func = shared_state_->exec_->functions[git->second];
+
+  for (auto& vm_mod : vms_) {
+    auto* vm = GetVMFromModule(vm_mod);
+
+    if (func.params.empty()) {
+      InvokeGlobal(func, {});
+    } else {
+      auto it = vm->inputs_.find(func_name);
+      ICHECK(it != vm->inputs_.end()) << "Input has not been set for function " << func_name;
+      const std::vector<ObjectRef>& func_args = it->second;
+      vm->InvokeGlobal(func, func_args);
+    }
+  }
+
+  RunLoop();
+
+  Array<ObjectRef> res;
+  for (auto& vm_mod : vms_) {
+    auto* vm = GetVMFromModule(vm_mod);
+    res.push_back(vm->return_register_);
+  }
+
+  *rv = res;
+}
+
 void ConcurrentVirtualMachine::LoadExecutable(Executable* exec) {
   VirtualMachine::LoadExecutable(exec);
 }
@@ -867,7 +903,7 @@ void ConcurrentVirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
 void ConcurrentVirtualMachine::InitSharedState() {
   this->concurrent_vm_ = true;
   VirtualMachine::InitSharedState();
-  for (size_t i = 0; i < 1; ++i) {
+  for (size_t i = 0; i < 2; ++i) {
     auto vm_ptr = make_object<VirtualMachine>();
     auto module = Module(vm_ptr);
     // std::cout << "[VM] Creating VM: " << GetVMFromModule(module) << " " << vm_ptr.get()
@@ -909,8 +945,13 @@ void ConcurrentVirtualMachine::InvokeGlobal(const VMFunction& func,
   }
 }
 
-void ConcurrentVirtualMachine::SetInput(std::string name, TVMArgs args, int offset) {
-  VirtualMachine::SetInput(name, args, offset);
+void ConcurrentVirtualMachine::SetInput(std::string name, TVMArgs args, int offset, int num_args) {
+  NDArray array = args[offset++];
+  int per_vm = static_cast<int32_t*>(array->data)[0];
+  for (auto& vm : vms_) {
+    GetVMFromModule(vm)->SetInput(name, args, offset, per_vm);
+    offset += per_vm;
+  }
 }
 
 runtime::Module CreateVirtualMachine(Executable* exec) {
