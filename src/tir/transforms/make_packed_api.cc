@@ -122,7 +122,25 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
 
   auto* func_ptr = func.CopyOnWrite();
   const Stmt nop = Evaluate(0);
-  int num_args = static_cast<int>(func_ptr->params.size());
+
+  Array<Var> scatter_cleaned_params;
+  for (auto var : func_ptr->params) {
+    bool skip = false;
+    auto it = func_ptr->buffer_map.find(var);
+    if (it != func_ptr->buffer_map.end()) {
+      auto buffer = (*it).second;
+      if (func_ptr->scatter_buffer_map.count(buffer->data)) {
+        skip = true;
+      }
+    }
+    if (!skip) {
+      scatter_cleaned_params.push_back(var);
+    }
+  }
+  std::cout << "[MPA] Params " << scatter_cleaned_params << std::endl;
+
+  // int num_args = static_cast<int>(func_ptr->params.size());
+  int num_args = static_cast<int>(scatter_cleaned_params.size());
   ICHECK_LE(num_unpacked_args, num_args);
   bool pack_args = (num_unpacked_args == -1) || (num_args > num_unpacked_args);
   if (num_unpacked_args == -1) {
@@ -177,8 +195,8 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
   std::vector<std::pair<Var, Var> > var_def;
   std::vector<std::pair<Var, Buffer> > buffer_def;
 
-  for (int i = 0; i < static_cast<int>(func_ptr->params.size()); ++i) {
-    Var param = func_ptr->params[i];
+  for (int i = 0; i < static_cast<int>(scatter_cleaned_params.size()); ++i) {
+    Var param = scatter_cleaned_params[i];
     Var v_arg = Var("arg" + std::to_string(i), param->dtype);
 
     // Pluck the device API context out based on name
@@ -190,8 +208,12 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
 
     auto it = func_ptr->buffer_map.find(param);
     if (it != func_ptr->buffer_map.end()) {
+      std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << (*it).second->data.get()
+                << std::endl;
       buffer_def.emplace_back(v_arg, (*it).second);
     } else {
+      std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << param << " " << param.get()
+                << std::endl;
       var_def.emplace_back(v_arg, param);
     }
     if (i < num_packed_args) {

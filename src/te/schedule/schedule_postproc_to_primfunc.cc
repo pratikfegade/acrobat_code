@@ -165,14 +165,25 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
       extern_buffer[tensor] = buffer;
     } else {
       tir::Buffer buffer = Downcast<tir::Buffer>(var);
-      // tir::Var bptr(buffer->name, PrimType(DataType::Handle()));
       tir::Var bptr(buffer->name, buffer->data->type_annotation);
-      // std::cout << "[BUF]   ParamBuffer " << buffer->name << " " << buffer->data->type_annotation
-      // << std::endl;
+      // std::cout << "[BUF]   ParamBuffer " << buffer->name << " " << bptr.get() << " "
+      // << buffer->data.get() << std::endl;
       params.push_back(bptr);
       buffer_map.Set(bptr, buffer);
     }
   }
+
+  // for (auto it : buffer_map) {
+  //   std::cout << "[ABC] " << it.second->data->name_hint << " " << it.second->data.get() << " "
+  //             << scatter_buffer_opt.value().count(it.second->data) << std::endl;
+  // }
+  // for (auto var : params) {
+  //   std::cout << "[XYZ] " << var->name_hint << " " << var.get() << " "
+  //             << scatter_buffer_opt.value().count(var) << std::endl;
+  // }
+  // for (auto it : scatter_buffer_opt.value()) {
+  //   std::cout << "[MNO] " << it.first->name_hint << " " << it.first.get() << std::endl;
+  // }
 
   body = TensorToBufferMapper(std::move(extern_buffer))(std::move(body));
   // We mark this PrimFunc as coming from a TE schedule

@@ -69,6 +69,13 @@ void StmtVisitor::VisitStmt_(const StoreNode* op) {
   }
 }
 
+void StmtVisitor::VisitStmt_(const ScatterStoreNode* op) {
+  this->VisitExpr(op->value);
+  this->VisitExpr(op->batch_index);
+  this->VisitExpr(op->elem_index);
+  this->VisitExpr(op->predicate);
+}
+
 void StmtVisitor::VisitStmt_(const BufferStoreNode* op) {
   this->VisitExpr(op->value);
   VisitArray(op->indices, [this](const PrimExpr& e) { this->VisitExpr(e); });
@@ -367,6 +374,25 @@ Stmt StmtMutator::VisitStmt_(const StoreNode* op) {
     n->predicate = std::move(predicate);
     n->scatter_batch_index = std::move(scatter_batch_index);
     n->scatter_elem_index = std::move(scatter_elem_index);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const ScatterStoreNode* op) {
+  PrimExpr value = this->VisitExpr(op->value);
+  PrimExpr batch_index = this->VisitExpr(op->batch_index);
+  PrimExpr elem_index = this->VisitExpr(op->elem_index);
+  PrimExpr predicate = this->VisitExpr(op->predicate);
+
+  if (value.same_as(op->value) && predicate.same_as(op->predicate) &&
+      batch_index.same_as(op->batch_index) && elem_index.same_as(op->elem_index)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->value = std::move(value);
+    n->predicate = std::move(predicate);
+    n->batch_index = std::move(batch_index);
+    n->elem_index = std::move(elem_index);
     return Stmt(n);
   }
 }
@@ -679,6 +705,17 @@ class IRSubstitute : public StmtExprMutator {
     op = ret.as<StoreNode>();
     if (auto mapped_var = vmap_(op->buffer_var)) {
       return Store(Downcast<Var>(mapped_var.value()), op->value, op->index, op->predicate);
+    } else {
+      return ret;
+    }
+  }
+
+  Stmt VisitStmt_(const ScatterStoreNode* op) final {
+    Stmt ret = StmtExprMutator::VisitStmt_(op);
+    op = ret.as<ScatterStoreNode>();
+    if (auto mapped_var = vmap_(op->buffer_var)) {
+      return ScatterStore(Downcast<Var>(mapped_var.value()), op->value, op->batch_index,
+                          op->elem_index, op->predicate);
     } else {
       return ret;
     }

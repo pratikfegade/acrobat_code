@@ -493,6 +493,14 @@ TVM_DLL Pass ConvertForLoopsToSerial();
  */
 TVM_DLL Pass PrintCurrentIR(String previous_pass);
 
+/*!
+ * \brief Lower scatter loads/stores from Loads/Stores to dedicated
+ * ScatterLoads/SCatterStores
+ *
+ * \return The Pass
+ */
+TVM_DLL Pass LowerScatterLoadsAndStores();
+
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm

@@ -293,6 +293,77 @@ class Store : public Stmt {
 };
 
 /*!
+ * \brief ScatterStore value to the buffer.
+ *
+ *  Equivalent to
+ *  ((DType*)buffer_var)[batch_index][elem_index] =
+ *  value.  where DType is the type specified by type().element_of().
+ *
+ *  For example, if type = float32x3, then the store will corresponds to
+ *
+ * \code
+ *
+ *  auto buffer = static_cast<float*>(buffer_var);
+ *  buffer[batch_index][elem_index.v0] = value.v0;
+ *  buffer[batch_index][elem_index.v1] = value.v1;
+ *  buffer[batch_index][elem_index.v2] = value.v2;
+ *
+ * \endcode
+ * \sa LoadNode
+ */
+class ScatterStoreNode : public StmtNode {
+ public:
+  /*! \brief The buffer variable. */
+  Var buffer_var;
+  /*! \brief The batch index locations to be stored to. */
+  PrimExpr batch_index;
+  /*! \brief The element index locations to be stored to. */
+  PrimExpr elem_index;
+  /*! \brief The value to be stored. */
+  PrimExpr value;
+  /*! \brief The predicate to mask which lanes would be stored. */
+  PrimExpr predicate;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("buffer_var", &buffer_var);
+    v->Visit("batch_index", &batch_index);
+    v->Visit("elem_index", &elem_index);
+    v->Visit("value", &value);
+    v->Visit("predicate", &predicate);
+    v->Visit("span", &span);
+  }
+
+  bool SEqualReduce(const ScatterStoreNode* other, SEqualReducer equal) const {
+    return equal(value, other->value) && equal(predicate, other->predicate) &&
+           equal(buffer_var, other->buffer_var) && equal(batch_index, other->batch_index) &&
+           equal(elem_index, other->elem_index);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(buffer_var);
+    hash_reduce(batch_index);
+    hash_reduce(elem_index);
+    hash_reduce(value);
+    hash_reduce(predicate);
+  }
+
+  static constexpr const char* _type_key = "tir.ScatterStore";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ScatterStoreNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to ScatterStoreNode.
+ * \sa ScatterStoreNode
+ */
+class ScatterStore : public Stmt {
+ public:
+  TVM_DLL ScatterStore(Var buffer_var, PrimExpr value, PrimExpr batch_index, PrimExpr elem_index,
+                       PrimExpr predicate, Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(ScatterStore, Stmt, ScatterStoreNode);
+};
+
+/*!
  * \brief Store value to the high dimension buffer.
  *
  * \code

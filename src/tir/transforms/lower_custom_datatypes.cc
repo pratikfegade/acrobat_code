@@ -119,6 +119,23 @@ class CustomDatatypesLowerer : public StmtExprMutator {
     return expr;
   }
 
+  PrimExpr VisitExpr_(const ScatterLoadNode* load) final {
+    bool to_be_lowered = datatype::Registry::Global()->GetTypeRegistered(load->dtype.code());
+    PrimExpr expr = StmtExprMutator::VisitExpr_(load);
+    load = expr.as<ScatterLoadNode>();
+    if (to_be_lowered) {
+      auto new_load_type = DataType::UInt(load->dtype.bits());
+      auto buffer_var = load->buffer_var;
+      auto it = var_remap_.find(buffer_var);
+      if (it != var_remap_.end()) {
+        buffer_var = it->second;
+      }
+      return ScatterLoad(new_load_type, buffer_var, load->batch_index, load->elem_index,
+                         load->predicate);
+    }
+    return expr;
+  }
+
   Stmt VisitStmt_(const StoreNode* op) final {
     Stmt ret = StmtExprMutator::VisitStmt_(op);
     op = ret.as<StoreNode>();
@@ -126,6 +143,18 @@ class CustomDatatypesLowerer : public StmtExprMutator {
     auto it = var_remap_.find(op->buffer_var);
     if (it != var_remap_.end()) {
       return Store(it->second, op->value, op->index, op->predicate);
+    } else {
+      return ret;
+    }
+  }
+
+  Stmt VisitStmt_(const ScatterStoreNode* op) final {
+    Stmt ret = StmtExprMutator::VisitStmt_(op);
+    op = ret.as<ScatterStoreNode>();
+
+    auto it = var_remap_.find(op->buffer_var);
+    if (it != var_remap_.end()) {
+      return ScatterStore(it->second, op->value, op->batch_index, op->elem_index, op->predicate);
     } else {
       return ret;
     }

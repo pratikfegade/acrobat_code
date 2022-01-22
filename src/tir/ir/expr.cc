@@ -718,6 +718,91 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       }
     });
 
+// ScatterLoad
+ScatterLoad::ScatterLoad(DataType dtype, Var buffer_var, PrimExpr batch_index, PrimExpr elem_index,
+                         PrimExpr predicate, Span span) {
+  ICHECK(buffer_var.defined());
+  ICHECK(predicate.defined());
+  ICHECK(batch_index.defined());
+  ICHECK(elem_index.defined());
+
+  // TODO(ppf): Fix these checks for the case of scatter loads
+  // // Assume that the array elements have 1 lane, unless a type
+  // // annotation tells us otherwise.
+  // int element_lanes = 1;
+  // auto pointer_type = tir::GetPointerType(buffer_var->type_annotation);
+  // if (pointer_type.first) {
+  //   // Cannot check element type of array, as it may be different than
+  //   // the loaded type in some cases.
+  //   //
+  //   // 1. Booleans use DataType::Int(8) while stored, and the codegens
+  //   // handle cast to boolean.
+  //   //
+  //   // 2. The StorageRewrite pass can merge multiple allocations at
+  //   // the same scope, regardless of element type.  The codegen is
+  //   // then responsible for casting to the output type.
+
+  //   // TODO(Lunderberg): Uncomment this check once it can be applied.
+  //   // See https://discuss.tvm.apache.org/t/pre-rfc-vectorized-tir-buffers/10615
+  //   // for discussion.
+
+  //   // ICHECK(dtype.element_of() == pointer_type.second.element_of())
+  //   //     << "Type mismatch, cannot load type " << dtype << " from buffer " <<
+  //   //     buffer_var->name_hint
+  //   //     << " of type " << pointer_type.second;
+  //   element_lanes = pointer_type.second.lanes();
+  // }
+
+  // // The C-based codegens assume that all loads occur on a array with
+  // // non-vectorized elements, and cast between
+  // // vectorized/non-vectorized arrays as needed.  Ideally, these
+  // // should be changed to explicit casts in the TIR graph, rather than
+  // // being handled at the code-gen level.
+  // ICHECK((dtype.lanes() == element_lanes * index.dtype().lanes()) ||
+  //        (dtype.lanes() == index.dtype().lanes()));
+  // ICHECK((dtype.lanes() == element_lanes * predicate.dtype().lanes()) ||
+  //        (dtype.lanes() == index.dtype().lanes()));
+
+  ObjectPtr<ScatterLoadNode> node = make_object<ScatterLoadNode>();
+  node->dtype = dtype;
+  node->buffer_var = std::move(buffer_var);
+  node->batch_index = std::move(batch_index);
+  node->elem_index = std::move(elem_index);
+  node->predicate = std::move(predicate);
+  node->span = std::move(span);
+
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_GLOBAL("tir.ScatterLoad").set_body([](TVMArgs args, TVMRetValue* ret) {
+  DataType t = args[0];
+  if (args.size() == 4) {
+    *ret = ScatterLoad(t, args[1], args[2], args[3], const_true(t.lanes()), Span());
+  } else if (args.size() == 5) {
+    *ret = ScatterLoad(t, args[1], args[2], args[3], args[4], Span());
+  } else {
+    *ret = ScatterLoad(t, args[1], args[2], args[3], args[4], args[5]);
+  }
+});
+
+TVM_REGISTER_NODE_TYPE(ScatterLoadNode);
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<ScatterLoadNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const ScatterLoadNode*>(node.get());
+      p->stream << op->buffer_var;
+      p->stream << "[";
+      p->Print(op->batch_index);
+      p->stream << "]";
+      p->stream << "[";
+      p->Print(op->elem_index);
+      p->stream << "]";
+      if (!is_one(op->predicate)) {
+        p->stream << " if ";
+        p->Print(op->predicate);
+      }
+    });
+
 // Ramp
 Ramp::Ramp(PrimExpr base, PrimExpr stride, int lanes, Span span) {
   ICHECK(base.defined());

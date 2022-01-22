@@ -23,6 +23,7 @@
  */
 // The pass definition originates from Halide pipeline.
 
+#include <tvm/tir/analysis.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/stmt.h>
 #include <tvm/tir/transform.h>
@@ -32,6 +33,7 @@ namespace tir {
 
 PrimFunc PrintCurrentIRFn(PrimFunc func, String previous_pass) {
   std::cout << "[PRINT] IR after " << previous_pass << std::endl;
+  std::cout << UndefinedVars(func->body, func->params) << std::endl;
   std::cout << func << std::endl;
   return func;
 }

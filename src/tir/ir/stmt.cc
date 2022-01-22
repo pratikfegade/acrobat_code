@@ -318,6 +318,81 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->stream << '\n';
     });
 
+// ScatterStore
+ScatterStore::ScatterStore(Var buffer_var, PrimExpr value, PrimExpr batch_index,
+                           PrimExpr elem_index, PrimExpr predicate, Span span) {
+  ICHECK(value.defined());
+  ICHECK(batch_index.defined());
+  ICHECK(elem_index.defined());
+  ICHECK(predicate.defined());
+
+  // TODO(ppf): Fix these checks for the case of scatter stores
+  // // Assume that the array elements have 1 lane, unless a type
+  // // annotation tells us otherwise.
+  // int element_lanes = 1;
+  // auto pointer_type = tir::GetPointerType(buffer_var->type_annotation);
+  // if (pointer_type.first) {
+  //   // Currently cannot check element type of array, see Load::Load
+  //   // for details.
+
+  //   // TODO(Lunderberg): Uncomment this check once it can be applied.
+  //   // See https://discuss.tvm.apache.org/t/pre-rfc-vectorized-tir-buffers/10615
+  //   // for discussion.
+
+  //   // ICHECK_EQ(value.dtype().element_of(), pointer_type.second.element_of())
+  //   //     << "Type mismatch, cannot store type " << value.dtype() << " into buffer "
+  //   //     << buffer_var->name_hint << " of type " << pointer_type.second;
+  //   element_lanes = pointer_type.second.lanes();
+  // }
+  // ICHECK((value.dtype().lanes() == element_lanes * index.dtype().lanes()) ||
+  //        (value.dtype().lanes() == index.dtype().lanes()));
+  // ICHECK((value.dtype().lanes() == element_lanes * predicate.dtype().lanes()) ||
+  //        (value.dtype().lanes() == index.dtype().lanes()));
+
+  ObjectPtr<ScatterStoreNode> node = make_object<ScatterStoreNode>();
+  node->value = std::move(value);
+  node->buffer_var = std::move(buffer_var);
+  node->batch_index = std::move(batch_index);
+  node->elem_index = std::move(elem_index);
+  node->predicate = std::move(predicate);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+// Var buffer_var, PrimExpr value, PrimExpr batch_index,
+// PrimExpr elem_index, PrimExpr predicate, Span span)
+TVM_REGISTER_GLOBAL("tir.ScatterStore").set_body([](TVMArgs args, TVMRetValue* ret) {
+  PrimExpr value = args[1];
+  if (args.size() == 4) {
+    *ret =
+        ScatterStore(args[0], value, args[2], args[3], const_true(value.dtype().lanes()), Span());
+  } else if (args.size() == 5) {
+    *ret = ScatterStore(args[0], value, args[2], args[3], args[4], Span());
+  } else {
+    *ret = ScatterStore(args[0], value, args[2], args[3], args[4], args[5]);
+  }
+});
+
+TVM_REGISTER_NODE_TYPE(ScatterStoreNode);
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<ScatterStoreNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const ScatterStoreNode*>(node.get());
+      p->PrintIndent();
+      p->stream << op->buffer_var;
+      p->stream << "[";
+      p->Print(op->batch_index);
+      p->stream << "][";
+      p->Print(op->elem_index);
+      p->stream << "] = ";
+      p->Print(op->value);
+      if (!is_one(op->predicate)) {
+        p->stream << " if ";
+        p->Print(op->predicate);
+      }
+      p->stream << '\n';
+    });
+
 // ProducerStore
 ProducerStore::ProducerStore(DataProducer producer, PrimExpr value, Array<PrimExpr> indices,
                              Span span) {

@@ -151,6 +151,14 @@ class CodeGenLLVM : public ExprFunctor<llvm::Value*(const PrimExpr&)>,
   // scatter/gather accesses
   llvm::Value* LoadBufferPointer(const Var& buffer_var, const PrimExpr& batch_index,
                                  const DataType& element_type);
+
+  // Generate code for LoadNode and the element load of ScatterLoads
+  llvm::Value* GenerateForLoad(llvm::Value* load_buffer, Var load_buffer_tir,
+                               llvm::Value* load_index, PrimExpr load_index_tir, DataType t);
+
+  // Generate code for StoreNode and the element store of ScatterStores
+  void GenerateForStore(llvm::Value* value, llvm::Value* store_buffer, Var store_buffer_tir,
+                        llvm::Value* store_index, PrimExpr store_index_tir, DataType t);
   // override codegen
   llvm::Value* VisitExpr_(const VarNode* op) override;
   llvm::Value* VisitExpr_(const CastNode* op) override;
@@ -176,12 +184,14 @@ class CodeGenLLVM : public ExprFunctor<llvm::Value*(const PrimExpr&)>,
   llvm::Value* VisitExpr_(const SelectNode* op) override;
   llvm::Value* VisitExpr_(const LetNode* op) override;
   llvm::Value* VisitExpr_(const LoadNode* op) override;
+  llvm::Value* VisitExpr_(const ScatterLoadNode* op) override;
   llvm::Value* VisitExpr_(const CallNode* op) override;
   llvm::Value* VisitExpr_(const RampNode* op) override;
   llvm::Value* VisitExpr_(const ShuffleNode* op) override;
   llvm::Value* VisitExpr_(const BroadcastNode* op) override;
   // stmt
   void VisitStmt_(const StoreNode* op) override;
+  void VisitStmt_(const ScatterStoreNode* op) override;
   void VisitStmt_(const ForNode* op) override;
   void VisitStmt_(const WhileNode* op) override;
   void VisitStmt_(const IfThenElseNode* op) override;

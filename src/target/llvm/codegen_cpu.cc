@@ -600,6 +600,7 @@ void CodeGenCPU::UnpackClosureData(TypedPointer cdata, const Array<Var>& vfields
 }
 
 void CodeGenCPU::CreateParallelLaunch(const Stmt& body, int num_task) {
+  std::cout << "[CPU] Create parallel launch " << body << std::endl;
   using llvm::BasicBlock;
   // closure data
   llvm::Function* f =

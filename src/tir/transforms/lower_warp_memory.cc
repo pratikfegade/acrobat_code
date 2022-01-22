@@ -129,6 +129,11 @@ class WarpStoreCoeffFinder : private StmtVisitor {
     }
   }
 
+  void VisitStmt_(const ScatterStoreNode* op) final {
+    ICHECK(!(op->buffer_var.get() == buffer_));
+    StmtVisitor::VisitStmt_(op);
+  }
+
   void UpdatePattern(const PrimExpr& index) {
     Array<PrimExpr> m = arith::DetectLinearEquation(index, {warp_index_});
     ICHECK_EQ(m.size(), 2U)
@@ -249,6 +254,11 @@ class WarpAccessRewriter : protected StmtExprMutator {
     }
   }
 
+  Stmt VisitStmt_(const ScatterStoreNode* op) override {
+    ICHECK(!(op->buffer_var.get() == buffer_));
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
   PrimExpr VisitExpr_(const LoadNode* op) override {
     if (op->buffer_var.get() == buffer_) {
       PrimExpr local_index, group;
@@ -267,6 +277,11 @@ class WarpAccessRewriter : protected StmtExprMutator {
     } else {
       return StmtExprMutator::VisitExpr_(op);
     }
+  }
+
+  PrimExpr VisitExpr_(const ScatterLoadNode* op) override {
+    ICHECK(!(op->buffer_var.get() == buffer_));
+    return StmtExprMutator::VisitExpr_(op);
   }
   // Split the index to the two component
   // <local_index, source_index>

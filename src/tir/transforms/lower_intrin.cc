@@ -311,38 +311,6 @@ Stmt LowerIntrinStmt(Stmt stmt, const std::string& target) {
   return IntrinInjecter(&analyzer, target)(std::move(stmt));
 }
 
-class FloorModVisitor : public StmtExprVisitor {
- public:
-  int Visit(const Stmt& stmt) {
-    this->VisitStmt(stmt);
-    return counter;
-  }
-
-  void VisitExpr_(const FloorModNode* op) {
-    if (print) {
-      std::cout << "[HELLO]   " << GetRef<PrimExpr>(op) << " " << op << " " << in_load << std::endl;
-    }
-    StmtExprVisitor::VisitExpr_(op);
-    counter++;
-  }
-
-  void VisitExpr_(const LoadNode* op) {
-    this->VisitExpr(op->index);
-    this->VisitExpr(op->predicate);
-
-    in_load = true;
-    if (op->scatter_batch_index.defined()) {
-      this->VisitExpr(op->scatter_batch_index);
-      this->VisitExpr(op->scatter_elem_index);
-    }
-    in_load = false;
-  }
-
-  bool print = false;
-  bool in_load = false;
-  int counter = 0;
-};
-
 namespace transform {
 
 Pass LowerIntrin() {
@@ -352,18 +320,8 @@ Pass LowerIntrin() {
     ICHECK(target.defined()) << "LowerIntrin: Require the target attribute";
     arith::Analyzer analyzer;
     auto mtriple = target.value()->GetAttr<runtime::String>("mtriple", "");
-    // int start = FloorModVisitor().Visit(n->body, false);
-    // if (start) {
-    // std::cout << "[HELLO] Start" << std::endl;
-    // }
     n->body =
         IntrinInjecter(&analyzer, target.value()->kind->name, mtriple.value())(std::move(n->body));
-    // if (start) {
-    //   std::cout << "[HELLO] End" << std::endl;
-    //   if (FloorModVisitor().Visit(n->body, true)) {
-    //     std::cout << "[HELLO] BODY " << n->body << std::endl;
-    //   }
-    // }
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.LowerIntrin", {});

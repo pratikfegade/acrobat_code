@@ -772,6 +772,74 @@ class Load : public PrimExpr {
 };
 
 /*!
+ * \brief ScatterLoad the value from buffer_var.
+ *
+ *  Equivalent to
+ *  ((DType*)buffer_var)[batch_index][elem_index]
+ *  where DType is the type specified by type().element_of().
+ *
+ *  For example, if type = float32x3, then the load will corresponds to
+ *
+ * \code
+ *
+ *  auto buffer = static_cast<float*>(buffer_var);
+ *  auto loaded_val = float32x3(buffer[batch_index][elem_index.v0],
+ *                              buffer[batch_index][elem_index.v1],
+ *                              buffer[batch_index][elem_index.v2]);
+ *
+ * \endcode
+ */
+class ScatterLoadNode : public PrimExprNode {
+ public:
+  // Fields useful for scatter loads
+  /*! \brief The buffer variable. */
+  Var buffer_var;
+  /*! \brief The batch index locations to be loaded. */
+  PrimExpr batch_index;
+  /*! \brief The element index locations to be loaded. */
+  PrimExpr elem_index;
+  /*! \brief The predicate to mask which lanes would be loaded. */
+  PrimExpr predicate;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("dtype", &dtype);
+    v->Visit("buffer_var", &buffer_var);
+    v->Visit("batch_index", &batch_index);
+    v->Visit("elem_index", &elem_index);
+    v->Visit("predicate", &predicate);
+    v->Visit("span", &span);
+  }
+
+  bool SEqualReduce(const ScatterLoadNode* other, SEqualReducer equal) const {
+    return equal(dtype, other->dtype) && equal(predicate, other->predicate) &&
+           equal(buffer_var, other->buffer_var) && equal(batch_index, other->batch_index) &&
+           equal(elem_index, other->elem_index);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(dtype);
+    hash_reduce(buffer_var);
+    hash_reduce(batch_index);
+    hash_reduce(elem_index);
+    hash_reduce(predicate);
+  }
+
+  static constexpr const char* _type_key = "tir.ScatterLoad";
+  TVM_DECLARE_FINAL_OBJECT_INFO(ScatterLoadNode, PrimExprNode);
+};
+
+/*!
+ * \brief Managed reference to ScatterLoadNode
+ * \sa ScatterLoadNode
+ */
+class ScatterLoad : public PrimExpr {
+ public:
+  TVM_DLL ScatterLoad(DataType dtype, Var buffer_var, PrimExpr batch_index, PrimExpr elem_index,
+                      PrimExpr predicate, Span span = Span());
+  TVM_DEFINE_OBJECT_REF_METHODS(ScatterLoad, PrimExpr, ScatterLoadNode);
+};
+
+/*!
  * \brief Construct a vector with lanes elements
  *        where its i-th element equals base + i * stride.
  *  This is useful to construct a index for a continuous vector load.

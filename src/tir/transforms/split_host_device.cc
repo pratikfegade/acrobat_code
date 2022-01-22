@@ -115,6 +115,11 @@ class VarUseDefAnalysis : public StmtExprMutator {
     return StmtExprMutator::VisitStmt_(op);
   }
 
+  Stmt VisitStmt_(const ScatterStoreNode* op) final {
+    this->HandleUse(op->buffer_var);
+    return StmtExprMutator::VisitStmt_(op);
+  }
+
   PrimExpr VisitExpr_(const LetNode* op) final {
     // Weaker SSA condition
     // A single var can be binded in multiple lets
@@ -164,6 +169,11 @@ class VarUseDefAnalysis : public StmtExprMutator {
     } else {
       this->HandleUse(op->buffer_var);
     }
+    return StmtExprMutator::VisitExpr_(op);
+  }
+
+  PrimExpr VisitExpr_(const ScatterLoadNode* op) final {
+    this->HandleUse(op->buffer_var);
     return StmtExprMutator::VisitExpr_(op);
   }
 
