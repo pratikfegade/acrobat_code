@@ -313,6 +313,9 @@ constexpr const char* kDBBatchedPrimFunc = "db.batched_prim_func";
     invoked by a coarse wrapper. */
 constexpr const char* kDBKernelPrimFunc = "db.kernel_prim_func";
 
+/*! \brief Mark the function as having an unpacked API. */
+constexpr const char* kDBUnpackedAPI = "db.unpacked_api";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

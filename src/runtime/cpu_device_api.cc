@@ -54,6 +54,7 @@ class CPUDeviceAPI final : public DeviceAPI {
     if (ptr == nullptr) throw std::bad_alloc();
 #else
     // posix_memalign is available in android ndk since __ANDROID_API__ >= 17
+    // std::cout << "[CDA] " << nbytes << " " << alignment << std::endl;
     int ret = posix_memalign(&ptr, alignment, nbytes);
     if (ret != 0) throw std::bad_alloc();
 #endif

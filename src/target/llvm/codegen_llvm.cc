@@ -115,28 +115,32 @@ void CodeGenLLVM::InitFuncState() {
 
 void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
   std::string name = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
-  bool batched_function = f->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc);
-  bool coarsened_function = f->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc);
+  bool is_batched_function = f->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc);
+  bool is_coarsened_function = f->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc);
+  bool has_unpacked_api = f->HasNonzeroAttr(tir::attr::kDBUnpackedAPI);
+  bool compile_at_coarsened_granularity =
+      tvm::transform::PassContext::Current()
+          ->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false))
+          .value();
   bool is_execution_kernel =
       (support::StartsWith(name, "vm_") || support::StartsWith(name, "prim_func"));
   this->InitFuncState();
 
   std::vector<tvm::runtime::vm::DBBatchedArgMode> arg_modes;
   auto arg_modes_arr = f->GetAttr<Array<Integer>>("batched_arg_modes", Array<Integer>()).value();
-  bool is_batched_prim_func = f->GetAttr<Bool>(tir::attr::kDBBatchedPrimFunc, Bool(false)).value();
   for (auto i : arg_modes_arr) {
     arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
   }
 
-  // if (name == "vm_mod_fused_layout_transform_batched") {
-  // if (is_execution_kernel) {
-  std::cout << "[LLVM] Function: " << name << std::endl;
-  // std::cout << f << std::endl;
-  // }
+  if (name == "vm_mod_fused_add_batched") {
+    std::cout << "[LLVM] Function: " << name << std::endl;
+    std::cout << f << std::endl;
+  }
   std::vector<bool> param_retain(f->params.size(), true);
-  bool print_param_data = false;
-  if (batched_function && !coarsened_function) {
-    int start = is_batched_prim_func ? 1 : 0;
+  bool print_param_data = true;
+  if (is_batched_function && compile_at_coarsened_granularity && !is_coarsened_function &&
+      has_unpacked_api) {
+    int start = is_batched_function ? 1 : 0;
     int ctr = 0;
     for (size_t i = start; i < f->params.size();) {
       switch (arg_modes[ctr++]) {
@@ -818,7 +822,6 @@ void CodeGenLLVM::CreateSerialFor(llvm::Value* begin, llvm::Value* end, llvm::Va
                          md_very_likely_branch_);
   builder_->SetInsertPoint(for_body);
   this->VisitStmt(body);
-  std::cout << "[LLVM] Erasing var map " << loop_var << " " << loop_var.get() << std::endl;
   var_map_.erase(loop_var.get());
   llvm::Value* loop_next = CreateAdd(loop_var.dtype(), loop_value, stride);
   loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
@@ -1148,7 +1151,6 @@ void CodeGenLLVM::Scalarize(const PrimExpr& e, std::function<void(int i, llvm::V
 llvm::Value* CodeGenLLVM::VisitExpr_(const VarNode* op) { return GetVarValue(op); }
 
 llvm::Value* CodeGenLLVM::VisitExpr_(const CastNode* op) {
-  // std::cout << "[LLVM] Cast " << GetRef<PrimExpr>(op) << std::endl;
   return CreateCast(op->value.dtype(), op->dtype, MakeValue(op->value));
 }
 llvm::Value* CodeGenLLVM::VisitExpr_(const IntImmNode* op) {
@@ -1414,9 +1416,9 @@ llvm::Value* CodeGenLLVM::VisitExpr_(const CallNode* op) {
       ICHECK(it != functions_map_.end());
       llvm::Function* callee = it->second;
       std::vector<llvm::Value*> arg_value;
-      llvm::outs() << "FUNC: " << callee_name.c_str() << ": ";
-      callee->getFunctionType()->print(llvm::outs());
-      llvm::outs() << "\n";
+      // llvm::outs() << "FUNC: " << callee_name.c_str() << ": ";
+      // callee->getFunctionType()->print(llvm::outs());
+      // llvm::outs() << "\n";
       for (size_t i = 1; i < op->args.size(); ++i) {
         // std::cout << "[CALL]  Arg " << op->args[i] << " " << GetType(op->args[i]) << std::endl;
         llvm::Value* loaded_void_ptr_arg = MakeValue(op->args[i]);

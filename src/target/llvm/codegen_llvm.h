@@ -439,10 +439,8 @@ void CodeGenLLVM::AddFunctionsOrdered(IterType begin, IterType end, ConvType pfu
     funcs.push_back(pfunc(*it));
   }
   std::sort(funcs.begin(), funcs.end(), [](PrimFunc func_a, PrimFunc func_b) {
-    bool coarsened_prim_func_a =
-        func_a->GetAttr(tir::attr::kDBCoarseWrapperPrimFunc, Bool(false)).value().operator bool();
-    bool coarsened_prim_func_b =
-        func_b->GetAttr(tir::attr::kDBCoarseWrapperPrimFunc, Bool(false)).value().operator bool();
+    bool coarsened_prim_func_a = func_a->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc);
+    bool coarsened_prim_func_b = func_b->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc);
     std::string name_a = func_a->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
     std::string name_b = func_b->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
     if (coarsened_prim_func_a == coarsened_prim_func_b) {

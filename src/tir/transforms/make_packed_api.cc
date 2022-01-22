@@ -137,7 +137,7 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
       scatter_cleaned_params.push_back(var);
     }
   }
-  std::cout << "[MPA] Params " << scatter_cleaned_params << std::endl;
+  // std::cout << "[MPA] Params " << scatter_cleaned_params << std::endl;
 
   // int num_args = static_cast<int>(func_ptr->params.size());
   int num_args = static_cast<int>(scatter_cleaned_params.size());
@@ -208,12 +208,13 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
 
     auto it = func_ptr->buffer_map.find(param);
     if (it != func_ptr->buffer_map.end()) {
-      std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << (*it).second->data.get()
-                << std::endl;
+      // std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << (*it).second->data.get()
+      //           << std::endl;
       buffer_def.emplace_back(v_arg, (*it).second);
     } else {
-      std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << param << " " << param.get()
-                << std::endl;
+      // std::cout << "[MPA] Arg " << v_arg << " " << v_arg.get() << " " << param << " " <<
+      // param.get()
+      // << std::endl;
       var_def.emplace_back(v_arg, param);
     }
     if (i < num_packed_args) {

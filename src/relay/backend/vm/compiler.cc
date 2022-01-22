@@ -1064,7 +1064,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
   // rewrite it in C++ and complete it.
   // // Perform memory planning in order to coalesce/reduce allocations.
 
-  // pass_seqs.push_back(transform::CPPMemoryPlan());
+  pass_seqs.push_back(transform::CPPMemoryPlan());
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1213,7 +1213,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

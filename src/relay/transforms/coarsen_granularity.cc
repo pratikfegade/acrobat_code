@@ -789,9 +789,9 @@ class Coarsener : public ExprMutator {
         attrs.Set("global_symbol", runtime::String(name));
         attrs.Set("hash", String(s.str()));
         attrs.Set(tvm::attr::kTarget, target);
-        attrs.Set(tir::attr::kDBCoarseWrapperPrimFunc, Bool(true));
+        attrs.Set(tir::attr::kDBCoarseWrapperPrimFunc, Integer(1));
         if (batched) {
-          attrs.Set(tir::attr::kDBBatchedPrimFunc, Bool(true));
+          attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));
         }
         return WithAttrs(std::move(func), attrs);
       };
@@ -810,7 +810,7 @@ class Coarsener : public ExprMutator {
       GlobalVar prim_func_var(name, VoidType());
       auto call = InvokeTVMOp(prim_func_var, Tuple(call_args), Tuple(Array<Expr>()),
                               DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
-                                         {tir::attr::kDBCoarseWrapperPrimFunc, Bool(true)}}));
+                                         {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}}));
       prim_func = add_attrs_to_wrapper_func(prim_func, name, false);
       prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 

@@ -49,7 +49,7 @@ void TestNDArray(const NDArray& array) {
     total_nums *= d;
   }
 
-  std::cout << "[VMU] Array size " << total_nums << std::endl;
+  // std::cout << "[VMU] Array size " << total_nums << std::endl;
 
   for (size_t j = 0; j < total_nums; ++j) {
     static_cast<float*>(array->data)[j] = 1.0;
@@ -62,24 +62,26 @@ NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
   for (size_t i = 0; i < size; ++i) {
     raw_ptrs[i] = arrays[i]->data;
   }
+  std::cout << "[VMU] Allocating pointer array " << size << std::endl;
   auto result = NDArray::Empty(
       ShapeTuple({size}), DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, arrays[0]->device);
+  std::cout << "[VMU] Allocated pointer array " << size << std::endl;
   result.CopyFromBytes(raw_ptrs.data(), size * sizeof(void*));
 
-  {
-    size_t total_nums = 1;
-    for (auto d : arrays[0].Shape()) {
-      total_nums *= d;
-    }
+  // {
+  //   size_t total_nums = 1;
+  //   for (auto d : arrays[0].Shape()) {
+  //     total_nums *= d;
+  //   }
 
-    std::cout << "[VMU] Array size " << total_nums << std::endl;
+  //   std::cout << "[VMU] Array size " << total_nums << std::endl;
 
-    for (size_t i = 0; i < size; ++i) {
-      for (size_t j = 0; j < total_nums; ++j) {
-        static_cast<float**>(result->data)[i][j] = 1.0;
-      }
-    }
-  }
+  //   for (size_t i = 0; i < size; ++i) {
+  //     for (size_t j = 0; j < total_nums; ++j) {
+  //       static_cast<float**>(result->data)[i][j] = 1.0;
+  //     }
+  //   }
+  // }
 
   return result;
 }
@@ -121,17 +123,20 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
   std::vector<int> codes(arity + 1);
   std::vector<NDArray> arg_holder(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
-  // std::cout << "Executing " << arity << std::endl;
   setter(0, batch_size);
-  for (Index i = 0; i < arity; i++) {
+  std::cout << "[VMU]  BatchSize 0 " << batch_size << std::endl;
+  int ctr = 1;
+  for (Index i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
       case kIgnore: {
         break;
       }
       case kReuse: {
         arg_holder[i] = nodes[0]->args_[i];
-        setter(i + 1, nodes[0]->args_[i]);
-        std::cout << "[VMU]  ArgReuse " << ShapeToString(nodes[0]->args_[i].Shape()) << std::endl;
+        setter(ctr, nodes[0]->args_[i]);
+        std::cout << "[VMU]  ArgReuse " << ctr << " " << ShapeToString(nodes[0]->args_[i].Shape())
+                  << std::endl;
+        ctr += 1;
         break;
       }
       case kScatter: {
@@ -141,8 +146,10 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         }
         auto ptr_array = CreatePointerNDArray(to_scatter);
         arg_holder[i] = ptr_array;
-        setter(i + 1, ptr_array);
-        std::cout << "[VMU]  ArgScatter " << ShapeToString(ptr_array.Shape()) << std::endl;
+        setter(ctr, ptr_array);
+        std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+                  << std::endl;
+        ctr += 1;
         break;
       }
       case kConcat: {
@@ -152,116 +159,10 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
     }
   }
 
+  std::cout << "[VMU] Calling " << ctr << std::endl;
   TVMRetValue rv;
-  func.CallPacked(TVMArgs(values.data(), codes.data(), arity + 1), &rv);
+  func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
 }
-
-// void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
-//                     const std::vector<ObjectRef>& args,
-//                     const std::vector<DBBatchedArgMode>& arg_modes, bool batched,
-//                     bool scattered_kernels) {
-//   size_t arity = 0;
-//   if (batched) {
-//     arity++;
-//   }
-//   for (Index i = 0; i < arg_count; i++) {
-//     if (const auto* obj = args[i].as<ADTObj>()) {
-//       arity += obj->size;
-//     } else {
-//       ++arity;
-//     }
-//   }
-
-//   if (batched) {
-//     ICHECK_EQ(arg_modes.size() + 1, arity) << arg_modes.size() << " " << arity << " " <<
-//     arg_count;
-//   }
-
-//   if (batched) {
-//     arity = 2 * arity - 1;
-//   }
-//   std::vector<ObjectRef> new_args;
-//   new_args.reserve(arity);
-//   std::vector<TVMValue> values(arity);
-//   std::vector<int> codes(arity);
-//   runtime::TVMArgsSetter setter(values.data(), codes.data());
-//   bool is_empty_output = false;
-//   int32_t batch_size = 1;
-//   int32_t counter = 0;
-//   if (batched) {
-//     setter(counter++, batch_size);
-//   }
-//   int32_t idx = 0;
-//   for (Index i = 0; i < arg_count; i++) {
-//     if (const auto* dt_cell = args[i].as<ADTObj>()) {
-//       for (size_t fi = 0; fi < dt_cell->size; ++fi) {
-//         if (batched && arg_modes.size() > 0 && arg_modes[idx++] == kIgnore) {
-//           continue;
-//         }
-
-//         auto obj = (*dt_cell)[fi];
-//         auto nd_array = Downcast<NDArray>(obj);
-
-//         if (batched) {
-//           auto old_shape = nd_array.Shape();
-//           std::vector<Index> new_shape_vec;
-//           new_shape_vec.push_back(batch_size);
-//           for (auto dim : old_shape) {
-//             new_shape_vec.push_back(dim);
-//           }
-//           nd_array = nd_array.CreateView(ShapeTuple(new_shape_vec), nd_array.DataType());
-//         }
-//         new_args.push_back(nd_array);
-//         setter(counter++, nd_array);
-//       }
-//     } else {
-//       auto nd_array = Downcast<NDArray>(args[i]);
-//       // We can safely skip CallPacked if there is only one
-//       // output and it is empty.
-//       if (i == arg_count - 1 && output_size == 1) {
-//         for (const auto& dim : nd_array.Shape()) {
-//           if (!dim) {
-//             is_empty_output = true;
-//             break;
-//           }
-//         }
-//       }
-
-//       if (batched && arg_modes.size() > 0 && arg_modes[idx++] == kIgnore) {
-//         continue;
-//       }
-
-//       if (batched) {
-//         auto old_shape = nd_array.Shape();
-//         std::vector<Index> new_shape_vec;
-//         new_shape_vec.push_back(batch_size);
-//         for (auto dim : old_shape) {
-//           new_shape_vec.push_back(dim);
-//         }
-//         nd_array = nd_array.CreateView(ShapeTuple(new_shape_vec), nd_array.DataType());
-//       }
-//       new_args.push_back(nd_array);
-//       setter(counter++, nd_array);
-//     }
-//   }
-
-//   // if (scattered_kernels) {
-//   //   int total_args = new_args.size();
-//   //   for (auto i = 0; i < total_args; ++i) {
-//   //     auto nd_array = Downcast<NDArray>(new_args[i]);
-//   //     auto ptr_nd_array = CreatePointerNDArray({nd_array});
-//   //     setter(counter++, ptr_nd_array);
-//   //     new_args.push_back(ptr_nd_array);
-//   //   }
-//   // }
-
-//   std::cout << "[VMU]   Invoke " << counter << " " << batched << std::endl;
-
-//   if (!is_empty_output) {
-//     TVMRetValue rv;
-//     func.CallPacked(TVMArgs(values.data(), codes.data(), counter), &rv);
-//   }
-// }
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const std::vector<ObjectRef>& args,
@@ -305,7 +206,6 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
   }
 
   if (!is_empty_output) {
-    std::cout << "YELLO " << std::endl;
     TVMRetValue rv;
     func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
   }

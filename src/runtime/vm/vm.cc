@@ -571,8 +571,8 @@ void VirtualMachine::RunLoop() {
       }
       case Opcode::InvokePacked: {
         VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-        std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
-                  << std::endl;
+        // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
+        // << std::endl;
         ICHECK_LE(instr.packed_index, packed_funcs_.size());
         const auto& arity = instr.arity;
         std::vector<ObjectRef> args;

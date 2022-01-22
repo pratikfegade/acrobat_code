@@ -444,9 +444,9 @@ class TECompilerImpl : public TECompilerNode {
           if (func.as<tir::PrimFuncNode>()) {
             Map<String, ObjectRef> attrs;
             if (batched) {
-              attrs.Set(tir::attr::kDBBatchedPrimFunc, Bool(true));
+              attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));
             }
-            attrs.Set(tir::attr::kDBKernelPrimFunc, Bool(true));
+            attrs.Set(tir::attr::kDBKernelPrimFunc, Integer(1));
             // std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
             func = WithAttrs(std::move(Downcast<tir::PrimFunc>(func)), attrs);
           }
@@ -1272,18 +1272,27 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
       per_target_modules;
   for (const auto& kv : mod->functions) {
     const GlobalVar& var = kv.first;
-    const BaseFunc& func = kv.second;
-    if (func->IsInstance<tir::PrimFuncNode>()) {
+    const BaseFunc& base_func = kv.second;
+    if (base_func->IsInstance<tir::PrimFuncNode>()) {
+      tir::PrimFunc func = Downcast<tir::PrimFunc>(base_func);
       // std::cout << "[PTM] Func " << var->name_hint << std::endl;
       // Extract target
       Optional<Target> opt_target = func->GetAttr<Target>(tvm::attr::kTarget);
       ICHECK(opt_target) << "Target should be set at this point";
 
       Target target = opt_target.value();
-      if (for_execution && func->HasNonzeroAttr(tvm::tir::attr::kDBKernelPrimFunc)) {
+      bool coarsened_granularity =
+          PassContext::Current()
+              ->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false))
+              .value();
+      if (coarsened_granularity && for_execution &&
+          func->HasNonzeroAttr(tvm::tir::attr::kDBKernelPrimFunc)) {
         auto target_map = target->Export();
         target_map.Set("db-unpacked-api", Bool(true));
         target = Target(target_map);
+        func = WithAttr(std::move(func), tvm::tir::attr::kDBUnpackedAPI, tvm::Integer(1));
+      } else {
+        func = WithAttr(std::move(func), tvm::tir::attr::kDBUnpackedAPI, tvm::Integer(0));
       }
 
       auto add_db_meta_data = [](const IRModule& mod, IRModule& target_module,
@@ -1312,10 +1321,10 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
         target_module->Add(var, func);
         add_db_meta_data(mod, target_module, var);
       }
-    } else if (!func->IsInstance<relay::FunctionNode>()) {
+    } else if (!base_func->IsInstance<relay::FunctionNode>()) {
       LOG(FATAL)
           << "The function types in the IRModule should be RelayFunction or PrimFunc, but got "
-          << func->GetTypeKey();
+          << base_func->GetTypeKey();
     }
   }
 

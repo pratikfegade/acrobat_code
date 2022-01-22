@@ -343,7 +343,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
         << verify_errors.str();
     target_ = target;
     mptr_ = module_.get();
-    module_->print(llvm::outs(), nullptr);
+    // module_->print(llvm::outs(), nullptr);
   }
 
   void Init(std::unique_ptr<llvm::Module> module, std::shared_ptr<llvm::LLVMContext> ctx) {

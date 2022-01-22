@@ -1158,8 +1158,6 @@ class StorageFlattener : public StmtExprMutator {
     Buffer scatter_buffer;
     if (scatter_buffer_map_.count(key->data)) {
       scatter_buffer = scatter_buffer_map_.at(key->data);
-      std::cout << "[SF] Scatter bufferS " << scatter_buffer->data << " "
-                << scatter_buffer->data.get() << std::endl;
     }
 
     Stmt body = e.buffer.vstore(op->indices, op->value, scatter_buffer);
@@ -1286,8 +1284,6 @@ class StorageFlattener : public StmtExprMutator {
     Buffer scatter_buffer;
     if (scatter_buffer_map_.count(key->data)) {
       scatter_buffer = scatter_buffer_map_.at(key->data);
-      std::cout << "[SF] Scatter bufferL " << scatter_buffer->data << " "
-                << scatter_buffer->data.get() << std::endl;
     }
 
     auto it = buf_map_.find(key);
@@ -1298,7 +1294,6 @@ class StorageFlattener : public StmtExprMutator {
     if (create_bound_attributes_ && ShapeIsValid(e.buffer->shape)) {
       shape_collector_.push_back(std::make_pair(e.buffer->data, e.buffer->shape));
     }
-    std::cout << "[SF] BufferL " << e.buffer->data << " " << e.buffer->data.get() << std::endl;
     return e.buffer.vload(op->indices, e.buffer->dtype, scatter_buffer);
   }
 
@@ -1510,10 +1505,6 @@ PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_at
   // entire module and apply the Sequential transform.
   Optional<Bool> from_legacy_te_schedule = func->GetAttr("from_legacy_te_schedule", Bool(false));
   if (from_legacy_te_schedule.value()) {
-    for (auto p : func->params) {
-      std::cout << "[SF] Params " << p << " " << p.get() << std::endl;
-    }
-
     auto seq = transform::Sequential(
         {
             BufferShapeLegalize::Pass(),
