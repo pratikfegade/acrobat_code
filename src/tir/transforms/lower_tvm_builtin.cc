@@ -218,6 +218,14 @@ class BuiltinLower : public StmtExprMutator {
       return StmtExprMutator::VisitExpr_(op);
     }
   }
+  Stmt VisitStmt_(const EvaluateNode* op) final {
+    if (auto call = op->value.as<CallNode>()) {
+      if (call->op.same_as(builtin::tvm_call_unpacked_from_packed())) {
+        return MakeUnpackedCallInPackedFuncStmts(call);
+      }
+    }
+    return StmtExprMutator::VisitStmt_(op);
+  }
   // call shape
   PrimExpr MakeShape(const CallNode* op) {
     // if args.size() == 0, it represents a scalar shape ()
@@ -417,6 +425,33 @@ class BuiltinLower : public StmtExprMutator {
         Call(op->dtype, builtin::tvm_call_unpacked_from_packed_lowered(), raw_args, op->span);
     for (auto& pair : let_binds) {
       body = Let(pair.first, pair.second, body);
+    }
+    return body;
+  }
+
+  Stmt MakeUnpackedCallInPackedFuncStmts(const CallNode* op) {
+    ICHECK_GE(op->args.size(), 1);
+    Array<PrimExpr> raw_args;
+    raw_args.push_back(op->args[0]);
+    bool batched = IsDBBatchedPrimFuncCall(op);
+    size_t tensor_arg_start = 1;
+    if (batched) {
+      tensor_arg_start = 2;
+      raw_args.push_back(op->args[1]);
+    }
+
+    std::vector<std::pair<Var, PrimExpr>> let_binds;
+    for (size_t i = tensor_arg_start; i < op->args.size(); ++i) {
+      Var raw_arg("raw_" + std::to_string(i), PointerType(PrimType(DataType::Float(32))));
+      let_binds.push_back({raw_arg, TVMStructGet(DataType::Handle(), Downcast<Var>(op->args[i]), 0,
+                                                 builtin::kArrData)});
+      raw_args.push_back(raw_arg);
+    }
+
+    Stmt body = Evaluate(
+        Call(op->dtype, builtin::tvm_call_unpacked_from_packed_lowered(), raw_args, op->span));
+    for (auto& pair : let_binds) {
+      body = LetStmt(pair.first, pair.second, body);
     }
     return body;
   }

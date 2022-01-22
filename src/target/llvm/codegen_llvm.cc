@@ -132,12 +132,12 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
     arg_modes.push_back(static_cast<tvm::runtime::vm::DBBatchedArgMode>(i->value));
   }
 
-  if (name == "vm_mod_fused_add_batched") {
+  if (is_execution_kernel) {
     std::cout << "[LLVM] Function: " << name << std::endl;
     std::cout << f << std::endl;
   }
   std::vector<bool> param_retain(f->params.size(), true);
-  bool print_param_data = true;
+  bool print_param_data = false;
   if (is_batched_function && compile_at_coarsened_granularity && !is_coarsened_function &&
       has_unpacked_api) {
     int start = is_batched_function ? 1 : 0;
@@ -1683,9 +1683,6 @@ void CodeGenLLVM::VisitStmt_(const LetStmtNode* op) {
   }
   auto var_value = MakeValue(op->value);
   var_map_[v] = var_value;
-  if (v->name_hint == "Optr") {
-    std::cout << "[LLVM]  Let: " << op->var << " " << op->var.get() << std::endl;
-  }
   analyzer_->Bind(op->var, op->value);
   if (alloc_storage_info_.count(v) && alloc_storage_info_[v].alignment > 1) {
     builder_->CreateAlignmentAssumption(*data_layout_, GetVarValue(v),

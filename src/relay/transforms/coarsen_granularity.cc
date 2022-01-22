@@ -547,6 +547,15 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) final {
+    bool print = (bindings.size() < 5);
+
+    if (print) {
+      for (auto pair : bindings) {
+        std::cout << "[CG] Binding: " << pair.first->vid->name_hint << " = " << pair.second
+                  << std::endl;
+      }
+    }
+
     /* Prologue: Initialization *************************************************************/
 
     RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
@@ -600,10 +609,19 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     /* Backward pass *************************************************************/
 
     auto merge_and_set_arg_mode = [&](const relay::Var& var, Integer val) {
+      if (print) {
+        std::cout << "[CG]  MaS: " << var->vid->name_hint << " = " << val << std::endl;
+      }
       auto it = arg_mode_states_.find(var);
       if (it != arg_mode_states_.end()) {
         auto old_val = (*it).second;
         val = Integer(std::max(val->value, old_val->value));
+        if (print) {
+          std::cout << "[CG]   Merging: " << old_val << std::endl;
+        }
+      }
+      if (print) {
+        std::cout << "[CG]   Setting: " << val << std::endl;
       }
       arg_mode_states_.Set(var, val);
     };
@@ -613,6 +631,10 @@ class TIRLowererBatched : public AbstractTIRLowerer {
       auto rvalue = it->second;
 
       if (auto call = rvalue.as<CallNode>()) {
+        if (print) {
+          std::cout << "[CG]  Visiting: " << rvalue << " " << FlattenTuple(call->args[1])
+                    << std::endl;
+        }
         auto callee_gv = Downcast<GlobalVar>(call->args[0]);
         auto iit = mod_->batched_prim_funcs.find(callee_gv);
         ICHECK(iit != mod_->batched_prim_funcs.end()) << callee_gv->name_hint;
@@ -626,7 +648,12 @@ class TIRLowererBatched : public AbstractTIRLowerer {
           auto arg_var = Downcast<relay::Var>(arg);
           auto arg_mode = arg_modes[idx++]->value;
           merge_and_set_arg_mode(arg_var, arg_mode);
-          // std::cout << "[CoG] ArgMode " << arg_var << " " << arg_mode << std::endl;
+        }
+        for (auto arg : FlattenTuple(call->args[2])) {
+          ICHECK(arg.as<relay::VarNode>());
+          auto arg_var = Downcast<relay::Var>(arg);
+          auto arg_mode = arg_modes[idx++]->value;
+          merge_and_set_arg_mode(arg_var, arg_mode);
         }
       }
     }
@@ -647,7 +674,10 @@ class TIRLowererBatched : public AbstractTIRLowerer {
                            : (scattered_kernels_ ? runtime::vm::DBBatchedArgMode::kScatter
                                                  : runtime::vm::DBBatchedArgMode::kConcat));
       prim_func_arg_modes.push_back(arg_mode);
-      // std::cout << "[CoG]  CreatingVar " << param << " " << param->type_annotation << std::endl;
+      if (print) {
+        std::cout << "[CG]  ArgMode: " << rvar->vid->name_hint << " " << param->name_hint << " "
+                  << arg_mode << " " << (iit != arg_mode_states_.end()) << std::endl;
+      }
     }
 
     Array<tir::Stmt> tir_stmts;

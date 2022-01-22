@@ -357,7 +357,7 @@ class TECompilerImpl : public TECompilerNode {
       auto create_pointer_buffer = [](const te::Tensor& tensor) {
         std::string name = tensor->op->name + "ptr";
         auto var_type = PointerType(PointerType(PrimType(tensor->dtype), ""), "");
-        // std::cout << "[BATCHED]   Buffer: " << name << " " << var_type << std::endl;
+        std::cout << "[BATCHED]   Buffer: " << name << " " << var_type << std::endl;
         return tir::Buffer(tir::Var(name, var_type), DataType::Handle(),
                            Array<PrimExpr>({tensor->shape[0]}), Array<PrimExpr>(), 0, name, 0, 0,
                            tir::kDefault);
@@ -391,7 +391,7 @@ class TECompilerImpl : public TECompilerNode {
               te::Tensor arg = (ctr < cached_func->inputs.size())
                                    ? cached_func->inputs[ctr]
                                    : cached_func->outputs[ctr - cached_func->inputs.size()];
-              // std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
+              std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
               auto scatter_buffer = create_pointer_buffer(arg);
               scatter_buffers.Set(arg, scatter_buffer);
             }
@@ -457,8 +457,9 @@ class TECompilerImpl : public TECompilerNode {
 
       lower_scheduled_function(value->cached_func, false);
       if (value->batched_cached_func.defined()) {
-        // std::cout << "[TEC] Creating args for " << value->cached_func->prim_fn_var->name_hint
-        // << std::endl;
+        std::cout << "[TEC] Creating args for "
+                  << value->batched_cached_func->prim_fn_var->name_hint << " "
+                  << value->batched_cached_func->batched_arg_mode << std::endl;
         lower_scheduled_function(value->batched_cached_func, true);
       }
     }

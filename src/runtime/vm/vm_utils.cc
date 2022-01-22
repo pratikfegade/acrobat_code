@@ -124,7 +124,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
   std::vector<NDArray> arg_holder(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   setter(0, batch_size);
-  std::cout << "[VMU]  BatchSize 0 " << batch_size << std::endl;
+  // std::cout << "[VMU]  BatchSize 0 " << batch_size << std::endl;
   int ctr = 1;
   for (Index i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
@@ -134,8 +134,9 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
       case kReuse: {
         arg_holder[i] = nodes[0]->args_[i];
         setter(ctr, nodes[0]->args_[i]);
-        std::cout << "[VMU]  ArgReuse " << ctr << " " << ShapeToString(nodes[0]->args_[i].Shape())
-                  << std::endl;
+        // std::cout << "[VMU]  ArgReuse " << ctr << " " <<
+        // ShapeToString(nodes[0]->args_[i].Shape())
+        // << std::endl;
         ctr += 1;
         break;
       }
@@ -147,8 +148,8 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         auto ptr_array = CreatePointerNDArray(to_scatter);
         arg_holder[i] = ptr_array;
         setter(ctr, ptr_array);
-        std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
-                  << std::endl;
+        // std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+        // << std::endl;
         ctr += 1;
         break;
       }
@@ -159,7 +160,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
     }
   }
 
-  std::cout << "[VMU] Calling " << ctr << std::endl;
+  // std::cout << "[VMU] Calling " << ctr << std::endl;
   TVMRetValue rv;
   func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
 }
