@@ -85,10 +85,14 @@ PackedFunc Executable::GetFunction(const std::string& name, const ObjectPtr<Obje
   } else if (name == "vm_load_executable") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       VMExecutionOptions options = args[0];
-      auto vm = make_object<VirtualMachine>();
-      // auto vm = make_object<ConcurrentVirtualMachine>();
-      vm->InitSharedState();
+      ObjectPtr<VirtualMachine> vm;
+      if (options->concurrent_execution) {
+        vm = make_object<ConcurrentVirtualMachine>();
+      } else {
+        vm = make_object<VirtualMachine>();
+      }
       vm->SetExecutionOptions(options);
+      vm->InitSharedState();
       vm->LoadExecutable(this);
       *rv = Module(vm);
     });

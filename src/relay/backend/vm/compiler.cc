@@ -64,6 +64,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_coarsen_granularity", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_scattered_kernels", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_concurrent_execution", Bool);
 
 namespace relay {
 
@@ -1010,7 +1011,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   for (auto pair : arg_modes) {
     ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
     auto index = exec_->primitive_map.at(pair.first->name_hint);
-    if (exec_->batched_func_arg_mode.size() <= index) {
+    if (static_cast<Index>(exec_->batched_func_arg_mode.size()) <= index) {
       exec_->batched_func_arg_mode.resize(index + 1);
     }
     auto modes = pair.second;
@@ -1213,7 +1214,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, true));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

@@ -107,7 +107,7 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
 
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
-    InvokePackedFnUnrolled(vm_->shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
+    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
                            node.output_size_, node.args_);
   }
   nodes_.clear();
@@ -116,7 +116,7 @@ void LazyExecutor::Execute() {
 void LazyExecutor::BatchedExecute() {
   std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
   for (OpNode& node : nodes_) {
-    for (size_t i = node.OutputStart(); i < node.OutputEnd(); ++i) {
+    for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
       output_tensor_to_node[node.args_[i]] = node.id_;
     }
   }
@@ -128,7 +128,7 @@ void LazyExecutor::BatchedExecute() {
   for (size_t i = 0; i < num_nodes; ++i) {
     OpNode& node = nodes_[i];
     int max_depth = 0;
-    for (size_t j = node.InputStart(); j < node.InputEnd(); ++j) {
+    for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
       auto it = output_tensor_to_node.find(node.args_[j]);
       if (it != output_tensor_to_node.end()) {
         auto input_node_id = it->second;
@@ -161,17 +161,17 @@ void LazyExecutor::BatchedExecute() {
 
       // if (nodes.size() == 1) {
       //   // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-      //   InvokePackedFnUnrolled(vm_->shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
+      //   InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
       //                          nodes[0]->output_size_, nodes[0]->args_);
       // } else {
-      auto batched_func_idx = vm_->shared_state_->batched_funcs_[func_idx];
+      auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
       // std::cout << "[VMU] Executing " << batched_func_idx << " " << nodes.size() << std::endl;
-      // for (auto i : vm_->shared_state_->batched_func_arg_mode_[batched_func_idx]) {
+      // for (auto i : vm_shared_state_->batched_func_arg_mode_[batched_func_idx]) {
       //   std::cout << "[VMU]   ArgMode " << i << std::endl;
       // }
-      InvokePackedFnBatchedUnrolled(vm_->shared_state_->packed_funcs_[batched_func_idx],
+      InvokePackedFnBatchedUnrolled(vm_shared_state_->packed_funcs_[batched_func_idx],
                                     nodes[0]->arg_count_, nodes[0]->output_size_,
-                                    vm_->shared_state_->batched_func_arg_mode_[batched_func_idx],
+                                    vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
                                     nodes);
       // }
     }

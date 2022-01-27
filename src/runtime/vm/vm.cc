@@ -48,13 +48,17 @@ TVM_REGISTER_OBJECT_TYPE(VMClosureObj);
 TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
 
 VMExecutionOptions::VMExecutionOptions(bool lazy_execution, bool batched_execution,
-                                       bool scattered_kernels)
-    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(lazy_execution, batched_execution,
-                                                             scattered_kernels)) {}
+                                       bool scattered_kernels, bool concurrent_execution,
+                                       size_t batch_size)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(
+          lazy_execution, batched_execution, scattered_kernels, concurrent_execution, batch_size)) {
+}
 
 TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions")
-    .set_body_typed([](bool lazy_execution, bool batched_execution, bool scattered_kernels) {
-      return VMExecutionOptions(lazy_execution, batched_execution, scattered_kernels);
+    .set_body_typed([](bool lazy_execution, bool batched_execution, bool scattered_kernels,
+                       bool concurrent_execution, size_t batch_size) {
+      return VMExecutionOptions(lazy_execution, batched_execution, scattered_kernels,
+                                concurrent_execution, batch_size);
     });
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
@@ -262,7 +266,8 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, i
   ICHECK_EQ(param_names.size(), vm_func.param_device_indexes.size())
       << "The number of provided parameters doesn't match the number of assigned devices";
   std::vector<ObjectRef> func_args(param_names.size());
-  for (int i = offset; i < num_args; ++i) {
+  std::cout << "[VM] Setting inputs for " << func_name << std::endl;
+  for (int i = offset; i < num_args + offset; ++i) {
     Device dev = GetDevice(vm_func.param_device_indexes[i - offset]);
 
     if (args[i].type_code() == kTVMDLTensorHandle) {
@@ -288,6 +293,7 @@ void VirtualMachine::InitSharedState() {
   if (!shared_state_) {
     shared_state_ = new VMSharedState();
   }
+  this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
 }
 
 void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
@@ -311,7 +317,6 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   //   std::cout << "[VM] Executing unscattered kernels" << std::endl;
   // }
   this->scattered_kernels_ = options->scattered_kernels;
-  this->shared_state_->lazy_executor_.vm_ = this;
 }
 
 inline Device VirtualMachine::GetDevice(Index device_index) const {
@@ -417,12 +422,12 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     shared_state_->packed_funcs_[packed_index] = pf;
 
-    // if (batched_execution_) {
-    //   std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-    //             << shared_state_->exec_->batched_func_arg_mode[packed_index].size() << std::endl;
-    // } else {
-    //   std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
-    // }
+    if (batched_execution_) {
+      std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
+                << shared_state_->exec_->batched_func_arg_mode[packed_index].size() << std::endl;
+    } else {
+      std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
+    }
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
@@ -488,6 +493,7 @@ void VirtualMachine::Init(const std::vector<Device>& physical_devices,
 }
 
 inline void VirtualMachine::WriteRegister(Index r, const ObjectRef& val) {
+  // std::cout << "[VM] Wrtiting to register " << r << " " << val.defined() << std::endl;
   frames_.back().register_file[r] = val;
 }
 
@@ -541,6 +547,7 @@ void VirtualMachine::RunLoop() {
 bool VirtualMachine::RunOneIteration(int frame_start) {
   auto const& instr = code_[this->pc_];
   VLOG(2) << "Executing(" << pc_ << "): " << instr;
+
   switch (instr.op) {
     case Opcode::Move: {
       ObjectRef from_obj;
@@ -597,14 +604,16 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
     }
     case Opcode::InvokePacked: {
       VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-      // std::cout << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity
+      // std::cout << vm_id_ << " InvokedPacked " << instr.packed_index << " arity=" << instr.arity
       // << std::endl;
       ICHECK_LE(instr.packed_index, shared_state_->packed_funcs_.size());
       const auto& arity = instr.arity;
       std::vector<ObjectRef> args;
       for (Index i = 0; i < arity; ++i) {
         VLOG(2) << "arg" << i << " $" << instr.packed_args[i];
+        // std::cout << "[VM] Reading register " << instr.packed_args[i] << std::endl;
         auto arg = ReadRegister(instr.packed_args[i]);
+        ICHECK(arg.defined());
         args.push_back(arg);
       }
 
@@ -894,6 +903,7 @@ void ConcurrentVirtualMachine::Init(const std::vector<Device>& physical_devices,
 }
 
 void ConcurrentVirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
+  this->num_vms_ = options->batch_size;
   VirtualMachine::SetExecutionOptions(options);
   for (auto& vm : vms_) {
     GetVMFromModule(vm)->SetExecutionOptions(options);
@@ -903,11 +913,10 @@ void ConcurrentVirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
 void ConcurrentVirtualMachine::InitSharedState() {
   this->concurrent_vm_ = true;
   VirtualMachine::InitSharedState();
-  for (size_t i = 0; i < 2; ++i) {
+  for (size_t i = 0; i < num_vms_; ++i) {
     auto vm_ptr = make_object<VirtualMachine>();
+    vm_ptr->vm_id_ = i;
     auto module = Module(vm_ptr);
-    // std::cout << "[VM] Creating VM: " << GetVMFromModule(module) << " " << vm_ptr.get()
-    // << std::endl;
     vms_.push_back(module);
   }
   for (auto& vm : vms_) {
@@ -916,17 +925,51 @@ void ConcurrentVirtualMachine::InitSharedState() {
   }
 }
 
+DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMachine* vm,
+                                                         int frame_start) {
+  // std::cout << "[CVM] Running a stage" << std::endl;
+  while (true) {
+    auto const& instr = vm->code_[vm->pc_];
+    // std::cout << "[CVM]  Next Instr " << static_cast<int>(instr.op) << " " << vm->pc_ <<
+    // std::endl;
+    if (instr.op == Opcode::InvokePacked) {
+      return kStageEnd;
+    }
+    if (vm->RunOneIteration(frame_start)) {
+      return kExecutionEnd;
+    }
+  }
+}
+
 void ConcurrentVirtualMachine::RunLoop() {
-  std::vector<bool> mask(vms_.size(), true);
+  std::vector<DBVMExecutionState> mask(vms_.size(), kRunning);
   int alive = vms_.size();
   int frame_start = GetVMFromModule(vms_[0])->frames_.size();
+
   while (alive > 0) {
+    // Run one control flow stage for all VMs
     for (size_t i = 0; i < vms_.size(); ++i) {
-      if (mask[i]) {
+      if (mask[i] != kExecutionEnd) {
+        ICHECK_EQ(mask[i], kRunning);
+        auto& vm = vms_[i];
+        auto stage_state = RunOneStage(i, GetVMFromModule(vm), frame_start);
+        mask[i] = stage_state;
+        if (stage_state == kExecutionEnd) {
+          alive--;
+        }
+      }
+    }
+
+    // Run all tensor ops
+    for (size_t i = 0; i < vms_.size(); ++i) {
+      if (mask[i] != kExecutionEnd) {
+        ICHECK_EQ(mask[i], kStageEnd);
         auto& vm = vms_[i];
         if (GetVMFromModule(vm)->RunOneIteration(frame_start)) {
-          alive--;
-          mask[i] = false;
+          --alive;
+          mask[i] = kExecutionEnd;
+        } else {
+          mask[i] = kRunning;
         }
       }
     }

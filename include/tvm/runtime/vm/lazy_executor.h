@@ -44,6 +44,7 @@ namespace runtime {
 namespace vm {
 
 class VirtualMachine;
+class VMSharedState;
 
 class OpNode {
  public:
@@ -86,8 +87,9 @@ class LazyExecutor {
  private:
   friend class VirtualMachine;
 
-  /*! \brief Pointer to the VM this executor is associated with */
-  const VirtualMachine* vm_;
+  /*! \brief Pointer to the shared state of the VM this executor is
+      associated with */
+  const VMSharedState* vm_shared_state_;
   /*! \brief list of nodes to execute */
   std::vector<OpNode> nodes_;
 };

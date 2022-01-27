@@ -54,12 +54,20 @@ class VMExecutionOptionsNode : public Object {
   bool batched_execution;
   /*! \brief whether the batched kernels operate on scattered tensors */
   bool scattered_kernels;
+  /*! \brief whether to launch multiple concurrent VMs, each
+   * corresponding to one batch element instance */
+  bool concurrent_execution;
+  /*! \brief the batch size to be used for execution */
+  size_t batch_size;
 
   VMExecutionOptionsNode() {}
-  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_, bool scattered_kernels_)
+  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_, bool scattered_kernels_,
+                         bool concurrent_execution_, size_t batch_size_)
       : lazy_execution(lazy_execution_),
         batched_execution(batched_execution_),
-        scattered_kernels(scattered_kernels_) {}
+        scattered_kernels(scattered_kernels_),
+        concurrent_execution(concurrent_execution_),
+        batch_size(batch_size_) {}
 
   static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
   static constexpr const char* _type_key = "VMExecutionOptions";
@@ -73,7 +81,8 @@ class VMExecutionOptions : public ObjectRef {
    * \brief constructor
    * \param lazy_execution whether to execute tensor operations lazily.
    */
-  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution, bool scattered_kernels);
+  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution, bool scattered_kernels,
+                             bool concurrent_execution, size_t batch_size);
   // declare VMExecutionOptions.
   TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
 };
@@ -165,6 +174,16 @@ struct VMFrame {
         code(code),
         register_file(register_file_size),
         caller_return_register(0) {}
+};
+
+/*!
+ * \brief Individual VM state when using dynamic batching with
+ * concurrent VM.
+ */
+enum DBVMExecutionState {
+  kRunning = 0,
+  kStageEnd = 1,
+  kExecutionEnd = 2,
 };
 
 /*!
@@ -418,6 +437,10 @@ class VirtualMachine : public runtime::ModuleNode {
    * \brief Whether the current VM object is a concurrent VM object
    */
   bool concurrent_vm_ = false;
+  /*!
+   * \brief VM ID. Used when one has multiple concurrent VMs
+   */
+  int vm_id_ = 0;
 };
 
 class ConcurrentVirtualMachine : public VirtualMachine {
@@ -455,6 +478,9 @@ class ConcurrentVirtualMachine : public VirtualMachine {
   /*! \brief Run VM dispatch loop. */
   void RunLoop() override;
 
+  /*! \brief Run one stage of the VM dispatch loop. */
+  DBVMExecutionState RunOneStage(size_t vm_id, VirtualMachine* vm, int frame_start);
+
   /*! \brief Run one iteration of the VM dispatch loop. */
   bool RunOneIteration(int frame_start) override;
 
@@ -488,6 +514,10 @@ class ConcurrentVirtualMachine : public VirtualMachine {
 
   /*! \brief The vms representing multiple concurrent executions. */
   std::vector<runtime::Module> vms_;
+
+  /*! \brief The batch size, or equivvalently the number of
+      coincurrent VMs to launch. */
+  size_t num_vms_;
 };
 
 }  // namespace vm

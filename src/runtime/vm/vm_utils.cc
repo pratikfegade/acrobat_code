@@ -45,11 +45,13 @@ namespace vm {
 
 void TestNDArray(const NDArray& array) {
   size_t total_nums = 1;
+  ICHECK(array.defined());
+  ICHECK(array.Shape().defined());
   for (auto d : array.Shape()) {
     total_nums *= d;
   }
 
-  // std::cout << "[VMU] Array size " << total_nums << std::endl;
+  std::cout << "[VMU] Array size " << total_nums << std::endl;
 
   for (size_t j = 0; j < total_nums; ++j) {
     static_cast<float*>(array->data)[j] = 1.0;
@@ -57,13 +59,14 @@ void TestNDArray(const NDArray& array) {
 }
 
 NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
-  int size = arrays.size();
+  size_t size = arrays.size();
   std::vector<void*> raw_ptrs(size);
   for (size_t i = 0; i < size; ++i) {
     raw_ptrs[i] = arrays[i]->data;
   }
-  auto result = NDArray::Empty(
-      ShapeTuple({size}), DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, arrays[0]->device);
+  auto result =
+      NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
+                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, arrays[0]->device);
   result.CopyFromBytes(raw_ptrs.data(), size * sizeof(void*));
 
   // {
@@ -92,7 +95,7 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   // std::cout << "Executing " << arity << std::endl;
-  for (Index i = 0; i < arity; i++) {
+  for (size_t i = 0; i < arity; i++) {
     setter(i, args[i]);
   }
 
@@ -140,7 +143,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
       }
       case kScatter: {
         std::vector<NDArray> to_scatter(batch_size);
-        for (size_t j = 0; j < batch_size; ++j) {
+        for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
           to_scatter[j] = nodes[j]->args_[i];
         }
         auto ptr_array = CreatePointerNDArray(to_scatter);
@@ -186,6 +189,7 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
       for (size_t fi = 0; fi < dt_cell->size; ++fi) {
         auto obj = (*dt_cell)[fi];
         auto nd_array = Downcast<NDArray>(obj);
+        // TestNDArray(nd_array);
         setter(idx++, nd_array);
       }
     } else {
@@ -200,12 +204,14 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
           }
         }
       }
+      // TestNDArray(nd_array);
       setter(idx++, nd_array);
     }
   }
 
   if (!is_empty_output) {
     TVMRetValue rv;
+    // std::cout << "[VMU] Calling " << arity << std::endl;
     func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
   }
 }
