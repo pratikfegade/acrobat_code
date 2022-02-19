@@ -66,6 +66,7 @@ class VMExecutionOptions(Object):
     def create(lazy_execution=False, batched_execution=False,
                scattered_kernels=False, concurrent_execution=False,
                batch_size=1):
+        print("YOLO", concurrent_execution, batch_size)
         return _ffi_api.CreateVMExecutionOptions(lazy_execution, batched_execution,
                                                  scattered_kernels, concurrent_execution,
                                                  batch_size)
@@ -434,7 +435,7 @@ class VirtualMachine(object):
             init_args.append(alloc_type)
         self._init(*init_args)
 
-    def set_input(self, func_name, *args, **kwargs):
+    def set_input(self, func_name, batch_size, *args, **kwargs):
         """Set the input to a function.
 
         Parameters
@@ -467,7 +468,7 @@ class VirtualMachine(object):
                     idx += 1
             args = new_args
         cargs = convert(args)
-        self._set_input(func_name, *cargs)
+        self._set_input(func_name, batch_size, *cargs)
 
     def invoke(self, func_name, *args, **kwargs):
         """Invoke a function.

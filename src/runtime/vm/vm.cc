@@ -134,10 +134,9 @@ std::vector<int64_t> ToShape(NDArray shape_tensor) {
 void VirtualMachine::OpStartHook(Instruction instr) {}
 void VirtualMachine::OpStopHook() {}
 
-void VirtualMachine::InvokeWrapper(TVMArgs args, TVMRetValue* rv) {
+void VirtualMachine::InvokeWrapper(std::string func_name, TVMRetValue* rv) {
   ICHECK(shared_state_->exec_) << "The executable is not created yet.";
 
-  std::string func_name = args[0];
   auto git = shared_state_->exec_->global_map.find(func_name);
   ICHECK(git != shared_state_->exec_->global_map.end())
       << "Cannot find function " << func_name << " in the executable";
@@ -157,7 +156,7 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
                                        const ObjectPtr<Object>& sptr_to_self) {
   if (name == "invoke") {
     return PackedFunc(
-        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { this->InvokeWrapper(args, rv); });
+        [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { this->InvokeWrapper(args[0], rv); });
   } else if (name == "invoke_stateful") {
     // TODO(tkonolige, jroesch, tqchen): invoke_stateful and get_output are
     // stop-gap measure to allow using vm over a remote connection.
@@ -170,7 +169,7 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       Device host{static_cast<DLDeviceType>(args[1].operator int()), args[2].operator int()};
 
-      SetInput(args[0].operator std::string(), args, 3, args.size() - 3);
+      SetInput(args[0].operator std::string(), args, 3, 1, args.size() - 3);
       PackedFunc invoke = GetFunction("invoke", sptr_to_self);
       TVMRetValue rv_;
       invoke.CallPacked(args, &rv_);  // Invoke only uses the first arg, so the rest of the args
@@ -239,7 +238,7 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
     });
   } else if (name == "set_input") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
-      SetInput(args[0], args, 1, args.size() - 1);
+      SetInput(args[0], args, 2, args[1], args.size() - 2);
     });
   } else if (name == "load_late_bound_consts") {
     return PackedFunc([this](TVMArgs args, TVMRetValue* rv) {
@@ -253,40 +252,52 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
   }
 }
 
-void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, int num_args) {
+void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, int batch_size,
+                              int num_args) {
+  if (concurrent_execution_) {
+    ICHECK(!concurrent_vm_);
+    ICHECK_EQ(batch_size, 1);
+  }
+
+  ICHECK_EQ(num_args % batch_size, 0);
+  int num_args_per_instance = num_args / batch_size;
   ICHECK(shared_state_->exec_) << "The executable is not created yet.";
   auto gvit = shared_state_->exec_->global_map.find(func_name);
   ICHECK(gvit != shared_state_->exec_->global_map.end()) << "Cannot find function " << func_name;
   auto func_index = gvit->second;
   const auto& vm_func = shared_state_->exec_->functions[func_index];
   const auto& param_names = vm_func.params;
-  ICHECK_EQ(num_args, param_names.size())
-      << "The number of provided parameters doesn't match the number of arguments " << num_args
-      << " " << offset << " " << param_names.size();
+  ICHECK_EQ(num_args_per_instance, param_names.size())
+      << "The number of provided parameters doesn't match the number of arguments "
+      << num_args_per_instance << " " << offset << " " << param_names.size();
   ICHECK_EQ(param_names.size(), vm_func.param_device_indexes.size())
       << "The number of provided parameters doesn't match the number of assigned devices";
-  std::vector<ObjectRef> func_args(param_names.size());
-  std::cout << "[VM] Setting inputs for " << func_name << std::endl;
-  for (int i = offset; i < num_args + offset; ++i) {
-    Device dev = GetDevice(vm_func.param_device_indexes[i - offset]);
 
-    if (args[i].type_code() == kTVMDLTensorHandle) {
-      // Automatically convert input DLTensors to NDArray
-      DLTensor* tensor = args[i];
-      std::vector<int64_t> shape;
-      for (int64_t i = 0; i < tensor->ndim; i++) {
-        shape.push_back(tensor->shape[i]);
+  std::vector<ObjectRef> batch_func_args(batch_size * num_args_per_instance);
+  for (int j = 0; j < batch_size; ++j) {
+    // std::cout << "[VM] Setting inputs for " << func_name << std::endl;
+    for (int i = offset; i < num_args_per_instance + offset; ++i) {
+      Device dev = GetDevice(vm_func.param_device_indexes[i - offset]);
+
+      if (args[i].type_code() == kTVMDLTensorHandle) {
+        // Automatically convert input DLTensors to NDArray
+        DLTensor* tensor = args[i];
+        std::vector<int64_t> shape;
+        for (int64_t i = 0; i < tensor->ndim; i++) {
+          shape.push_back(tensor->shape[i]);
+        }
+        NDArray ary = NDArray::Empty(shape, tensor->dtype, dev);
+        ary.CopyFrom(tensor);
+        batch_func_args[j * num_args_per_instance + i - offset] = ary;
+      } else {
+        ObjectRef obj = CopyTo(args[i], dev);
+        batch_func_args[j * num_args_per_instance + i - offset] = obj;
       }
-      NDArray ary = NDArray::Empty(shape, tensor->dtype, dev);
-      ary.CopyFrom(tensor);
-      func_args[i - offset] = ary;
-    } else {
-      ObjectRef obj = CopyTo(args[i], dev);
-      func_args[i - offset] = obj;
     }
+    offset += num_args_per_instance;
   }
   inputs_.erase(func_name);
-  inputs_.emplace(func_name, func_args);
+  inputs_.emplace(func_name, batch_func_args);
 }
 
 void VirtualMachine::InitSharedState() {
@@ -317,6 +328,14 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   //   std::cout << "[VM] Executing unscattered kernels" << std::endl;
   // }
   this->scattered_kernels_ = options->scattered_kernels;
+
+  // if (options->concurrent_execution) {
+  //   std::cout << "[VM] Executing concurrent" << std::endl;
+  // } else {
+  //   std::cout << "[VM] Executing unconcurrent" << std::endl;
+  // }
+  this->concurrent_execution_ = options->concurrent_execution;
+  this->batch_size_ = options->batch_size;
 }
 
 inline Device VirtualMachine::GetDevice(Index device_index) const {
@@ -347,12 +366,18 @@ Index VirtualMachine::PopFrame() {
   return call_stack_size;
 }
 
-void VirtualMachine::InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args) {
+void VirtualMachine::InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args,
+                                  const int offset) {
   VLOG(2) << "Invoking global " << func.name << " " << args.size();
 
+  // PushFrame(func.params.size(), this->pc_ + 1, func);
+  // for (size_t i = 0; i < args.size(); ++i) {
+  //   WriteRegister(i, args[i]);
+  // }
+
   PushFrame(func.params.size(), this->pc_ + 1, func);
-  for (size_t i = 0; i < args.size(); ++i) {
-    WriteRegister(i, args[i]);
+  for (size_t i = 0; i < func.params.size(); ++i) {
+    WriteRegister(i, args[i + offset]);
   }
   VLOG(2) << "func.params= " << func.params.size();
 
@@ -368,8 +393,10 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
-  InvokeGlobal(func, args);
-  RunLoop();
+  for (int i = 0; i < batch_size_; ++i) {
+    InvokeGlobal(func, args, i * (args.size() / batch_size_));
+    RunLoop();
+  }
   return return_register_;
 }
 
@@ -385,7 +412,8 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
 
 void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index output_size,
                                   const std::vector<ObjectRef>& args, bool batched) {
-  if (lazy_execution_) {
+  if (concurrent_execution_ || lazy_execution_) {
+    // std::cout << "[VM] Adding to lazy executor " << vm_id_ << std::endl;
     shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
   } else {
     if (batched) {
@@ -598,7 +626,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
       for (Index i = 0; i < instr.num_args; ++i) {
         args.push_back(ReadRegister(instr.invoke_args_registers[i]));
       }
-      InvokeGlobal(shared_state_->exec_->functions[instr.func_index], args);
+      InvokeGlobal(shared_state_->exec_->functions[instr.func_index], args, 0);
       frames_.back().caller_return_register = instr.dst;
       return false;
     }
@@ -636,7 +664,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
       for (Index i = 0; i < instr.num_closure_args; ++i) {
         args.push_back(ReadRegister(instr.closure_args[i]));
       }
-      InvokeGlobal(shared_state_->exec_->functions[closure->func_index], args);
+      InvokeGlobal(shared_state_->exec_->functions[closure->func_index], args, 0);
       frames_.back().caller_return_register = instr.dst;
       return false;
     }
@@ -860,10 +888,9 @@ inline VirtualMachine* GetVMFromModule(const Module& mod) {
   return static_cast<VirtualMachine*>(const_cast<ModuleNode*>(mod.operator->()));
 }
 
-void ConcurrentVirtualMachine::InvokeWrapper(TVMArgs args, TVMRetValue* rv) {
+void ConcurrentVirtualMachine::InvokeWrapper(std::string func_name, TVMRetValue* rv) {
   ICHECK(shared_state_->exec_) << "The executable is not created yet.";
 
-  std::string func_name = args[0];
   auto git = shared_state_->exec_->global_map.find(func_name);
   ICHECK(git != shared_state_->exec_->global_map.end())
       << "Cannot find function " << func_name << " in the executable";
@@ -873,12 +900,12 @@ void ConcurrentVirtualMachine::InvokeWrapper(TVMArgs args, TVMRetValue* rv) {
     auto* vm = GetVMFromModule(vm_mod);
 
     if (func.params.empty()) {
-      InvokeGlobal(func, {});
+      InvokeGlobal(func, {}, 0);
     } else {
       auto it = vm->inputs_.find(func_name);
       ICHECK(it != vm->inputs_.end()) << "Input has not been set for function " << func_name;
       const std::vector<ObjectRef>& func_args = it->second;
-      vm->InvokeGlobal(func, func_args);
+      vm->InvokeGlobal(func, func_args, 0);
     }
   }
 
@@ -905,20 +932,23 @@ void ConcurrentVirtualMachine::Init(const std::vector<Device>& physical_devices,
 void ConcurrentVirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   this->num_vms_ = options->batch_size;
   VirtualMachine::SetExecutionOptions(options);
-  for (auto& vm : vms_) {
-    GetVMFromModule(vm)->SetExecutionOptions(options);
-  }
-}
 
-void ConcurrentVirtualMachine::InitSharedState() {
-  this->concurrent_vm_ = true;
-  VirtualMachine::InitSharedState();
   for (size_t i = 0; i < num_vms_; ++i) {
     auto vm_ptr = make_object<VirtualMachine>();
     vm_ptr->vm_id_ = i;
     auto module = Module(vm_ptr);
     vms_.push_back(module);
   }
+
+  for (auto& vm : vms_) {
+    GetVMFromModule(vm)->SetExecutionOptions(options);
+    GetVMFromModule(vm)->batch_size_ = 1;
+  }
+}
+
+void ConcurrentVirtualMachine::InitSharedState() {
+  this->concurrent_vm_ = true;
+  VirtualMachine::InitSharedState();
   for (auto& vm : vms_) {
     VirtualMachine* vm_ptr = GetVMFromModule(vm);
     vm_ptr->shared_state_ = this->shared_state_;
@@ -929,49 +959,41 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
                                                          int frame_start) {
   // std::cout << "[CVM] Running a stage" << std::endl;
   while (true) {
-    auto const& instr = vm->code_[vm->pc_];
     // std::cout << "[CVM]  Next Instr " << static_cast<int>(instr.op) << " " << vm->pc_ <<
     // std::endl;
-    if (instr.op == Opcode::InvokePacked) {
-      return kStageEnd;
-    }
     if (vm->RunOneIteration(frame_start)) {
       return kExecutionEnd;
+    } else if (vm->code_[vm->pc_ - 1].op == Opcode::InvokePacked) {
+      return kStageEnd;
     }
   }
 }
 
 void ConcurrentVirtualMachine::RunLoop() {
-  std::vector<DBVMExecutionState> mask(vms_.size(), kRunning);
+  std::vector<bool> mask(vms_.size(), true);
   int alive = vms_.size();
   int frame_start = GetVMFromModule(vms_[0])->frames_.size();
 
   while (alive > 0) {
     // Run one control flow stage for all VMs
     for (size_t i = 0; i < vms_.size(); ++i) {
-      if (mask[i] != kExecutionEnd) {
-        ICHECK_EQ(mask[i], kRunning);
+      if (mask[i]) {
         auto& vm = vms_[i];
         auto stage_state = RunOneStage(i, GetVMFromModule(vm), frame_start);
-        mask[i] = stage_state;
         if (stage_state == kExecutionEnd) {
           alive--;
+          mask[i] = false;
         }
       }
     }
 
     // Run all tensor ops
-    for (size_t i = 0; i < vms_.size(); ++i) {
-      if (mask[i] != kExecutionEnd) {
-        ICHECK_EQ(mask[i], kStageEnd);
-        auto& vm = vms_[i];
-        if (GetVMFromModule(vm)->RunOneIteration(frame_start)) {
-          --alive;
-          mask[i] = kExecutionEnd;
-        } else {
-          mask[i] = kRunning;
-        }
-      }
+    if (batched_execution_) {
+      // std::cout << "[VM] Batched execution " << shared_state_->lazy_executor_.nodes_.size()
+      // << std::endl;
+      shared_state_->lazy_executor_.BatchedExecute(!lazy_execution_);
+    } else {
+      shared_state_->lazy_executor_.Execute();
     }
   }
 }
@@ -982,17 +1004,18 @@ bool ConcurrentVirtualMachine::RunOneIteration(int frame_start) {
 }
 
 void ConcurrentVirtualMachine::InvokeGlobal(const VMFunction& func,
-                                            const std::vector<ObjectRef>& args) {
+                                            const std::vector<ObjectRef>& args, const int offset) {
   for (auto& vm : vms_) {
-    GetVMFromModule(vm)->InvokeGlobal(func, args);
+    GetVMFromModule(vm)->InvokeGlobal(func, args, 0);
   }
 }
 
-void ConcurrentVirtualMachine::SetInput(std::string name, TVMArgs args, int offset, int num_args) {
-  NDArray array = args[offset++];
-  int per_vm = static_cast<int32_t*>(array->data)[0];
+void ConcurrentVirtualMachine::SetInput(std::string name, TVMArgs args, int offset, int batch_size,
+                                        int num_args) {
+  ICHECK_EQ(num_args % batch_size, 0);
+  int per_vm = num_args / batch_size;
   for (auto& vm : vms_) {
-    GetVMFromModule(vm)->SetInput(name, args, offset, per_vm);
+    GetVMFromModule(vm)->SetInput(name, args, offset, 1, per_vm);
     offset += per_vm;
   }
 }

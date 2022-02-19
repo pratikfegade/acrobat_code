@@ -331,10 +331,10 @@ class VirtualMachine : public runtime::ModuleNode {
 
   /*!
    * \brief A packed API wrapper to the invoke functions above.
-   * \param args The function.
+   * \param func_name The function.
    * \param rv Pointer to storage for the return value .
    */
-  virtual void InvokeWrapper(TVMArgs args, TVMRetValue* rv);
+  virtual void InvokeWrapper(std::string func_name, TVMRetValue* rv);
 
   /*!
    * \brief Invoke a PackedFunction
@@ -372,7 +372,8 @@ class VirtualMachine : public runtime::ModuleNode {
    *
    * This does not begin execution of the VM.
    */
-  virtual void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args);
+  virtual void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args,
+                            const int offset);
 
   /*!
    * \brief Set inputs to a function.
@@ -381,9 +382,10 @@ class VirtualMachine : public runtime::ModuleNode {
    * function. If the arguments are not of the correct device for the function,
    * they will be copied to the device.
    * \param offset Starting offset of the arguments in `args`.
+   * \param batch_size Batch size.
    * \param num_args Number of args to consume from args.
    */
-  virtual void SetInput(std::string name, TVMArgs args, int offset, int num_args);
+  virtual void SetInput(std::string name, TVMArgs args, int offset, int batch_size, int num_args);
 
   /*!
    * \brief Internal hook for profiling the start of an op.
@@ -434,9 +436,18 @@ class VirtualMachine : public runtime::ModuleNode {
    */
   bool scattered_kernels_ = false;
   /*!
+   * \brief whether to launch multiple concurrent VMs, each
+   * corresponding to one batch element instance
+   */
+  bool concurrent_execution_;
+  /*!
    * \brief Whether the current VM object is a concurrent VM object
    */
   bool concurrent_vm_ = false;
+  /*!
+   * \brief Batch size the VM is operating on
+   */
+  int batch_size_;
   /*!
    * \brief VM ID. Used when one has multiple concurrent VMs
    */
@@ -486,17 +497,18 @@ class ConcurrentVirtualMachine : public VirtualMachine {
 
   /*!
    * \brief A packed API wrapper to invoke functions.
-   * \param args The function.
+   * \param func_name The function.
    * \param rv Pointer to storage for the return value .
    */
-  void InvokeWrapper(TVMArgs args, TVMRetValue* rv) override;
+  void InvokeWrapper(std::string func_name, TVMRetValue* rv) override;
 
   /*!
    * \brief Invoke a global setting up the VM state to execute.
    *
    * This does not begin execution of the VM.
    */
-  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args) override;
+  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args,
+                    const int offset) override;
 
   /*!
    * \brief Set inputs to a function.
@@ -505,9 +517,10 @@ class ConcurrentVirtualMachine : public VirtualMachine {
    * function. If the arguments are not of the correct device for the function,
    * they will be copied to the device.
    * \param offset Starting offset of the arguments in `args`.
+   * \param batch_size Batch size.
    * \param num_args Number of args to consume from args.
    */
-  void SetInput(std::string name, TVMArgs args, int offset, int num_args) override;
+  void SetInput(std::string name, TVMArgs args, int offset, int batch_size, int num_args) override;
 
  protected:
   friend class LazyExecutor;

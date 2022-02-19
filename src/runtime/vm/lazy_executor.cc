@@ -113,57 +113,25 @@ void LazyExecutor::Execute() {
   nodes_.clear();
 }
 
-void LazyExecutor::BatchedExecute() {
-  std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
-  for (OpNode& node : nodes_) {
-    for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
-      output_tensor_to_node[node.args_[i]] = node.id_;
-    }
-  }
+void LazyExecutor::ExecuteOpNodeBatch(
+    const std::unordered_map<int, std::vector<OpNode*>>& func_to_node) {
+  for (auto& pair : func_to_node) {
+    auto& func_idx = pair.first;
+    auto& nodes = pair.second;
 
-  size_t num_nodes = nodes_.size();
-  std::vector<int> node_to_depth(num_nodes);
-  std::vector<std::vector<int>> depth_to_node(num_nodes);
-  int graph_depth = -1;
-  for (size_t i = 0; i < num_nodes; ++i) {
-    OpNode& node = nodes_[i];
-    int max_depth = 0;
-    for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
-      auto it = output_tensor_to_node.find(node.args_[j]);
-      if (it != output_tensor_to_node.end()) {
-        auto input_node_id = it->second;
-        max_depth = std::max(max_depth, node_to_depth[input_node_id]);
-      }
-    }
-    int node_depth = max_depth + 1;
-    node_to_depth[i] = node_depth;
-    depth_to_node[node_depth].push_back(i);
-    graph_depth = std::max(graph_depth, node_depth);
-  }
-
-  for (int i = 0; i <= graph_depth; ++i) {
-    auto& depth_nodes = depth_to_node[i];
-    std::unordered_map<int, std::vector<OpNode*>> func_to_node;
-    for (auto& node_id : depth_nodes) {
-      func_to_node[nodes_[node_id].func_idx_].push_back(&nodes_[node_id]);
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      ICHECK_EQ(func_idx, nodes[i]->func_idx_);
+      ICHECK_EQ(nodes[0]->arg_count_, nodes[i]->arg_count_);
+      ICHECK_EQ(nodes[0]->output_size_, nodes[i]->output_size_);
+      ICHECK_EQ(nodes[0]->args_.size(), nodes[i]->args_.size());
     }
 
-    for (auto& pair : func_to_node) {
-      auto& func_idx = pair.first;
-      auto& nodes = pair.second;
-
-      for (size_t i = 0; i < nodes.size(); ++i) {
-        ICHECK_EQ(func_idx, nodes[i]->func_idx_);
-        ICHECK_EQ(nodes[0]->arg_count_, nodes[i]->arg_count_);
-        ICHECK_EQ(nodes[0]->output_size_, nodes[i]->output_size_);
-        ICHECK_EQ(nodes[0]->args_.size(), nodes[i]->args_.size());
-      }
-
-      // if (nodes.size() == 1) {
-      //   // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-      //   InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
-      //                          nodes[0]->output_size_, nodes[0]->args_);
-      // } else {
+    // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
+    if (nodes.size() == 1) {
+      // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
+      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
+                             nodes[0]->output_size_, nodes[0]->args_);
+    } else {
       auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
       // std::cout << "[VMU] Executing " << batched_func_idx << " " << nodes.size() << std::endl;
       // for (auto i : vm_shared_state_->batched_func_arg_mode_[batched_func_idx]) {
@@ -173,7 +141,53 @@ void LazyExecutor::BatchedExecute() {
                                     nodes[0]->arg_count_, nodes[0]->output_size_,
                                     vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
                                     nodes);
-      // }
+    }
+  }
+}
+
+void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
+  if (all_nodes_same_depth) {
+    std::unordered_map<int, std::vector<OpNode*>> func_to_node;
+    for (auto& node : nodes_) {
+      func_to_node[node.func_idx_].push_back(&node);
+    }
+    ExecuteOpNodeBatch(func_to_node);
+  } else {
+    std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
+    for (OpNode& node : nodes_) {
+      for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
+        output_tensor_to_node[node.args_[i]] = node.id_;
+      }
+    }
+
+    size_t num_nodes = nodes_.size();
+    std::vector<int> node_to_depth(num_nodes);
+    std::vector<std::vector<OpNode*>> depth_to_node(num_nodes);
+    int graph_depth = -1;
+    for (size_t i = 0; i < num_nodes; ++i) {
+      OpNode& node = nodes_[i];
+      int max_depth = 0;
+      for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
+        auto it = output_tensor_to_node.find(node.args_[j]);
+        if (it != output_tensor_to_node.end()) {
+          auto input_node_id = it->second;
+          max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+        }
+      }
+      int node_depth = max_depth + 1;
+      node_to_depth[i] = node_depth;
+      depth_to_node[node_depth].push_back(&node);
+      graph_depth = std::max(graph_depth, node_depth);
+    }
+
+    std::unordered_map<int, std::vector<OpNode*>> func_to_node;
+    for (int i = 0; i <= graph_depth; ++i) {
+      auto& depth_nodes = depth_to_node[i];
+      for (auto& node : depth_nodes) {
+        func_to_node[node->func_idx_].push_back(node);
+      }
+      ExecuteOpNodeBatch(func_to_node);
+      func_to_node.clear();
     }
   }
   nodes_.clear();

@@ -82,10 +82,13 @@ class LazyExecutor {
 
   void Execute();
 
-  void BatchedExecute();
+  void BatchedExecute(bool all_nodes_same_depth = false);
 
  private:
+  void ExecuteOpNodeBatch(const std::unordered_map<int, std::vector<OpNode*>>& func_to_node);
+
   friend class VirtualMachine;
+  friend class ConcurrentVirtualMachine;
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
