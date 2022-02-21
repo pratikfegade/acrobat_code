@@ -1146,9 +1146,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
 
   pass_seqs.push_back(transform::FuseOps());
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
 
   // Do layout rewrite for auto-scheduler.
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
   transform::PassContext pass_ctx = PassContext::Current();
   if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
     Pass major_pass = transform::AutoSchedulerLayoutRewrite();
@@ -1166,7 +1166,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   }
 
   pass_seqs.push_back(transform::ToANormalForm());
-  // pass_seqs.push_back(transform::PrintCurrentIR("ToANormalForm", true, true));
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::LambdaLift());
 

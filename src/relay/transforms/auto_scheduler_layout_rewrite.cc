@@ -110,37 +110,56 @@ class FuncMutator : public ExprMutator {
       "nn.matmul", "nn.dense",  "nn.batch_matmul"};
 };
 
+class PrimitiveFunctionBodyChecker : public ExprVisitor {
+ public:
+  bool Check(const Expr expr) {
+    this->VisitExpr(expr);
+    return is_primitive_;
+  }
+
+ private:
+  void VisitExpr_(const CallNode* op) override {
+    if (const auto* func = op->op.as<FunctionNode>()) {
+      is_primitive_ = is_primitive_ && false;
+    }
+  }
+
+  bool is_primitive_ = true;
+};
+
 Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
   auto new_n = ExprMutator::VisitExpr_(n);
 
   if (const auto* call = new_n.as<CallNode>()) {
     if (const auto* func = call->op.as<FunctionNode>()) {
-      global_ori_layouts_queue.clear();
-      global_new_layouts_queue.clear();
+      if (PrimitiveFunctionBodyChecker().Check(func->body)) {
+        global_ori_layouts_queue.clear();
+        global_new_layouts_queue.clear();
 
-      // Use ScheduleGetter to call python lower functions.
-      // This is used to get the layout transform information.
-      // The layout transformation will be recorded to global_ori_layout_queue
-      // and global_new_layouts_queue in ComputeDAG::RewriteLayout.
-      auto f = runtime::Registry::Get("auto_scheduler.enter_layout_rewrite");
-      CHECK(f) << "Could not find auto_scheduler.enter_layout_rewrite function.";
-      (*f)();
+        // Use ScheduleGetter to call python lower functions.
+        // This is used to get the layout transform information.
+        // The layout transformation will be recorded to global_ori_layout_queue
+        // and global_new_layouts_queue in ComputeDAG::RewriteLayout.
+        auto f = runtime::Registry::Get("auto_scheduler.enter_layout_rewrite");
+        CHECK(f) << "Could not find auto_scheduler.enter_layout_rewrite function.";
+        (*f)();
 
-      tec::PrimFuncFor(GetRef<Function>(func), Target::Current(),
-                       [](std::string name) { return name; });
+        tec::PrimFuncFor(GetRef<Function>(func), Target::Current(),
+                         [](std::string name) { return name; });
 
-      f = runtime::Registry::Get("auto_scheduler.exit_layout_rewrite");
-      CHECK(f) << "Could not find ansor.exit_layout_rewrite function.";
-      (*f)();
+        f = runtime::Registry::Get("auto_scheduler.exit_layout_rewrite");
+        CHECK(f) << "Could not find ansor.exit_layout_rewrite function.";
+        (*f)();
 
-      // Mutate the called function
-      if (!global_ori_layouts_queue.empty() && !global_new_layouts_queue.empty()) {
-        auto ret = FuncMutator(global_ori_layouts_queue, global_new_layouts_queue).VisitExpr(new_n);
-        return ret;
+        // Mutate the called function
+        if (!global_ori_layouts_queue.empty() && !global_new_layouts_queue.empty()) {
+          auto ret =
+              FuncMutator(global_ori_layouts_queue, global_new_layouts_queue).VisitExpr(new_n);
+          return ret;
+        }
       }
     }
   }
-
   return new_n;
 }
 

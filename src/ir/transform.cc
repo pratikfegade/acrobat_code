@@ -484,12 +484,9 @@ IRModule SequentialNode::operator()(IRModule mod, const PassContext& pass_ctx) c
     for (const auto& it : pass_info->required) {
       auto required_pass = GetPass(it);
       mod = required_pass(std::move(mod), pass_ctx);
-      // std::cout << "[SEP]  SPass " << required_pass->Info()->name << " "
-      // << mod->batched_prim_funcs.size() << std::endl;
     }
+    // std::cout << "[SEP] PPass " << pass->Info()->name << std::endl;
     mod = pass(std::move(mod), pass_ctx);
-    // std::cout << "[SEP] PPass " << pass->Info()->name << " " << mod->batched_prim_funcs.size()
-    // << std::endl;
   }
   return mod;
 }

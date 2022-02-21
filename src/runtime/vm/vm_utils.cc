@@ -87,6 +87,31 @@ NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
   return result;
 }
 
+NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
+  auto unbatched_shape = arrays[0].Shape();
+  std::vector<int64_t> batched_shape(unbatched_shape.size() + 1);
+  batched_shape[0] = static_cast<int64_t>(arrays.size());
+  for (size_t i = 0; i < unbatched_shape.size(); ++i) {
+    batched_shape[i + 1] = unbatched_shape[i];
+  }
+  auto result = NDArray::Empty(ShapeTuple(batched_shape), arrays[0].DataType(), arrays[0]->device);
+  DLTensor* mutable_internal = const_cast<DLTensor*>(result.operator->());
+  auto old_offset = mutable_internal->byte_offset;
+  auto offset_delta = arrays[0].DataType().bytes();
+  for (auto dim : unbatched_shape) {
+    offset_delta *= dim;
+  }
+  mutable_internal->shape[0] = 1;
+  for (size_t i = 0; i < arrays.size(); ++i) {
+    arrays[i].CopyTo(result);
+    mutable_internal->byte_offset += offset_delta;
+  }
+  mutable_internal->shape[0] = batched_shape.size();
+
+  mutable_internal->byte_offset = old_offset;
+  return result;
+}
+
 void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
                             const std::vector<NDArray>& args) {
   size_t arity = arg_count;
@@ -155,8 +180,20 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         break;
       }
       case kConcat: {
-        ICHECK(false) << "Concat not implemented yet!";
-        break;
+        std::vector<NDArray> to_concat(batch_size);
+        for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
+          to_concat[j] = nodes[j]->args_[i];
+        }
+
+        auto concat_array = CreateConcatenatedNDArray(to_concat);
+        arg_holder[i] = concat_array;
+        setter(ctr, concat_array);
+        // std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+        // << std::endl;
+        ctr += 1;
+
+        // ICHECK(false) << "Concat not implemented yet!";
+        // break;
       }
     }
   }
