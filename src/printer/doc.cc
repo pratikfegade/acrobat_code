@@ -97,7 +97,7 @@ Doc& Doc::operator<<(const DocAtom& right) {
   return *this;
 }
 
-std::string Doc::str() {
+std::string Doc::str() const {
   std::ostringstream os;
   for (auto atom : this->stream_) {
     if (auto* text = atom.as<DocTextNode>()) {

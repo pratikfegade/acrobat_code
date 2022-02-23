@@ -413,7 +413,6 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
 void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index output_size,
                                   const std::vector<ObjectRef>& args, bool batched) {
   if (concurrent_execution_ || lazy_execution_) {
-    // std::cout << "[VM] Adding to lazy executor " << vm_id_ << std::endl;
     shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
   } else {
     if (batched) {
@@ -421,6 +420,7 @@ void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index out
                      shared_state_->batched_func_arg_mode_[packed_index], batched,
                      this->scattered_kernels_);
     } else {
+      std::cout << "[VM] Executing " << packed_index << std::endl;
       InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args, {},
                      batched, this->scattered_kernels_);
     }

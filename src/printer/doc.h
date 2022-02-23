@@ -104,7 +104,7 @@ class Doc {
    * \brief Convert the doc stream into string.
    * \return The string representation.
    */
-  std::string str();
+  std::string str() const;
   /*!
    * \brief Create a doc that represents text content.
    * \return The created doc.

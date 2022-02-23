@@ -673,7 +673,8 @@ class TypeInferencer::Resolver : public MixedModeMutator, PatternMutator {
     if (checked_type.as<IncompleteTypeNode>() != nullptr) {
       this->solver_->Emit(
           Diagnostic::Error(op->span)
-          << "The type inference pass was unable to infer a type for this expression.\n"
+          << "The type inference pass was unable to infer a type for the expression"
+          << GetRef<Expr>(op) << ".\n"
           << "This usually occurs when an operator call is under constrained in some way,"
           << " check other reported errors for hints of what may of happened.");
     }

@@ -432,6 +432,7 @@ Doc RelayTextPrinter::VisitExpr_(const LetNode* op) {
 }
 
 Doc RelayTextPrinter::PrintFunc(const Doc& prefix, const relay::Function& fn) {
+  auto prefix_str = prefix.str();
   Doc doc;
   doc << prefix;
   if (fn->type_params.size() > 0) {

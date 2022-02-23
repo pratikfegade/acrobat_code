@@ -134,7 +134,7 @@ def BackwardFoldScaleAxis():
     return _ffi_api.BackwardFoldScaleAxis()
 
 
-def RemoveUnusedFunctions(entry_functions=None):
+def RemoveUnusedFunctions(entry_functions=None, batched_execution=False):
     """Remove unused global relay functions in a relay module.
 
     Parameters
@@ -149,7 +149,7 @@ def RemoveUnusedFunctions(entry_functions=None):
     """
     if entry_functions is None:
         entry_functions = ["main"]
-    return _ffi_api.RemoveUnusedFunctions(entry_functions)
+    return _ffi_api.RemoveUnusedFunctions(entry_functions, batched_execution)
 
 
 def ForwardFoldScaleAxis():

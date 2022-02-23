@@ -182,6 +182,16 @@ std::vector<CallGraphEntry*> CallGraphNode::TopologicalOrder() const {
 
   // Find out the missing global functions if there are any to help debugging.
   if (ret.size() != module->functions.size()) {
+    std::cout << "[CG] Functions in the module" << std::endl;
+    for (auto it : module->functions) {
+      std::cout << "[CG]  " << it.first << std::endl;
+    }
+
+    std::cout << "[CG] Functions in the CG" << std::endl;
+    for (auto it : ret) {
+      std::cout << "[CG]  " << it->GetGlobalVar() << std::endl;
+    }
+
     for (auto it : module->functions) {
       if (visited.find((*this)[it.first]) == visited.end()) {
         LOG(WARNING) << "Missing global:" << it.first->name_hint

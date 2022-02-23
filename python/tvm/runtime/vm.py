@@ -66,7 +66,6 @@ class VMExecutionOptions(Object):
     def create(lazy_execution=False, batched_execution=False,
                scattered_kernels=False, concurrent_execution=False,
                batch_size=1):
-        print("YOLO", concurrent_execution, batch_size)
         return _ffi_api.CreateVMExecutionOptions(lazy_execution, batched_execution,
                                                  scattered_kernels, concurrent_execution,
                                                  batch_size)
