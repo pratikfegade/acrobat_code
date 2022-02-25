@@ -63,19 +63,27 @@ def convert(args):
 
 class VMExecutionOptions(Object):
     @staticmethod
-    def create(lazy_execution=False, batched_execution=False,
-               scattered_kernels=False, concurrent_execution=False,
-               batch_size=1):
-        return _ffi_api.CreateVMExecutionOptions(lazy_execution, batched_execution,
-                                                 scattered_kernels, concurrent_execution,
+    def create(coarsened_execution=False, lazy_execution=False,
+               batched_execution=False, scattered_kernels=False,
+               concurrent_execution=False, batch_size=1):
+        return _ffi_api.CreateVMExecutionOptions(coarsened_execution,
+                                                 lazy_execution,
+                                                 batched_execution,
+                                                 scattered_kernels,
+                                                 concurrent_execution,
                                                  batch_size)
 
-def create_vm_execution_options(lazy_execution=False, batched_execution=False,
-                                scattered_kernels=False, concurrent_execution=False,
+def create_vm_execution_options(coarsened_execution=False,
+                                lazy_execution=False,
+                                batched_execution=False,
+                                scattered_kernels=False,
+                                concurrent_execution=False,
                                 batch_size=1):
-    return VMExecutionOptions.create(lazy_execution, batched_execution,
-                                     scattered_kernels, concurrent_execution,
-                                     batch_size)
+    return VMExecutionOptions.create(coarsened_execution,
+                                     lazy_execution,
+                                     batched_execution,
+                                     scattered_kernels,
+                                     concurrent_execution, batch_size)
 
 class Executable(object):
     """Relay VM executable"""

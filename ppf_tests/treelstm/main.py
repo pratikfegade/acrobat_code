@@ -9,12 +9,12 @@ device = tvm.runtime.device("cpu")
 target = "llvm"
 
 hidden_size = 32
-batch_size = 1
-num_nodes = 20
+batch_size = 5
+num_nodes = 6
 lazy_execution=True
 coarsened_execution=True
-batched_execution=False
-scattered_kernels=False
+batched_execution=True
+scattered_kernels=True
 concurrent_execution=False
 use_autoscheduler=False
 
@@ -22,7 +22,8 @@ tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 params = tlstm.all_weights()
 
-trees = generate_random_trees(num_nodes, batch_size, (1, 32), prelude)
+trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
+# exit(0)
 
 param_tensors = [get_random_tensor(tuple([int(i) for i in param.type_annotation.shape])) for param in params]
 

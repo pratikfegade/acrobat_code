@@ -1024,15 +1024,30 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
 
   for (auto pair : context_.module->functions) {
-    auto index = exec_->primitive_map.at(pair.first->name_hint);
-    auto access_modes = pair.second->GetAttr<Array<Integer>>(tir::attr::kDBArgAccessModes);
-    if (access_modes) {
-      std::vector<DBArgAccessMode> access_modes_vec;
-      access_modes_vec.reserve(access_modes.value().size());
-      for (auto mode : access_modes.value()) {
-        access_modes_vec.push_back(static_cast<DBArgAccessMode>(mode->value));
+    if (pair.second.as<tir::PrimFuncNode>()) {
+      auto it = exec_->primitive_map.find(pair.first->name_hint);
+      ICHECK(it != exec_->primitive_map.end());
+      auto index = (*it).second;
+      if (static_cast<Index>(exec_->prim_func_arg_access_mode.size()) <= index) {
+        exec_->prim_func_arg_access_mode.resize(index + 1);
       }
-      exec_->prim_func_arg_access_mode[index] = std::move(access_modes_vec);
+      auto access_modes = pair.second->GetAttr<Array<Integer>>(tir::attr::kDBArgAccessModes);
+      if (access_modes) {
+        std::vector<DBArgAccessMode> access_modes_vec;
+        access_modes_vec.reserve(access_modes.value().size());
+        for (auto mode : access_modes.value()) {
+          access_modes_vec.push_back(static_cast<DBArgAccessMode>(mode->value));
+        }
+        exec_->prim_func_arg_access_mode[index] = std::move(access_modes_vec);
+
+        if (false) {
+          std::cout << "[COMP]   ArgAccessModes: [";
+          for (size_t i = 0; i < exec_->prim_func_arg_access_mode[index].size(); ++i) {
+            std::cout << exec_->prim_func_arg_access_mode[index][i] << " ";
+          }
+          std::cout << "]" << std::endl;
+        }
+      }
     }
   }
 

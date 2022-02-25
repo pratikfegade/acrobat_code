@@ -64,19 +64,15 @@ std::string DebugPrint(const ObjectRef& obj) {
   return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
 }
 
-class TensorAccessModeCalculator : public tir::StmtExprVisitor {
+class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
  public:
-  TensorAccessModeCalculator(const tir::PrimFunc& func) : func_(func) {}
+  LeafTensorAccessModeCalculator(const tir::PrimFunc& func) : func_(func) {}
 
   std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
   Compute() {
-    auto global_symbol = func_->GetAttr<String>(tvm::attr::kGlobalSymbol);
-    bool print = (global_symbol == "vm_mod_fused_sigmoid_tanh_multiply");
-
     for (auto pair : func_->buffer_map) {
       param_mapping_[pair.second->data] = pair.first;
     }
-
     VisitStmt(func_->body);
     return access_modes_;
   }
@@ -84,7 +80,6 @@ class TensorAccessModeCalculator : public tir::StmtExprVisitor {
  private:
   void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
     auto global_symbol = func_->GetAttr<String>(tvm::attr::kGlobalSymbol);
-    bool print = false;  //(global_symbol == "vm_mod_fused_sigmoid_tanh_multiply");
 
     tir::Var replaced_var = var;
     auto it = param_mapping_.find(var);
@@ -92,15 +87,10 @@ class TensorAccessModeCalculator : public tir::StmtExprVisitor {
       replaced_var = it->second;
     }
 
-    if (print) {
-      std::cout << "[CG_AMC]  var " << replaced_var << " " << replaced_var.get() << std::endl;
-    }
     auto iit = access_modes_.find(replaced_var);
     if (iit == access_modes_.end()) {
-      // std::cout << "[CG_AMC]    " << mode << std::endl;
       access_modes_[replaced_var] = mode;
     } else if (iit->second != mode) {
-      // std::cout << "[CG_AMC]    " << kInputOutput << std::endl;
       access_modes_[replaced_var] = runtime::vm::kInputOutput;
     }
   }
@@ -129,6 +119,66 @@ class TensorAccessModeCalculator : public tir::StmtExprVisitor {
   std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
       access_modes_;
   const tir::PrimFunc func_;
+};
+
+class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
+ public:
+  CoarsenedTensorAccessModeCalculator(const tir::PrimFunc& func, const IRModule& mod)
+      : func_(func), mod_(mod) {}
+
+  Array<Integer> Compute() {
+    VisitStmt(func_->body);
+
+    Array<Integer> access_modes;
+    for (auto var : func_->params) {
+      auto it = access_modes_map_.find(var);
+      auto mode = Integer(
+          static_cast<int>((it != access_modes_map_.end() ? (*it).second : runtime::vm::kUnused)));
+      access_modes.push_back(mode);
+    }
+
+    return access_modes;
+  }
+
+ private:
+  void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
+    auto iit = access_modes_map_.find(var);
+    if (iit == access_modes_map_.end()) {
+      access_modes_map_[var] = mode;
+    } else if (iit->second != mode) {
+      access_modes_map_[var] = runtime::vm::kInputOutput;
+    }
+  }
+
+  void VisitExpr_(const tir::CallNode* op) {
+    // std::cout << "[CTAMC] Visiting Call " << GetRef<PrimExpr>(op) << std::endl;
+    ICHECK_EQ(op->op, tir::builtin::tvm_call_unpacked_from_packed());
+    auto base_leaf_callee = mod_->Lookup(Downcast<tir::StringImm>(op->args[0])->value);
+    ICHECK(base_leaf_callee.as<tir::PrimFuncNode>());
+    auto leaf_callee = Downcast<tir::PrimFunc>(base_leaf_callee);
+
+    auto func_access_modes = LeafTensorAccessModeCalculator(leaf_callee).Compute();
+
+    // std::cout << "[CTAMC]  Function " << leaf_callee << std::endl;
+    for (size_t i = 1; i < op->args.size(); ++i) {
+      auto arg = op->args[i];
+      auto param = leaf_callee->params[i - 1];
+      auto it = func_access_modes.find(param);
+      if (it != func_access_modes.end()) {
+        auto mode = it->second;
+        // std::cout << "[CTAMC]   " << arg << " " << param << " " << mode << std::endl;
+        MergeAndSet(Downcast<tir::Var>(arg), mode);
+      } else {
+        // std::cout << "[CTAMC]   " << arg << " " << param << " Unused " << std::endl;
+      }
+    }
+    // std::cout << std::endl;
+  }
+
+  std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
+      access_modes_map_;
+  const tir::PrimFunc func_;
+  const IRModule mod_;
 };
 
 struct GroupFinderResult {
@@ -301,8 +351,8 @@ class LetLifter : public ExprMutator {
         return ret;
       } else {
         auto ret = Let(inner_var, inner_value, Let(outer_var, inner_body, outer_body));
-        std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
-        std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
+        // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
+        // std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
         return ret;
       }
     } else {
@@ -515,6 +565,7 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 
   TIRLowererResult LowerToTIR(const Expr& rexpr, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) final {
+    // std::cout << "[CG] Lowering group to TIR" << std::endl;
     RelayVarSet free_vars_set = FreeVarsDedup(rexpr);
     std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
     std::vector<Var> flattened_free_vars;
@@ -527,56 +578,6 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     Array<tir::Var> prim_func_params;
     for (auto rvar : flattened_free_vars) {
       prim_func_params.push_back(CreateTIRVar(rvar));
-    }
-
-    Array<Integer> access_modes;
-    {
-      Map<Var, Integer> access_modes_map;
-      auto merge_and_set = [&](const Var& var, runtime::vm::DBArgAccessMode mode) {
-        auto it = access_modes_map.find(var);
-        if (it == access_modes_map.end()) {
-          access_modes_map.Set(var, Integer(static_cast<int>(mode)));
-        } else if ((*it).second != mode) {
-          access_modes_map.Set(var, Integer(static_cast<int>(runtime::vm::kInputOutput)));
-        }
-      };
-
-      for (auto pair : bindings) {
-        auto rvalue = pair.second;
-
-        if (auto call = rvalue.as<CallNode>()) {
-          ICHECK(call->op == GetInvokeTVMOp());
-          auto callee_gv = Downcast<GlobalVar>(call->args[0]);
-          auto func = mod_->Lookup(callee_gv);
-          auto prim_func = Downcast<tir::PrimFunc>(func);
-          auto func_access_modes = TensorAccessModeCalculator(prim_func).Compute();
-
-          std::cout << "[CG] Function " << prim_func << std::endl;
-          size_t j = 0;
-          for (size_t i = 1; i < call->args.size(); ++i) {
-            for (auto arg : FlattenTuple(call->args[i])) {
-              auto param = prim_func->params[j++];
-              auto it = func_access_modes.find(param);
-              if (it != func_access_modes.end()) {
-                auto mode = it->second;
-                std::cout << "[CG]   " << arg << " " << param << " " << param.get() << " " << mode
-                          << std::endl;
-                merge_and_set(Downcast<Var>(arg), mode);
-              } else {
-                std::cout << "[CG]   " << arg << " " << param << " " << param.get() << " Unused "
-                          << std::endl;
-              }
-            }
-          }
-          std::cout << std::endl;
-        }
-      }
-
-      for (auto var : flattened_free_vars) {
-        // auto mode = (access_modes_map.count(var) ? access_modes_map.at(var)
-        // : Integer(static_cast<int>(runtime::vm::kUnused)));
-        // std::cout << "[CG] Param " << var << " " << mode << std::endl;
-      }
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -617,18 +618,19 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
       }
     }
 
-    // std::cout << "[TL] Body " << body << std::endl;
     Expr body_in_free_vars;
     if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
       body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
     } else {
       body_in_free_vars = Tuple(Array<Expr>());
     }
-    // std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
+
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
-    func = WithAttr(func, tir::attr::kDBArgAccessModes, access_modes);
+    func = WithAttr(func, tir::attr::kDBArgAccessModes,
+                    CoarsenedTensorAccessModeCalculator(func, mod_).Compute());
+    // std::cout << "[CG]  Generated PrimFunc " << func << std::endl;
     return TIRLowererResult({func, flattened_call_args, body_in_free_vars, Array<Integer>()});
   }
 

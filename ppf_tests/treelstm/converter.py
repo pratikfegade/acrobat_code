@@ -73,30 +73,45 @@ def get_random_tensor(shape):
     return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
 
 def generate_random_tree(num_nodes, tensor_shape):
+    assert num_nodes > 0
+    height = num_nodes
+    if height == 1:
+        return RoseTree(get_random_tensor(tensor_shape), [])
+
+    return RoseTree(get_random_tensor(tensor_shape),
+                    [generate_random_tree(height - 1, tensor_shape),
+                     generate_random_tree(height - 1, tensor_shape)])
+
+
+
+
     # assert num_nodes > 0
     # if num_nodes == 1:
-    #     return RoseTree(get_random_tensor(tensor_shape), [])
+        # return RoseTree(get_random_tensor(tensor_shape), [])
 
     # num_nodes -= 1
     # l_nodes = randrange(num_nodes)
     # r_nodes = num_nodes - l_nodes
     # if l_nodes == 0 or r_nodes == 0:
-    #     return RoseTree(get_random_tensor(tensor_shape),
-    #                     [generate_random_tree(num_nodes, tensor_shape)])
+        # return RoseTree(get_random_tensor(tensor_shape),
+                        # [generate_random_tree(num_nodes, tensor_shape)])
     # else:
-    #     return RoseTree(get_random_tensor(tensor_shape),
-    #                     [generate_random_tree(l_nodes, tensor_shape),
-    #                      generate_random_tree(r_nodes, tensor_shape)])
+        # return RoseTree(get_random_tensor(tensor_shape),
+                        # [generate_random_tree(l_nodes, tensor_shape),
+                         # generate_random_tree(r_nodes, tensor_shape)])
 
-    assert num_nodes > 0
-    if num_nodes == 1:
-        return RoseTree(get_random_tensor(tensor_shape), [])
 
-    return RoseTree(get_random_tensor(tensor_shape),
-                    [generate_random_tree(num_nodes - 1, tensor_shape)])
+
+
+    # assert num_nodes > 0
+    # if num_nodes == 1:
+        # return RoseTree(get_random_tensor(tensor_shape), [])
+
+    # return RoseTree(get_random_tensor(tensor_shape),
+                    # [generate_random_tree(num_nodes - 1, tensor_shape)])
 
 def generate_random_trees(num_nodes, batch_size, tensor_shape, prelude):
     trees = [generate_random_tree(num_nodes, tensor_shape) for i in range(batch_size)]
-    trees[0].printTree(0)
+    # [tree.printTree(0) for tree in trees]
     return [from_tree(prelude, tree,
                       relay.TensorType(tensor_shape, dtype='float32')) for tree in trees]

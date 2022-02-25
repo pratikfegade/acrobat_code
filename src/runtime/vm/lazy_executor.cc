@@ -145,7 +145,7 @@ void LazyExecutor::ExecuteOpNodeBatch(
   }
 }
 
-void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
+void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
   std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
             << std::endl;
   if (all_nodes_same_depth) {
@@ -156,34 +156,65 @@ void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
     ExecuteOpNodeBatch(func_to_node);
   } else {
     std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
-    for (OpNode& node : nodes_) {
-      for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
-        output_tensor_to_node[node.args_[i]] = node.id_;
-      }
-    }
-
-    size_t num_nodes = nodes_.size();
-    std::vector<int> node_to_depth(num_nodes, -1);
-    std::vector<std::vector<OpNode*>> depth_to_node(num_nodes);
     int graph_depth = -1;
-    for (size_t i = 0; i < num_nodes; ++i) {
-      OpNode& node = nodes_[i];
-      int max_depth = 0;
-      for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
-        auto it = output_tensor_to_node.find(node.args_[j]);
-        if (it != output_tensor_to_node.end()) {
-          auto input_node_id = it->second;
-          ICHECK(node_to_depth[input_node_id] >= 0);
-          max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+    size_t num_nodes = nodes_.size();
+    std::vector<std::vector<OpNode*>> depth_to_node(num_nodes);
+    std::vector<int> node_to_depth(num_nodes, -1);
+
+    if (coarsened_execution) {
+      for (size_t i = 0; i < num_nodes; ++i) {
+        OpNode& node = nodes_[i];
+        auto& access_modes = vm_shared_state_->prim_func_arg_access_mode_[node.func_idx_];
+        int max_depth = 0;
+
+        for (size_t i = 0; i < node.args_.size(); ++i) {
+          if (access_modes[i] == kInput || access_modes[i] == kInputOutput) {
+            auto it = output_tensor_to_node.find(node.args_[i]);
+            if (it != output_tensor_to_node.end()) {
+              auto input_node_id = it->second;
+              ICHECK(node_to_depth[input_node_id] >= 0);
+              max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+            }
+          }
+          if (access_modes[i] == kOutput || access_modes[i] == kInputOutput) {
+            output_tensor_to_node[node.args_[i]] = node.id_;
+          }
+        }
+
+        int node_depth = max_depth + 1;
+        node_to_depth[i] = node_depth;
+        depth_to_node[node_depth].push_back(&node);
+        graph_depth = std::max(graph_depth, node_depth);
+        // std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
+        // << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
+        // << std::endl;
+      }
+    } else {
+      for (OpNode& node : nodes_) {
+        for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
+          output_tensor_to_node[node.args_[i]] = node.id_;
         }
       }
-      int node_depth = max_depth + 1;
-      node_to_depth[i] = node_depth;
-      depth_to_node[node_depth].push_back(&node);
-      graph_depth = std::max(graph_depth, node_depth);
-      std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
-                << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
-                << std::endl;
+
+      for (size_t i = 0; i < num_nodes; ++i) {
+        OpNode& node = nodes_[i];
+        int max_depth = 0;
+        for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
+          auto it = output_tensor_to_node.find(node.args_[j]);
+          if (it != output_tensor_to_node.end()) {
+            auto input_node_id = it->second;
+            ICHECK(node_to_depth[input_node_id] >= 0);
+            max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+          }
+        }
+        int node_depth = max_depth + 1;
+        node_to_depth[i] = node_depth;
+        depth_to_node[node_depth].push_back(&node);
+        graph_depth = std::max(graph_depth, node_depth);
+        // std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
+        // << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
+        // << std::endl;
+      }
     }
 
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;

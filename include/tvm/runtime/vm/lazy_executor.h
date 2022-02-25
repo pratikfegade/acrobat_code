@@ -82,7 +82,7 @@ class LazyExecutor {
 
   void Execute();
 
-  void BatchedExecute(bool all_nodes_same_depth = false);
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
 
  private:
   void ExecuteOpNodeBatch(const std::unordered_map<int, std::vector<OpNode*>>& func_to_node);

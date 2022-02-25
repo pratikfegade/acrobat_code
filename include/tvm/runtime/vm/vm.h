@@ -48,6 +48,8 @@ namespace vm {
 /*! \brief range over one dimension */
 class VMExecutionOptionsNode : public Object {
  public:
+  /*! \brief whether the prim funcs are coarsened */
+  bool coarsened_execution;
   /*! \brief whether to execute tensor operations lazily */
   bool lazy_execution;
   /*! \brief whether to execute tensor operations in a batched manner */
@@ -61,9 +63,10 @@ class VMExecutionOptionsNode : public Object {
   size_t batch_size;
 
   VMExecutionOptionsNode() {}
-  VMExecutionOptionsNode(bool lazy_execution_, bool batched_execution_, bool scattered_kernels_,
-                         bool concurrent_execution_, size_t batch_size_)
-      : lazy_execution(lazy_execution_),
+  VMExecutionOptionsNode(bool coarsened_execution_, bool lazy_execution_, bool batched_execution_,
+                         bool scattered_kernels_, bool concurrent_execution_, size_t batch_size_)
+      : coarsened_execution(coarsened_execution_),
+        lazy_execution(lazy_execution_),
         batched_execution(batched_execution_),
         scattered_kernels(scattered_kernels_),
         concurrent_execution(concurrent_execution_),
@@ -81,8 +84,8 @@ class VMExecutionOptions : public ObjectRef {
    * \brief constructor
    * \param lazy_execution whether to execute tensor operations lazily.
    */
-  TVM_DLL VMExecutionOptions(bool lazy_execution, bool batched_execution, bool scattered_kernels,
-                             bool concurrent_execution, size_t batch_size);
+  TVM_DLL VMExecutionOptions(bool coarsened_execution, bool lazy_execution, bool batched_execution,
+                             bool scattered_kernels, bool concurrent_execution, size_t batch_size);
   // declare VMExecutionOptions.
   TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
 };
@@ -215,13 +218,18 @@ struct VMSharedState {
    */
   LazyExecutor lazy_executor_;
   /*!
-   * \brief A mapping from packed_funcs to there batched counterparts.
+   * \brief A mapping from packed_funcs to their batched counterparts.
    */
   std::vector<Index> batched_funcs_;
   /*!
-   * \brief A mapping from packed_funcs to there batched counterparts.
+   * \brief A mapping from packed_funcs to their batched arg modes.
    */
   std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
+  /*!
+   * \brief A mapping from packed_funcs to their arg access modes
+   * counterparts.
+   */
+  std::vector<std::vector<DBArgAccessMode>> prim_func_arg_access_mode_;
 };
 
 class ConcurrentVirtualMachine;
@@ -423,6 +431,10 @@ class VirtualMachine : public runtime::ModuleNode {
   Index pc_;
   /*! \brief The special return register. */
   ObjectRef return_register_;
+  /*!
+   * \brief Whether the generated prim funcs are coarsened.
+   */
+  bool coarsened_execution_ = false;
   /*!
    * \brief Whether to execute tensor ops lazily.
    */

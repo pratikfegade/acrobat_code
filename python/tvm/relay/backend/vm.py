@@ -50,6 +50,7 @@ def create_workflow_configs(lazy_execution=False,
         "relay.backend.use_auto_scheduler": use_autoscheduler
    }
     execution_options = tvm.runtime.vm.create_vm_execution_options(
+        coarsened_execution=coarsened_execution,
         lazy_execution=lazy_execution,
         batched_execution=batched_execution,
         scattered_kernels=scattered_kernels,

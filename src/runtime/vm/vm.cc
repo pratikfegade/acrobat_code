@@ -47,18 +47,18 @@ namespace vm {
 TVM_REGISTER_OBJECT_TYPE(VMClosureObj);
 TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
 
-VMExecutionOptions::VMExecutionOptions(bool lazy_execution, bool batched_execution,
-                                       bool scattered_kernels, bool concurrent_execution,
-                                       size_t batch_size)
-    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(
-          lazy_execution, batched_execution, scattered_kernels, concurrent_execution, batch_size)) {
-}
+VMExecutionOptions::VMExecutionOptions(bool coarsened_execution, bool lazy_execution,
+                                       bool batched_execution, bool scattered_kernels,
+                                       bool concurrent_execution, size_t batch_size)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(coarsened_execution, lazy_execution,
+                                                             batched_execution, scattered_kernels,
+                                                             concurrent_execution, batch_size)) {}
 
 TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions")
-    .set_body_typed([](bool lazy_execution, bool batched_execution, bool scattered_kernels,
-                       bool concurrent_execution, size_t batch_size) {
-      return VMExecutionOptions(lazy_execution, batched_execution, scattered_kernels,
-                                concurrent_execution, batch_size);
+    .set_body_typed([](bool coarsened_execution, bool lazy_execution, bool batched_execution,
+                       bool scattered_kernels, bool concurrent_execution, size_t batch_size) {
+      return VMExecutionOptions(coarsened_execution, lazy_execution, batched_execution,
+                                scattered_kernels, concurrent_execution, batch_size);
     });
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
@@ -308,6 +308,7 @@ void VirtualMachine::InitSharedState() {
 }
 
 void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
+  this->coarsened_execution_ = options->coarsened_execution;
   this->lazy_execution_ = options->lazy_execution;
   this->scattered_kernels_ = options->scattered_kernels;
   this->batched_execution_ = options->batched_execution;
@@ -315,6 +316,12 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   this->batch_size_ = options->batch_size;
 
   if (true) {
+    if (options->coarsened_execution) {
+      std::cout << "[VM] Executing coarsened" << std::endl;
+    } else {
+      std::cout << "[VM] Executing uncoarsened" << std::endl;
+    }
+
     if (options->batched_execution) {
       std::cout << "[VM] Executing batched" << std::endl;
     } else {
@@ -400,6 +407,15 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();
   }
+
+  if (lazy_execution_) {
+    if (batched_execution_) {
+      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+    } else {
+      shared_state_->lazy_executor_.Execute();
+    }
+  }
+
   return return_register_;
 }
 
@@ -442,6 +458,9 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
+  this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
+  this->shared_state_->prim_func_arg_access_mode_ = shared_state_->exec_->prim_func_arg_access_mode;
+
   for (const auto& it : shared_state_->exec_->primitive_map) {
     const auto& packed_name = it.first;
     auto packed_index = static_cast<size_t>(it.second);
@@ -472,9 +491,16 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
         shared_state_->batched_funcs_[packed_index] = bit->second;
       }
     }
-  }
 
-  this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
+    if (true) {
+      std::cout << "[VM]   ArgAccessModes: [";
+      for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
+           ++i) {
+        std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
+      }
+      std::cout << "]" << std::endl;
+    }
+  }
 
   // for (const auto& it : shared_state_->exec_->primitive_map) {
   //   const auto& packed_name = it.first;
@@ -818,13 +844,6 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
       auto caller_return_register = frames_.back().caller_return_register;
 
       if (PopFrame() == frame_start) {
-        if (lazy_execution_) {
-          if (batched_execution_) {
-            shared_state_->lazy_executor_.BatchedExecute();
-          } else {
-            shared_state_->lazy_executor_.Execute();
-          }
-        }
         return true;
         // Otherwise we are just returning from a local call.
       } else {
@@ -994,7 +1013,7 @@ void ConcurrentVirtualMachine::RunLoop() {
     if (batched_execution_) {
       // std::cout << "[VM] Batched execution " << shared_state_->lazy_executor_.nodes_.size()
       // << std::endl;
-      shared_state_->lazy_executor_.BatchedExecute(!lazy_execution_);
+      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_, !lazy_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
     }
