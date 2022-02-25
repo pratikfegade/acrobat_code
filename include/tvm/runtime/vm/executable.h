@@ -275,6 +275,8 @@ class Executable : public ModuleNode {
   std::vector<Index> const_device_indexes;
   /*! \brief The arg_mode for all batched PrimFuncs. */
   std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode;
+  /*! \brief The arg_access_mode for all batched PrimFuncs. */
+  std::vector<std::vector<DBArgAccessMode>> prim_func_arg_access_mode;
 
  private:
   /*!

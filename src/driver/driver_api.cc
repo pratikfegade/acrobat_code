@@ -30,6 +30,7 @@
 #include <tvm/target/codegen.h>
 #include <tvm/te/operation.h>
 #include <tvm/tir/analysis.h>
+#include <tvm/tir/stmt_functor.h>
 #include <tvm/tir/transform.h>
 
 #include <algorithm>
@@ -677,21 +678,21 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
       target->GetAttr("db-unpacked-api", Bool(false)).value().operator bool() && for_execution;
 
   if (target_unpacked_api || module_unpacked_api) {
-    if (for_execution) {
-      std::cout << "[DA] Unpacked API for " << target << std::endl;
-      for (auto pair : mixed_mod->functions) {
-        std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
-      }
-    }
+    // if (for_execution) {
+    //   std::cout << "[DA] Unpacked API for " << target << std::endl;
+    //   for (auto pair : mixed_mod->functions) {
+    //     std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    //   }
+    // }
 
     mixed_pass_list.push_back(tir::transform::MakeUnpackedAPI());
   } else {
-    if (for_execution) {
-      std::cout << "[DA] Packed API for " << target << std::endl;
-      for (auto pair : mixed_mod->functions) {
-        std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
-      }
-    }
+    // if (for_execution) {
+    //   std::cout << "[DA] Packed API for " << target << std::endl;
+    //   for (auto pair : mixed_mod->functions) {
+    //     std::cout << "[DA]  Func " << pair.first->name_hint << std::endl;
+    //   }
+    // }
 
     mixed_pass_list.push_back(tir::transform::MakePackedAPI(-1));
   }

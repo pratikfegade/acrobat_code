@@ -142,6 +142,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     });
 
 GlobalVar::GlobalVar(String name_hint, Type type) {
+  if (name_hint == "vm_mod_fused_layout_transform_batched_1") {
+    std::cout << " " << std::endl;
+  }
   ObjectPtr<GlobalVarNode> n = make_object<GlobalVarNode>();
   n->name_hint = std::move(name_hint);
   n->checked_type_ = std::move(type);

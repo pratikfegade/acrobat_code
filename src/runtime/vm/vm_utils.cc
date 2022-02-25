@@ -155,6 +155,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
   for (Index i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
       case kIgnore: {
+        // std::cout << "[VMU]  Ignoring " << i << std::endl;
         break;
       }
       case kReuse: {
@@ -188,7 +189,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         auto concat_array = CreateConcatenatedNDArray(to_concat);
         arg_holder[i] = concat_array;
         setter(ctr, concat_array);
-        // std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+        // std::cout << "[VMU]  ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
         // << std::endl;
         ctr += 1;
 
@@ -198,7 +199,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
     }
   }
 
-  // std::cout << "[VMU] Calling " << ctr << std::endl;
+  // std::cout << "[VMU] Calling " << ctr << " " << arity << std::endl;
   TVMRetValue rv;
   func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
 }

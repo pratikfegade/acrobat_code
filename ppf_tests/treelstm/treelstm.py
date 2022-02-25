@@ -39,6 +39,24 @@ class LSTMCell(Network):
         c = self.p.foldl(sum, i * u, self.p.map(lam(["z"], foreach_children), c))
         return Tuple([c, o * op.tanh(c)])
 
+    # def build_impl(self, input_size, memory_size, dtype="float32"):
+        # t = TensorType(shape=(1, memory_size), dtype=dtype)
+        # i = self.input(var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+        # c = self.input(Var("lstmcell_children", self.l(TupleType([t, t]))))
+        # sum = lam(["x", "y"], lambda x, y: x + y)
+        # child_h_sum = self.p.foldl(sum,
+                                   # op.zeros(shape=(1, memory_size), dtype=dtype),
+                                   # self.p.map(lam(["z"], lambda z: TupleGetItem(z, 1)), c))
+        # iou = Linear(input_size=memory_size, output_size=memory_size * 3, name="hlinear")(self, child_h_sum)
+        # i, o, u = op.split(iou, 3, axis=1)
+        # fh = Linear(input_size=memory_size, output_size=memory_size)
+
+        # def foreach_children(children):
+            # f = op.sigmoid(fh(self, TupleGetItem(children, 1)))
+            # return f * TupleGetItem(children, 0)
+        # c = self.p.foldl(sum, i * u, self.p.map(lam(["z"], foreach_children), c))
+        # return Tuple([c, o])
+
 class LSTMEncoder(Network):
     def build_impl(self, input_size, memory_size, dtype="float32"):
         l = self.input(Var("l", self.l(TensorType(shape=(1, input_size), dtype=dtype))))

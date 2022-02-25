@@ -34,6 +34,7 @@
 #include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/te/schedule.h>
 #include <tvm/te/schedule_pass.h>
+#include <tvm/tir/stmt_functor.h>
 #include <tvm/topi/tags.h>
 
 #include <functional>
@@ -1276,6 +1277,7 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution) {
     const BaseFunc& base_func = kv.second;
     if (base_func->IsInstance<tir::PrimFuncNode>()) {
       tir::PrimFunc func = Downcast<tir::PrimFunc>(base_func);
+
       // std::cout << "[PTM] Func " << var->name_hint << std::endl;
       // Extract target
       Optional<Target> opt_target = func->GetAttr<Target>(tvm::attr::kTarget);

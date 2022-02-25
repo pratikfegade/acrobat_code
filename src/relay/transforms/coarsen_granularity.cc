@@ -55,13 +55,6 @@ Expr RemoveOnDeviceCalls(const Expr& expr) {
   return OnDeviceRemover()(expr);
 }
 
-struct GroupFinderResult {
-  const bool structurally_allowed;
-  const bool has_op_calls;
-
-  bool is_allowed() const { return structurally_allowed && has_op_calls; }
-};
-
 Op GetInvokeTVMOp() {
   static const Op& op = Op::Get("vm.invoke_tvm_op");
   return op;
@@ -70,6 +63,80 @@ Op GetInvokeTVMOp() {
 std::string DebugPrint(const ObjectRef& obj) {
   return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
 }
+
+class TensorAccessModeCalculator : public tir::StmtExprVisitor {
+ public:
+  TensorAccessModeCalculator(const tir::PrimFunc& func) : func_(func) {}
+
+  std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
+  Compute() {
+    auto global_symbol = func_->GetAttr<String>(tvm::attr::kGlobalSymbol);
+    bool print = (global_symbol == "vm_mod_fused_sigmoid_tanh_multiply");
+
+    for (auto pair : func_->buffer_map) {
+      param_mapping_[pair.second->data] = pair.first;
+    }
+
+    VisitStmt(func_->body);
+    return access_modes_;
+  }
+
+ private:
+  void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
+    auto global_symbol = func_->GetAttr<String>(tvm::attr::kGlobalSymbol);
+    bool print = false;  //(global_symbol == "vm_mod_fused_sigmoid_tanh_multiply");
+
+    tir::Var replaced_var = var;
+    auto it = param_mapping_.find(var);
+    if (it != param_mapping_.end()) {
+      replaced_var = it->second;
+    }
+
+    if (print) {
+      std::cout << "[CG_AMC]  var " << replaced_var << " " << replaced_var.get() << std::endl;
+    }
+    auto iit = access_modes_.find(replaced_var);
+    if (iit == access_modes_.end()) {
+      // std::cout << "[CG_AMC]    " << mode << std::endl;
+      access_modes_[replaced_var] = mode;
+    } else if (iit->second != mode) {
+      // std::cout << "[CG_AMC]    " << kInputOutput << std::endl;
+      access_modes_[replaced_var] = runtime::vm::kInputOutput;
+    }
+  }
+
+  void VisitExpr_(const tir::LoadNode* op) {
+    MergeAndSet(op->buffer_var, runtime::vm::kInput);
+    StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::StoreNode* op) {
+    MergeAndSet(op->buffer_var, runtime::vm::kOutput);
+    StmtExprVisitor::VisitStmt_(op);
+  }
+
+  void VisitExpr_(const tir::ScatterLoadNode* op) {
+    MergeAndSet(op->buffer_var, runtime::vm::kInput);
+    StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::ScatterStoreNode* op) {
+    MergeAndSet(op->buffer_var, runtime::vm::kOutput);
+    StmtExprVisitor::VisitStmt_(op);
+  }
+
+  std::unordered_map<tir::Var, tir::Var, ObjectPtrHash, ObjectPtrEqual> param_mapping_;
+  std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
+      access_modes_;
+  const tir::PrimFunc func_;
+};
+
+struct GroupFinderResult {
+  const bool structurally_allowed;
+  const bool has_op_calls;
+
+  bool is_allowed() const { return structurally_allowed && has_op_calls; }
+};
 
 typedef std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> Groups;
 class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
@@ -462,6 +529,56 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
       prim_func_params.push_back(CreateTIRVar(rvar));
     }
 
+    Array<Integer> access_modes;
+    {
+      Map<Var, Integer> access_modes_map;
+      auto merge_and_set = [&](const Var& var, runtime::vm::DBArgAccessMode mode) {
+        auto it = access_modes_map.find(var);
+        if (it == access_modes_map.end()) {
+          access_modes_map.Set(var, Integer(static_cast<int>(mode)));
+        } else if ((*it).second != mode) {
+          access_modes_map.Set(var, Integer(static_cast<int>(runtime::vm::kInputOutput)));
+        }
+      };
+
+      for (auto pair : bindings) {
+        auto rvalue = pair.second;
+
+        if (auto call = rvalue.as<CallNode>()) {
+          ICHECK(call->op == GetInvokeTVMOp());
+          auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+          auto func = mod_->Lookup(callee_gv);
+          auto prim_func = Downcast<tir::PrimFunc>(func);
+          auto func_access_modes = TensorAccessModeCalculator(prim_func).Compute();
+
+          std::cout << "[CG] Function " << prim_func << std::endl;
+          size_t j = 0;
+          for (size_t i = 1; i < call->args.size(); ++i) {
+            for (auto arg : FlattenTuple(call->args[i])) {
+              auto param = prim_func->params[j++];
+              auto it = func_access_modes.find(param);
+              if (it != func_access_modes.end()) {
+                auto mode = it->second;
+                std::cout << "[CG]   " << arg << " " << param << " " << param.get() << " " << mode
+                          << std::endl;
+                merge_and_set(Downcast<Var>(arg), mode);
+              } else {
+                std::cout << "[CG]   " << arg << " " << param << " " << param.get() << " Unused "
+                          << std::endl;
+              }
+            }
+          }
+          std::cout << std::endl;
+        }
+      }
+
+      for (auto var : flattened_free_vars) {
+        // auto mode = (access_modes_map.count(var) ? access_modes_map.at(var)
+        // : Integer(static_cast<int>(runtime::vm::kUnused)));
+        // std::cout << "[CG] Param " << var << " " << mode << std::endl;
+      }
+    }
+
     Array<tir::Stmt> tir_stmts;
     Map<relay::Var, Expr> bindings_map;
     for (auto pair : bindings) {
@@ -510,17 +627,18 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     // std::cout << "[TL] Rewritten body " << body_in_free_vars << std::endl;
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
-    return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
-                             flattened_call_args, body_in_free_vars, Array<Integer>()});
+    auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
+    func = WithAttr(func, tir::attr::kDBArgAccessModes, access_modes);
+    return TIRLowererResult({func, flattened_call_args, body_in_free_vars, Array<Integer>()});
   }
 
  private:
   PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) final {
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+
     std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(name));
-    // args.push_back(callee_gv);
 
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     auto push_args = [&](const Expr& tuple) {
@@ -531,8 +649,6 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     };
     push_args(call->args[1]);
     push_args(call->args[2]);
-    // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
-    // return tir::Call(DataType::Void(), callee_gv, args, call->span);
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
                      call->span);
   }
@@ -666,13 +782,16 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     prim_func_params.push_back(batch_size_var_);
     for (auto rvar : flattened_free_vars) {
       auto param = CreateTIRVarWithUpdatedType(rvar);
-      prim_func_params.push_back(param);
 
       auto iit = arg_mode_states_.find(rvar);
       auto arg_mode = (iit != arg_mode_states_.end()
                            ? (*iit).second
                            : (scattered_kernels_ ? runtime::vm::DBBatchedArgMode::kScatter
                                                  : runtime::vm::DBBatchedArgMode::kConcat));
+
+      if (arg_mode != runtime::vm::DBBatchedArgMode::kIgnore) {
+        prim_func_params.push_back(param);
+      }
       prim_func_arg_modes.push_back(arg_mode);
       if (print) {
         std::cout << "[CG]  ArgMode: " << rvar->vid->name_hint << " " << param->name_hint << " "
@@ -808,6 +927,7 @@ class Coarsener : public ExprMutator {
 
   Expr HandleExpr(const Expr& expr) {
     if (groups_.count(expr)) {
+      // std::cout << "[CG] Group: " << PrettyPrint(RemoveOnDeviceCalls(expr)) << std::endl;
       auto add_attrs_to_wrapper_func = [](const tir::PrimFunc& func, const std::string& name,
                                           bool batched) {
         // format hash as fixed length hex string so it is easier to read

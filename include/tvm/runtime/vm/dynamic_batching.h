@@ -42,6 +42,20 @@ enum DBBatchedArgMode {
   kConcat = 3,
 };
 
+/*!
+ * \brief Argument access mode.
+ *
+ * This specifies whether an argument tensor is read/written/read and
+ * written, or not used, in that order. This is used to determine
+ * dependences between operators during dynamic batching.
+ */
+enum DBArgAccessMode {
+  kInput = 0,
+  kOutput = 1,
+  kInputOutput = 2,
+  kUnused = 3,
+};
+
 #define DB_BATCHED_SUFFIX "_batched"
 
 inline std::string GetBatchedName(std::string name) { return name + DB_BATCHED_SUFFIX; }

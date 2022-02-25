@@ -1023,6 +1023,34 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     exec_->batched_func_arg_mode[index] = std::move(arg_modes_vec);
   }
 
+  for (auto pair : context_.module->functions) {
+    auto index = exec_->primitive_map.at(pair.first->name_hint);
+    auto access_modes = pair.second->GetAttr<Array<Integer>>(tir::attr::kDBArgAccessModes);
+    if (access_modes) {
+      std::vector<DBArgAccessMode> access_modes_vec;
+      access_modes_vec.reserve(access_modes.value().size());
+      for (auto mode : access_modes.value()) {
+        access_modes_vec.push_back(static_cast<DBArgAccessMode>(mode->value));
+      }
+      exec_->prim_func_arg_access_mode[index] = std::move(access_modes_vec);
+    }
+  }
+
+  for (auto pair : arg_modes) {
+    ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
+    auto index = exec_->primitive_map.at(pair.first->name_hint);
+    if (static_cast<Index>(exec_->batched_func_arg_mode.size()) <= index) {
+      exec_->batched_func_arg_mode.resize(index + 1);
+    }
+    auto modes = pair.second;
+    std::vector<DBBatchedArgMode> arg_modes_vec;
+    arg_modes_vec.reserve(modes.size());
+    for (auto mode : modes) {
+      arg_modes_vec.push_back(static_cast<DBBatchedArgMode>(mode->value));
+    }
+    exec_->batched_func_arg_mode[index] = std::move(arg_modes_vec);
+  }
+
   VLOG(1) << "Compiled to:" << std::endl
           << "-------------------------------------------------" << std::endl
           << exec_->GetVirtualDevices()  //
@@ -1191,7 +1219,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // Now that we have PrimFuncs, flow and solve SEScope constraints again to account for
   // any memory scopes which lowering has settled on.
   pass_seqs.push_back(transform::PlanDevices(config_));
-  // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, false));
 
   // Inline the functions that are lifted to the module scope. We perform this
   // pass after all other optimization passes but before the memory allocation
@@ -1213,7 +1240,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

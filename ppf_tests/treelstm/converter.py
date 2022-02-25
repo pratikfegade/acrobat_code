@@ -1,5 +1,7 @@
 import numpy as np
+import random
 from random import randrange
+random.seed(0)
 import tvm
 from tvm import relay
 from tvm.runtime.container import ADT
@@ -9,12 +11,16 @@ from treelstm import TreeLSTM, LSTMCell, Linear
 from network import copy_var
 
 class RoseTree:
+    idx = 0
+
     def __init__(self, head, children):
         self.head = head
         self.children = children
+        self.idx = RoseTree.idx
+        RoseTree.idx += 1
 
     def __str__(self):
-        return "Tree(" + str(self.head) + ", " + str(self.children) + ")"
+        return "Tree(" + str(self.idx) + ", " + str(self.children) + ")"
 
     def __repr__(self):
         return self.__str__()
@@ -24,6 +30,16 @@ class RoseTree:
 
     def size(self):
         return 1 + sum([x.size() for x in self.children])
+
+    def printTree(self, level=0):
+        if len(self.children) == 0:
+            print(' ' * 4 * level + '-> ' + str(self.idx))
+        elif len(self.children) == 1:
+            print(' ' * 4 * level + '-> ' + str(self.idx) + ' -> ' + str(self.children[0].idx))
+        else:
+            self.children[1].printTree(level + 1)
+            print(' ' * 4 * level + '-> ' + str(self.idx))
+            self.children[0].printTree(level + 1)
 
 # creates relay list from a list
 def from_list(p, l, t):
@@ -57,22 +73,30 @@ def get_random_tensor(shape):
     return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
 
 def generate_random_tree(num_nodes, tensor_shape):
+    # assert num_nodes > 0
+    # if num_nodes == 1:
+    #     return RoseTree(get_random_tensor(tensor_shape), [])
+
+    # num_nodes -= 1
+    # l_nodes = randrange(num_nodes)
+    # r_nodes = num_nodes - l_nodes
+    # if l_nodes == 0 or r_nodes == 0:
+    #     return RoseTree(get_random_tensor(tensor_shape),
+    #                     [generate_random_tree(num_nodes, tensor_shape)])
+    # else:
+    #     return RoseTree(get_random_tensor(tensor_shape),
+    #                     [generate_random_tree(l_nodes, tensor_shape),
+    #                      generate_random_tree(r_nodes, tensor_shape)])
+
     assert num_nodes > 0
     if num_nodes == 1:
         return RoseTree(get_random_tensor(tensor_shape), [])
 
-    num_nodes -= 1
-    l_nodes = randrange(num_nodes)
-    r_nodes = num_nodes - l_nodes
-    if l_nodes == 0 or r_nodes == 0:
-        return RoseTree(get_random_tensor(tensor_shape),
-                        [generate_random_tree(num_nodes, tensor_shape)])
-    else:
-        return RoseTree(get_random_tensor(tensor_shape),
-                        [generate_random_tree(l_nodes, tensor_shape),
-                         generate_random_tree(r_nodes, tensor_shape)])
+    return RoseTree(get_random_tensor(tensor_shape),
+                    [generate_random_tree(num_nodes - 1, tensor_shape)])
 
 def generate_random_trees(num_nodes, batch_size, tensor_shape, prelude):
     trees = [generate_random_tree(num_nodes, tensor_shape) for i in range(batch_size)]
+    trees[0].printTree(0)
     return [from_tree(prelude, tree,
                       relay.TensorType(tensor_shape, dtype='float32')) for tree in trees]

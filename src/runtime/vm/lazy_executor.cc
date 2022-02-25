@@ -117,35 +117,37 @@ void LazyExecutor::ExecuteOpNodeBatch(
     const std::unordered_map<int, std::vector<OpNode*>>& func_to_node) {
   for (auto& pair : func_to_node) {
     auto& func_idx = pair.first;
-    auto& nodes = pair.second;
+    auto& func_nodes = pair.second;
 
-    for (size_t i = 0; i < nodes.size(); ++i) {
-      ICHECK_EQ(func_idx, nodes[i]->func_idx_);
-      ICHECK_EQ(nodes[0]->arg_count_, nodes[i]->arg_count_);
-      ICHECK_EQ(nodes[0]->output_size_, nodes[i]->output_size_);
-      ICHECK_EQ(nodes[0]->args_.size(), nodes[i]->args_.size());
+    for (size_t i = 0; i < func_nodes.size(); ++i) {
+      ICHECK_EQ(func_idx, func_nodes[i]->func_idx_);
+      ICHECK_EQ(func_nodes[0]->arg_count_, func_nodes[i]->arg_count_);
+      ICHECK_EQ(func_nodes[0]->output_size_, func_nodes[i]->output_size_);
+      ICHECK_EQ(func_nodes[0]->args_.size(), func_nodes[i]->args_.size());
     }
 
-    // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-    if (nodes.size() == 1) {
-      // std::cout << "[VMU] Executing " << func_idx << " " << nodes.size() << std::endl;
-      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], nodes[0]->arg_count_,
-                             nodes[0]->output_size_, nodes[0]->args_);
+    std::cout << "[VMU]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
+    if (func_nodes.size() == 1) {
+      // std::cout << "[VMU] Executing " << func_idx << " " << func_nodes.size() << std::endl;
+      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->arg_count_,
+                             func_nodes[0]->output_size_, func_nodes[0]->args_);
     } else {
       auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
-      // std::cout << "[VMU] Executing " << batched_func_idx << " " << nodes.size() << std::endl;
-      // for (auto i : vm_shared_state_->batched_func_arg_mode_[batched_func_idx]) {
-      //   std::cout << "[VMU]   ArgMode " << i << std::endl;
+      // std::cout << "[VMU] Executing " << batched_func_idx << " " << func_nodes.size() <<
+      // std::endl; for (auto i : vm_shared_state_->batched_func_arg_mode_[batched_func_idx]) {
+      // std::cout << "[VMU]   ArgMode " << i << std::endl;
       // }
       InvokePackedFnBatchedUnrolled(vm_shared_state_->packed_funcs_[batched_func_idx],
-                                    nodes[0]->arg_count_, nodes[0]->output_size_,
+                                    func_nodes[0]->arg_count_, func_nodes[0]->output_size_,
                                     vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
-                                    nodes);
+                                    func_nodes);
     }
   }
 }
 
 void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
+  std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
+            << std::endl;
   if (all_nodes_same_depth) {
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;
     for (auto& node : nodes_) {
@@ -161,7 +163,7 @@ void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
     }
 
     size_t num_nodes = nodes_.size();
-    std::vector<int> node_to_depth(num_nodes);
+    std::vector<int> node_to_depth(num_nodes, -1);
     std::vector<std::vector<OpNode*>> depth_to_node(num_nodes);
     int graph_depth = -1;
     for (size_t i = 0; i < num_nodes; ++i) {
@@ -171,6 +173,7 @@ void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
         auto it = output_tensor_to_node.find(node.args_[j]);
         if (it != output_tensor_to_node.end()) {
           auto input_node_id = it->second;
+          ICHECK(node_to_depth[input_node_id] >= 0);
           max_depth = std::max(max_depth, node_to_depth[input_node_id]);
         }
       }
@@ -178,6 +181,9 @@ void LazyExecutor::BatchedExecute(bool all_nodes_same_depth) {
       node_to_depth[i] = node_depth;
       depth_to_node[node_depth].push_back(&node);
       graph_depth = std::max(graph_depth, node_depth);
+      std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
+                << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
+                << std::endl;
     }
 
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;

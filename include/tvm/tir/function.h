@@ -316,6 +316,10 @@ constexpr const char* kDBKernelPrimFunc = "db.kernel_prim_func";
 /*! \brief Mark the function as having an unpacked API. */
 constexpr const char* kDBUnpackedAPI = "db.unpacked_api";
 
+/*! \brief Mark arguments with their access modes (input, output,
+    in-out, or unused). */
+constexpr const char* kDBArgAccessModes = "db.args_access_modes";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

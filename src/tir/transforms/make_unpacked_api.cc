@@ -40,9 +40,55 @@
 namespace tvm {
 namespace tir {
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+class ParamDebugger : public tir::StmtExprVisitor {
+ public:
+  ParamDebugger(const tir::PrimFunc& func) : func_(func) {}
+
+  void Compute() {
+    std::cout << "[DA_PD] Func " << func_ << std::endl;
+    for (auto p : func_->params) {
+      std::cout << "[DA_PD]  Param " << p << " " << p.get() << std::endl;
+    }
+    VisitStmt(func_->body);
+  }
+
+ private:
+  void MergeAndSet(const tir::Var& var) {
+    std::cout << "[DA_PD]  var " << var << " " << var.get() << std::endl;
+  }
+
+  void VisitExpr_(const tir::LoadNode* op) {
+    MergeAndSet(op->buffer_var);
+    StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::StoreNode* op) {
+    MergeAndSet(op->buffer_var);
+    StmtExprVisitor::VisitStmt_(op);
+  }
+
+  void VisitExpr_(const tir::ScatterLoadNode* op) {
+    MergeAndSet(op->buffer_var);
+    StmtExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const tir::ScatterStoreNode* op) {
+    MergeAndSet(op->buffer_var);
+    StmtExprVisitor::VisitStmt_(op);
+  }
+
+  const tir::PrimFunc func_;
+};
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 PrimFunc MakeUnpackedAPI(PrimFunc&& func) {
   auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
   ICHECK(global_symbol) << "MakeUnpackedAPI: Expect PrimFunc to have the global_symbol attribute";
+
+  // if (global_symbol == "vm_mod_fused_sigmoid_tanh_multiply") {
+  // ParamDebugger(func).Compute();
+  // }
 
   auto target = func->GetAttr<Target>(tvm::attr::kTarget);
   ICHECK(target.defined()) << "MakeUnpackedAPI: Require the target attribute";
@@ -86,6 +132,10 @@ PrimFunc MakeUnpackedAPI(PrimFunc&& func) {
   func_ptr->body = MergeNest({device_init, binder.init_nest(), binder.asserts()}, func_ptr->body);
   func_ptr->params = args;
   func_ptr->ret_type = PrimType(DataType::Int(32));
+
+  // if (global_symbol == "vm_mod_fused_sigmoid_tanh_multiply") {
+  // ParamDebugger(func).Compute();
+  // }
 
   // return the function.
   return std::move(func);

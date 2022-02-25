@@ -160,7 +160,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     // TODO(mbs): This should be the definitive global by which the
     // PrimFunc is known and no other GlobalVar ctors should appear
     // inside the lowering machinery.
-    auto prim_fn_var = GlobalVar(renamer(candidate_name));
+    auto unique_name = renamer(candidate_name);
+    auto prim_fn_var = GlobalVar(unique_name);
     prim_fn_var->checked_type_ = relay_func->checked_type();
 
     // Fusion over tupled results may leave identity relationships
@@ -300,7 +301,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       Array<Type> input_tensor_types = tensor_to_batched_tensor_types(batched_inputs);
       Array<Type> output_tensor_types = tensor_to_batched_tensor_types(batched_outputs);
 
-      auto batched_fn_var = GlobalVar(renamer(runtime::vm::GetBatchedName(candidate_name)));
+      auto batched_fn_var = GlobalVar(runtime::vm::GetBatchedName(unique_name));
       batched_fn_var->checked_type_ = FuncType(input_tensor_types, TupleType(output_tensor_types),
                                                Array<TypeVar>(), Array<TypeConstraint>());
 

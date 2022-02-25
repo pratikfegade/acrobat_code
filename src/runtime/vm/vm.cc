@@ -308,34 +308,37 @@ void VirtualMachine::InitSharedState() {
 }
 
 void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
-  // if (options->lazy_execution) {
-  //   std::cout << "[VM] Executing lazily" << std::endl;
-  // } else {
-  //   std::cout << "[VM] Executing eagerly" << std::endl;
-  // }
   this->lazy_execution_ = options->lazy_execution;
-
-  // if (options->batched_execution) {
-  //   std::cout << "[VM] Executing batched" << std::endl;
-  // } else {
-  //   std::cout << "[VM] Executing unbatched" << std::endl;
-  // }
-  this->batched_execution_ = options->batched_execution;
-
-  // if (options->scattered_kernels) {
-  //   std::cout << "[VM] Executing scattered kernels" << std::endl;
-  // } else {
-  //   std::cout << "[VM] Executing unscattered kernels" << std::endl;
-  // }
   this->scattered_kernels_ = options->scattered_kernels;
-
-  // if (options->concurrent_execution) {
-  //   std::cout << "[VM] Executing concurrent" << std::endl;
-  // } else {
-  //   std::cout << "[VM] Executing unconcurrent" << std::endl;
-  // }
+  this->batched_execution_ = options->batched_execution;
   this->concurrent_execution_ = options->concurrent_execution;
   this->batch_size_ = options->batch_size;
+
+  if (true) {
+    if (options->batched_execution) {
+      std::cout << "[VM] Executing batched" << std::endl;
+    } else {
+      std::cout << "[VM] Executing unbatched" << std::endl;
+    }
+
+    if (options->lazy_execution) {
+      std::cout << "[VM] Executing lazily" << std::endl;
+    } else {
+      std::cout << "[VM] Executing eagerly" << std::endl;
+    }
+
+    if (options->scattered_kernels) {
+      std::cout << "[VM] Executing scattered kernels" << std::endl;
+    } else {
+      std::cout << "[VM] Executing unscattered kernels" << std::endl;
+    }
+
+    if (options->concurrent_execution) {
+      std::cout << "[VM] Executing concurrent" << std::endl;
+    } else {
+      std::cout << "[VM] Executing unconcurrent" << std::endl;
+    }
+  }
 }
 
 inline Device VirtualMachine::GetDevice(Index device_index) const {
