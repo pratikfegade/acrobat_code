@@ -516,7 +516,9 @@ class TECompilerImpl : public TECompilerNode {
     for (const auto& kv : cache_) {
       auto value = kv.second;
       auto name = value->cached_func->prim_fn_var->name_hint;
+      auto batched_name = value->batched_cached_func->prim_fn_var->name_hint;
       weights.Set(name, value->use_count);
+      weights.Set(batched_name, value->use_count);
     }
     return weights;
   }

@@ -179,6 +179,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     // No need to register schedule for device copy op.
     if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
       if (use_auto_scheduler_) {
+        std::cout << "[TCC] Invoking relay integration autoscheduler" << std::endl;
         const auto* fauto_schedule =
             runtime::Registry::Get("auto_scheduler.relay_integration.auto_schedule_topi_compute");
         ICHECK(fauto_schedule != nullptr)
@@ -234,6 +235,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     CachedFunc generated_batched_func;
 
     if (create_batched) {
+      std::cout << "[TCC] Creating batched functions" << std::endl;
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
                                         std::vector<bool>* p_reuse_taints) {
         ICHECK_LE(tensors.size(), model_parameter_taints.size());
@@ -282,11 +284,6 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       Array<te::Tensor> batched_inputs = map_tensors(fn_inputs, &arg_modes, 0);
       Array<te::Tensor> batched_outputs = map_tensors(outputs, &arg_modes, fn_inputs.size());
 
-      Array<te::Operation> output_operations;
-      for (auto tensor : batched_outputs) {
-        output_operations.push_back(tensor->op);
-      }
-
       auto tensor_to_batched_tensor_types = [](const Array<te::Tensor>& tensors) {
         Array<Type> tensor_types;
         for (auto tensor : tensors) {
@@ -305,7 +302,42 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       batched_fn_var->checked_type_ = FuncType(input_tensor_types, TupleType(output_tensor_types),
                                                Array<TypeVar>(), Array<TypeConstraint>());
 
-      auto batched_schedule = te::create_schedule(output_operations);
+      te::Schedule batched_schedule{nullptr};
+      // No need to register schedule for device copy op.
+      if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
+        if (use_auto_scheduler_) {
+          std::cout << "[TCC]  Invoking relay integration autoscheduler on batched" << std::endl;
+          const auto* fauto_schedule =
+              runtime::Registry::Get("auto_scheduler.relay_integration.auto_schedule_topi_compute");
+          ICHECK(fauto_schedule != nullptr)
+              << "auto_scheduler.relay_integration.auto_schedule_topi_compute is not registered";
+          ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs);
+          if (obj.defined()) {
+            batched_schedule = Downcast<te::Schedule>(obj);
+          }
+        }
+        ICHECK(!use_meta_schedule_) << "Do not support meta-schedule for batched operators yet!";
+
+        // Use TOPI schedule if user specificed, or the function has no
+        // auto_scheduler schedule.
+        if (!batched_schedule.defined() && !prim_func.defined()) {
+          Array<te::Operation> output_operations;
+          for (auto tensor : batched_outputs) {
+            output_operations.push_back(tensor->op);
+          }
+
+          batched_schedule = te::create_schedule(output_operations);
+        }
+        if (batched_schedule.defined()) {
+          for (const auto& scalar : scalars_) {
+            if (batched_schedule->Contain(scalar)) {
+              batched_schedule[scalar].compute_inline();
+            }
+          }
+        }
+      }
+
+      ICHECK(batched_schedule.defined());
 
       // std::cout << "[TEC] BatchedFnVar " << batched_fn_var << std::endl;
       generated_batched_func =

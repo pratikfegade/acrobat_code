@@ -48,7 +48,7 @@ from .workload_registry import register_workload_tensors
 logger = logging.getLogger("auto_scheduler")
 
 
-def call_all_topi_funcs(mod, params, target, opt_level=3):
+def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None):
     """Call all TOPI compute to extract auto_scheduler tasks in a Relay program"""
     # pylint: disable=import-outside-toplevel
     from tvm import relay
@@ -57,13 +57,13 @@ def call_all_topi_funcs(mod, params, target, opt_level=3):
     old_autotvm_silent = autotvm.GLOBAL_SCOPE.silent
     autotvm.GLOBAL_SCOPE.silent = True
 
-    with transform.PassContext(
-        opt_level=opt_level,
-        config={
-            "relay.backend.use_auto_scheduler": True,
-        },
-        disabled_pass={"AutoSchedulerLayoutRewrite"},
-    ):
+    if pass_context is not None:
+        pass_context = pass_context.combine_with(opt_level=opt_level,
+                                                 disabled_pass={"AutoSchedulerLayoutRewrite"},
+                                                 config={"relay.backend.use_auto_scheduler":
+                                                         True})
+
+    with pass_context:
         compiler = relay.vm.VMCompiler()
         if params:
             compiler.set_params(params)
@@ -75,11 +75,11 @@ def call_all_topi_funcs(mod, params, target, opt_level=3):
         finally:
             autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
 
-
 def extract_tasks(
     mod,
     params,
     target,
+    pass_context=None,
     target_host=None,
     hardware_params=None,
     include_simple_tasks=False,
@@ -135,7 +135,7 @@ def extract_tasks(
         # Wrap build call in a new thread to avoid the conflict
         # between python's multiprocessing and tvm's thread pool
         build_thread = threading.Thread(
-            target=call_all_topi_funcs, args=(mod, params, target, opt_level)
+            target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context)
         )
         build_thread.start()
         build_thread.join()
@@ -145,6 +145,7 @@ def extract_tasks(
     tasks = []
     weights = []
     for wkl_key, (weight, func_names) in env.wkl_key_to_weight.items():
+        print("EXTRACT TASKS:", wkl_key)
         tasks.append(
             SearchTask(
                 workload_key=wkl_key,
@@ -186,6 +187,7 @@ class TracingEnvironment:
     current = None
 
     def __init__(self, tracing_mode):
+        print("New env")
         self.tracing_mode = tracing_mode
         self.relay_disable_build_cache = "false"
         self.func_name_to_wkl_key = {}
@@ -210,6 +212,7 @@ class TracingEnvironment:
         workload_key: str
             The workload key of a task.
         """
+        print("   Adding key", func_name, workload_key, len(self.wkl_key_to_weight))
         self.func_name_to_wkl_key[func_name] = workload_key
         if workload_key not in self.wkl_key_to_weight:
             self.wkl_key_to_weight[workload_key] = (0, set())
@@ -291,10 +294,14 @@ def traverse_to_get_io_tensors(outs):
         traverse(t)
 
     io_tensors = inputs + list(outs)
-    for tensor in io_tensors:
-        # Reject the compute if any of its I/O tensors has dynamic shape.
-        if any([not isinstance(v, int) for v in get_const_tuple(tensor.shape)]):
-            return ([], False, False)
+
+    ##############################################
+    # for tensor in io_tensors:
+    #     # Reject the compute if any of its I/O tensors has dynamic shape.
+    #     if any([not isinstance(v, int) for v in get_const_tuple(tensor.shape)]):
+    #         # return ([], False, False)
+    #         print(" Found dynamic shapes!!")
+    ##############################################
 
     return (io_tensors, len(layout_free_ops) > 0, has_complex_op)
 
@@ -321,6 +328,7 @@ def auto_schedule_topi(func_name, outs):
         None in the tracing mode so that the fallback topi schedule will be used.
     """
 
+    # print("Auto schedule TOPI")
     # pylint: disable=import-outside-toplevel
     from tvm.auto_scheduler.measure import (
         prepare_input_map,
@@ -330,6 +338,7 @@ def auto_schedule_topi(func_name, outs):
     if not io_tensors:  # The compute includes dynamic shapes which are not supported yet.
         return None
 
+    # print(" Computing DAG")
     try:
         dag = ComputeDAG(io_tensors)
     except tvm.error.TVMError as err:
@@ -351,6 +360,8 @@ def auto_schedule_topi(func_name, outs):
 
         schedule, _ = dag.apply_steps_from_state(state)
         return schedule
+
+    # print(" Tracing DAG now")
 
     if env.tracing_mode in [TracingMode.EXTRACT_TASK, TracingMode.EXTRACT_COMPLEX_TASK_ONLY]:
         # in the task extraction mode
@@ -393,6 +404,7 @@ def te_compiler_update_weights(function_weights):
     """
     env = TracingEnvironment.current
     if env is not None:
+        print("Resetting the map")
         # Override this map with the weights in the TE compiler.
         env.wkl_key_to_weight = {}
 

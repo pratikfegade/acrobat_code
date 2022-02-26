@@ -97,6 +97,52 @@ class PassContext(tvm.runtime.Object):
             _ffi_transform_api.PassContext, opt_level, required, disabled, instruments, config
         )
 
+    def combine_with(
+        self,
+        opt_level=2,
+        required_pass=None,
+        disabled_pass=None,
+        instruments=None,
+        config=None,
+    ):
+
+        required = list(required_pass) if required_pass else []
+        if not isinstance(required, (list, tuple)):
+            raise TypeError("required_pass is expected to be the type of " + "list/tuple/set.")
+
+        disabled = list(disabled_pass) if disabled_pass else []
+        if not isinstance(disabled, (list, tuple)):
+            raise TypeError("disabled_pass is expected to be the type of " + "list/tuple/set.")
+
+        instruments = list(instruments) if instruments else []
+        if not isinstance(instruments, (list, tuple)):
+            raise TypeError("instruments is expected to be the type of " + "list/tuple/set.")
+
+        config = config if config else None
+
+        required += self.required_pass
+        disabled += self.disabled_pass
+        instruments += self.instruments
+        merged_config = {}
+        for key, value in self.config.items():
+            if key in config:
+                if config[key] == value:
+                    merged_config[key] = value
+                else:
+                    if isinstance(config[key], int):
+                        merged_config[key] = max(config[key], value)
+                    elif isinstance(config[key], bool):
+                        merged_config[key] = True
+                    else:
+                        raise ValueError('Cannot merge')
+            else:
+                merged_config[key] = value
+
+        return PassContext(
+            opt_level=max(opt_level, self.opt_level), required_pass=required,
+            disabled_pass=disabled, instruments=instruments, config=merged_config
+        )
+
     def __enter__(self):
         _ffi_transform_api.EnterPassContext(self)
         return self

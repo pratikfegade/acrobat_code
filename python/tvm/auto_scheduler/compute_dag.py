@@ -229,6 +229,8 @@ class ComputeDAG(Object):
         key: str
             The workload key of this compute DAG
         """
+
+        from tvm import tir
         str_dag = _ffi_api.ComputeDAGPrintDAG(self, True)
         hash_func = tvm._ffi.get_global_func(
             "auto_scheduler.compute_dag.hash_func", allow_missing=True
@@ -243,6 +245,13 @@ class ComputeDAG(Object):
         io_shapes = []
         for tensor in self.tensors:
             io_shapes.append(get_const_tuple(tensor.shape))
+        for i in range(len(io_shapes)):
+            tupl = list(io_shapes[i])
+            for j in range(len(tupl)):
+                if isinstance(tupl[j], tir.Var):
+                    var = tupl[j]
+                    tupl[j] = "var_" + var.name + "_" + var.dtype
+            io_shapes[i] = tuple(tupl)
         return json.dumps([hash_key] + io_shapes)
 
     def __str__(self):
