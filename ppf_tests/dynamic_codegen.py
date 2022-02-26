@@ -24,8 +24,15 @@ def matmul_add(N, L, M, dtype):
 
 target = tvm.target.Target("llvm")
 N = L = M = 1024
-task = tvm.auto_scheduler.SearchTask(func=matmul_add, args=(N, L, M, "float32"), target=target)
-
+V = te.var('Vavavoom')
+N = V
+# task = tvm.auto_scheduler.SearchTask(func=matmul_add, args=(N, L, M, "float32"), target=target)
+compute_dag = tvm.auto_scheduler.ComputeDAG(matmul_add(N, L, M, "float32"))
+task = tvm.auto_scheduler.SearchTask(func=matmul_add, args=(N, L, M, "float32"),
+                                     compute_dag=compute_dag, target=target)
+ctask = task.make_concrete({V: 128})
+print(ctask.compute_dag)
+exit(0)
 # Inspect the computational graph
 print("Computational DAG:")
 print(task.compute_dag)

@@ -304,6 +304,14 @@ class ComputeDAG : public ObjectRef {
    */
   ComputeDAG ReplayAndGetDAG(const Array<Step>& steps) const;
 
+  /*!
+   * \brief Get a compute dag by replacing all variable loop extents
+   * with constant ones, per the provided replacement map.
+   * \param rmap Replacement map
+   * \return The up-to-date ComputeDAG.
+   */
+  ComputeDAG MakeConcrete(Map<tir::Var, Integer> rmap) const;
+
   static constexpr const char* layout_free_placeholders_key = "layout_free_placeholders";
 
   TVM_DEFINE_OBJECT_REF_METHODS(ComputeDAG, ObjectRef, ComputeDAGNode);

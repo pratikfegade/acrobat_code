@@ -558,6 +558,19 @@ class SearchTask(Object):
         )
         return sch, args
 
+    def make_concrete(self, rmap):
+        """Make a search task concrete by replacing variable loop bounds with
+        constant ones
+
+        Parameters
+        ----------
+        rmap : Map[tir::Var, int]
+            Replacement map.
+
+        """
+        return _ffi_api.MakeSearchTaskConcrete(self, rmap)
+
+
     def print_best(self, log_file, print_mode="schedule"):
         """Print the best schedule as python schedule API code or CUDA source code.
 

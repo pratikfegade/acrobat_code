@@ -1389,6 +1389,83 @@ ComputeDAG ComputeDAG::ReplayAndGetDAG(const Array<Step>& transform_steps) const
   return ComputeDAG(sch);
 }
 
+ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
+  Map<tir::Var, PrimExpr> v_expr_map;
+  for (auto it : vmap) {
+    // std::cout << "[CD] VMAP " << it.first->name_hint << " " << it.first.get() << std::endl;
+    v_expr_map.Set(it.first, it.second);
+  }
+
+  auto self = operator->();
+  Array<te::Tensor> replaced_io_tensors;
+  std::unordered_map<te::Tensor, te::Tensor> tmap;
+  auto top_order = self->access_analyzer->ops_topo_order;
+  for (const auto& old_op : top_order) {
+    // std::cout << "[CD] OP " << old_op << " " << old_op->root_iter_vars().size() << std::endl;
+    auto op = old_op->ReplaceInputs(old_op, tmap);
+    bool is_io_op =
+        self->access_analyzer.IsOutput(old_op) || (old_op.as<te::PlaceholderOpNode>() != nullptr);
+
+    te::Operation new_op;
+    if (auto placeholder_op = op.as<te::PlaceholderOpNode>()) {
+      Array<PrimExpr> replaced_shape;
+      bool replaced = false;
+      for (auto extent : op->output_shape(0)) {
+        auto new_extent = tir::Substitute(extent, v_expr_map);
+        if (!extent.same_as(new_extent)) {
+          replaced_shape.push_back(new_extent);
+          replaced = true;
+        } else {
+          replaced_shape.push_back(extent);
+        }
+      }
+      if (replaced) {
+        new_op = te::PlaceholderOp(placeholder_op->name, replaced_shape, placeholder_op->dtype);
+      }
+    } else if (auto compute_op = op.as<te::ComputeOpNode>()) {
+      Array<PrimExpr> replaced_extents;
+      bool replaced = false;
+      for (auto iv : op->root_iter_vars()) {
+        auto extent = iv->dom->extent;
+        auto new_extent = tir::Substitute(extent, v_expr_map);
+        if (!extent.same_as(new_extent)) {
+          replaced_extents.push_back(new_extent);
+          replaced = true;
+        } else {
+          replaced_extents.push_back(extent);
+        }
+      }
+
+      if (replaced) {
+        Array<IterVar> new_axis;
+        for (size_t i = 0; i < compute_op->axis.size(); ++i) {
+          auto iv = compute_op->axis[i];
+          new_axis.push_back(IterVar(Range::FromMinExtent(0, replaced_extents[i]), iv->var,
+                                     iv->iter_type, iv->thread_tag, iv->span));
+        }
+        new_op = te::ComputeOp(compute_op->name, compute_op->tag, compute_op->attrs, new_axis,
+                               compute_op->body);
+      }
+    } else {
+      ICHECK(false) << "Cannot handle this type of operation yet! " << op;
+    }
+    // std::cout << "[CD]  Replaced " << new_op << std::endl;
+    if (new_op.defined()) {
+      for (size_t j = 0; j < op->num_outputs(); ++j) {
+        auto new_tensor = new_op.output(j);
+        tmap[old_op.output(j)] = new_tensor;
+        if (is_io_op) {
+          replaced_io_tensors.push_back(new_tensor);
+        }
+      }
+    }
+  }
+  // for (auto t : replaced_io_tensors) {
+  // std::cout << "[CD] RRRRReplaced tensor " << t << std::endl;
+  // }
+  return ComputeDAG(replaced_io_tensors);
+}
+
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<AccessAnalyzerNode>([](const ObjectRef& ref, ReprPrinter* p) {
       auto* node = static_cast<const AccessAnalyzerNode*>(ref.get());

@@ -63,6 +63,9 @@ namespace tir {
 
 // Var
 Var::Var(String name_hint, DataType dtype, Span span) {
+  if (name_hint == "Vavavoom") {
+    std::cout << " " << std::endl;
+  }
   // std::cout << "VV0 " << name_hint << std::endl;
   auto n = make_object<VarNode>();
   n->name_hint = std::move(name_hint);
@@ -73,6 +76,9 @@ Var::Var(String name_hint, DataType dtype, Span span) {
 
 Var::Var(String name_hint, Type type_annotation, Span span) {
   // std::cout << "VV1 " << name_hint << std::endl;
+  if (name_hint == "Vavavoom") {
+    std::cout << " " << std::endl;
+  }
   auto n = make_object<VarNode>();
   n->name_hint = std::move(name_hint);
   n->dtype = GetRuntimeDataType(type_annotation);

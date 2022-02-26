@@ -158,6 +158,13 @@ SearchTask::SearchTask(ComputeDAG compute_dag, String workload_key, Target targe
   data_ = std::move(node);
 }
 
+SearchTask SearchTask::MakeConcrete(Map<tir::Var, Integer> rmap) const {
+  auto self = operator->();
+  return SearchTask(self->compute_dag.MakeConcrete(rmap), self->workload_key, self->target,
+                    self->target_host, self->hardware_params, self->layout_rewrite_option,
+                    self->task_input_names, self->desc);
+}
+
 TVM_REGISTER_GLOBAL("auto_scheduler.HardwareParams")
     .set_body_typed([](int num_cores, int vector_unit_bytes, int cache_line_bytes,
                        int max_shared_memory_per_block, int max_local_memory_per_block,
@@ -179,6 +186,11 @@ TVM_REGISTER_GLOBAL("auto_scheduler.SearchTask")
       CheckAndUpdateHostConsistency(&target, &target_host);
       return SearchTask(compute_dag, workload_key, target, target_host, hardware_params,
                         LayoutRewriteOption(layout_rewrite_option), task_input_names, desc);
+    });
+
+TVM_REGISTER_GLOBAL("auto_scheduler.MakeSearchTaskConcrete")
+    .set_body_typed([](SearchTask task, Map<tir::Var, Integer> rmap) {
+      return task.MakeConcrete(rmap);
     });
 
 }  // namespace auto_scheduler

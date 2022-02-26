@@ -162,6 +162,8 @@ class SearchTask : public ObjectRef {
              Optional<HardwareParams> hardware_params, LayoutRewriteOption layout_rewrite_option,
              Array<String> task_input_names, String desc = "");
 
+  SearchTask MakeConcrete(Map<tir::Var, Integer> rmap) const;
+
   TVM_DEFINE_OBJECT_REF_METHODS(SearchTask, ObjectRef, SearchTaskNode);
 };
 

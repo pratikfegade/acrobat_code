@@ -40,6 +40,7 @@ def auto_schedule():
         for idx, task in enumerate(tasks):
             print("========== Task %d  (workload key: %s) ==========" % (idx, task.workload_key))
             print(task.compute_dag)
+
         exit(0)
         measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
 
