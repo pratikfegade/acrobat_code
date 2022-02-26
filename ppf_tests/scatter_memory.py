@@ -103,37 +103,6 @@ Iptr = create_pointers_buffer(I)
 Optr = create_pointers_buffer(O)
 scatter_buffers_map = { I: Iptr, O: Optr }
 print_after_passes = [
-    # "tir.InjectPrefetch",
-    # "tir.TextureFlatten",
-    # "tir.StorageFlatten",
-    # "tir.LowerCrossThreadReduction",
-    # "tir.LowerInitBlock",
-    # "tir.PlanAndUpdateBufferAllocationLocation",
-    # "tir.ConvertBlocksToOpaque",
-    # "tir.UnifyThreadBinding",
-    # "tir.CompactBufferAllocation",
-    # "tir.LowerMatchBuffer",
-    # "tir.FlattenBuffer",
-    # "tir.BF16Legalize",
-    # "tir.NarrowDataType",
-    # "tir.Simplify",
-    # "tir.LoopPartition",
-    # "tir.VectorizeLoop",
-    # "tir.InjectVirtualThread",
-    # "tir.InjectDoubleBuffer",
-    # "tir.StorageRewrite",
-    # "tir.UnrollLoop",
-    # "tir.Simplify",
-    # "tir.RemoveNoOp",
-    # "tir.RewriteUnsafeSelect",
-    # "tir.HoistIfThenElse",
-
-
-
-
-
-
-
     # "tir.InferFragment",
     # "tir.VerifyMemory",
     # "tir.LowerThreadAllreduce",

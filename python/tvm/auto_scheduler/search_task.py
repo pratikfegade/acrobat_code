@@ -527,6 +527,37 @@ class SearchTask(Object):
         )
         return sch, args
 
+    def apply_best_from_other_task(self, log_file, tuned_task,
+                                   include_compatible=False, layout_rewrite_option=None):
+        """Apply the history best from a log file and return the schedule.
+
+        Parameters
+        ----------
+        log_file : str
+           The name of the log file.
+        include_compatible: bool
+            When set to True, all compatible records in the log file will be considered.
+        layout_rewrite_option : Optional[LayoutRewriteOption]
+           The layout rewrite option.
+
+
+        Returns
+        -------
+            A `te.Schedule` and the a list of `te.Tensor` to be used in `tvm.lower` or `tvm.build`.
+        """
+        inp, _ = load_best_record(
+            log_file, tuned_task.workload_key, include_compatible=include_compatible
+        )
+        if inp is None:
+            raise RuntimeError(
+                "Cannot find any valid schedule for %s in file %s" % (tuned_task.workload_key, log_file)
+            )
+
+        sch, args = self.compute_dag.apply_steps_from_state(
+            inp.state, layout_rewrite_option or self.layout_rewrite_option
+        )
+        return sch, args
+
     def print_best(self, log_file, print_mode="schedule"):
         """Print the best schedule as python schedule API code or CUDA source code.
 

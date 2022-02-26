@@ -985,6 +985,13 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
     // std::endl;
     if (vm->RunOneIteration(frame_start)) {
       return kExecutionEnd;
+    } else if (lazy_execution_) {
+      if (false /* Some condition that checks if the value of a tensor
+		  is to be read */) {
+        return kStageEnd;
+      } else {
+        continue;
+      }
     } else if (vm->code_[vm->pc_ - 1].op == Opcode::InvokePacked) {
       return kStageEnd;
     }
@@ -1030,6 +1037,29 @@ void ConcurrentVirtualMachine::InvokeGlobal(const VMFunction& func,
   for (auto& vm : vms_) {
     GetVMFromModule(vm)->InvokeGlobal(func, args, 0);
   }
+}
+
+ObjectRef ConcurrentVirtualMachine::Invoke(const VMFunction& func,
+                                           const std::vector<ObjectRef>& args) {
+  DLOG(INFO) << "Executing Function: " << std::endl << func;
+  for (int i = 0; i < static_cast<int>(shared_state_->devices_.size()); ++i) {
+    DLOG(INFO) << "Device " << i << " has device type " << shared_state_->devices_[i].device_type
+               << " and device id " << shared_state_->devices_[i].device_id
+               << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
+  }
+
+  InvokeGlobal(func, args, 0);
+  RunLoop();
+
+  if (lazy_execution_) {
+    if (batched_execution_) {
+      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+    } else {
+      shared_state_->lazy_executor_.Execute();
+    }
+  }
+
+  return return_register_;
 }
 
 void ConcurrentVirtualMachine::SetInput(std::string name, TVMArgs args, int offset, int batch_size,

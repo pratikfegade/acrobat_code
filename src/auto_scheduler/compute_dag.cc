@@ -373,7 +373,8 @@ AccessAnalyzer::AccessAnalyzer(const Array<te::Tensor>& tensors) {
         }
 
         for (const auto& axis : cop->axis) {
-          if (GetIntImm(axis->dom->extent) > 1 && vars.count(axis->var.get()) == 0) {
+          if ((!IsConstant(axis->dom->extent) || (GetIntImm(axis->dom->extent) > 1)) &&
+              vars.count(axis->var.get()) == 0) {
             n_missing++;
             break;
           }

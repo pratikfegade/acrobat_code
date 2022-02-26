@@ -197,6 +197,8 @@ def serialize_args(args):
     Serialize arguments of a function to a hashable and jsonable tuple.
     Currently this is mainly used for tvm.tensor.Tensor
     """
+    from tvm import tir
+
     ret = []
     if args is None:
         return tuple(ret)
@@ -208,6 +210,11 @@ def serialize_args(args):
             t = list_to_tuple(t)
 
         assert isinstance(t, Hashable), str(t) + " is not hashable"
+
+        if isinstance(t, tir.Var):
+            str_repr = "var_" + str(t.name) + "_" + str(t.dtype)
+            t = str_repr
+
         ret.append(t)
 
     return tuple(ret)
@@ -215,10 +222,15 @@ def serialize_args(args):
 
 def deserialize_args(args):
     """The inverse function of :code:`serialize_args`"""
+    from tvm import tir
+
     ret = []
     for t in args:
         if isinstance(t, (tuple, list)) and t[0] == "TENSOR":
             ret.append(placeholder(shape=t[1], dtype=t[2]))
+        elif isinstance(t, str) and t.startswith("var_"):
+            arr = t.split('_')
+            ret.append(tir.Var(arr[1], arr[2]))
         else:
             ret.append(t)
     return ret

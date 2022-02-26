@@ -196,6 +196,11 @@ inline int64_t GetIntImm(const PrimExpr& expr) {
   return pint->value;
 }
 
+/*! \brief Check if an expr is a constant */
+inline bool IsConstant(const PrimExpr& expr) {
+  return expr.as<IntImmNode>() || expr.as<FloatImmNode>();
+}
+
 /*! \brief Compute the product of the lengths of axes */
 inline int64_t AxisLengthProd(const Array<tir::IterVar>& axes) {
   int64_t ret = 1.0;

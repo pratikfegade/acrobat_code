@@ -523,6 +523,14 @@ class ConcurrentVirtualMachine : public VirtualMachine {
                     const int offset) override;
 
   /*!
+   * \brief Invoke a VM function.
+   * \param func The function.
+   * \param args The arguments to the function.
+   * \return The object representing the result.
+   */
+  ObjectRef Invoke(const VMFunction& func, const std::vector<ObjectRef>& args);
+
+  /*!
    * \brief Set inputs to a function.
    * \param name The function name
    * \param args args[offset:] are arguments to the

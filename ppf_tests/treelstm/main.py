@@ -15,7 +15,7 @@ lazy_execution=True
 coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
-concurrent_execution=False
+concurrent_execution=True
 use_autoscheduler=False
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
