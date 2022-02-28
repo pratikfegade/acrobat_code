@@ -102,6 +102,7 @@ class ComputeDAG(Object):
 
     def __init__(self, compute_or_sche):
         if isinstance(compute_or_sche, str):
+            print("Creating DAG from workload key!!!", flush=True)
             compute = workload_key_to_tensors(compute_or_sche)
             sche = None
         elif isinstance(compute_or_sche, (list, tvm.ir.container.Array)):

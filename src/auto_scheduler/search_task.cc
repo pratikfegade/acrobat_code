@@ -160,9 +160,12 @@ SearchTask::SearchTask(ComputeDAG compute_dag, String workload_key, Target targe
 
 SearchTask SearchTask::MakeConcrete(Map<tir::Var, Integer> rmap) const {
   auto self = operator->();
-  return SearchTask(self->compute_dag.MakeConcrete(rmap), self->workload_key, self->target,
-                    self->target_host, self->hardware_params, self->layout_rewrite_option,
-                    self->task_input_names, self->desc);
+  // std::cout << "[MC] Compute DAG: " << self->compute_dag << std::endl;
+  auto concrete_compute_dag = self->compute_dag.MakeConcrete(rmap);
+  // std::cout << "[MC] Concrete Compute DAG: " << concrete_compute_dag << std::endl;
+  return SearchTask(concrete_compute_dag, self->workload_key, self->target, self->target_host,
+                    self->hardware_params, self->layout_rewrite_option, self->task_input_names,
+                    self->desc);
 }
 
 TVM_REGISTER_GLOBAL("auto_scheduler.HardwareParams")

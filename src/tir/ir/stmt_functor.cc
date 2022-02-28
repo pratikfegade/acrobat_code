@@ -682,8 +682,10 @@ class IRSubstitute : public StmtExprMutator {
   explicit IRSubstitute(std::function<Optional<PrimExpr>(const Var&)> vmap) : vmap_(vmap) {}
 
   PrimExpr VisitExpr_(const VarNode* op) final {
+    // std::cout << "[IRS]    visiting var " << op->name_hint << " " << op << std::endl;
     Var var = GetRef<Var>(op);
     auto ret = vmap_(var);
+    // std::cout << "[IRS]       by " << ret << std::endl;
     if (ret.defined()) return ret.value();
     return std::move(var);
   }

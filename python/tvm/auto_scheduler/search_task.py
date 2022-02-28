@@ -437,14 +437,32 @@ class SearchTask(Object):
         task_inputs_save_to_file=False,
         desc="",
     ):
-        assert (
-            func is not None or workload_key is not None
-        ), "Either a workload generation function or a workload key should be provided"
+        # assert (
+            # func is not None or workload_key is not None
+        # ), "Either a workload generation function or a workload key should be provided"
 
-        if func is not None:
-            workload_key = make_workload_key(func, args)
-        if compute_dag is None:
-            compute_dag = ComputeDAG(workload_key)
+        # if func is not None:
+        #     workload_key = make_workload_key(func, args)
+        # if compute_dag is None:
+        #     compute_dag = ComputeDAG(workload_key)
+
+        assert (
+            (func is not None and args is not None) or (compute_dag is not None) or (workload_key is not None)
+        ), "Either a workload generation function or a compute dag should be provided"
+
+        if compute_dag is None and func is not None and args is not None:
+            compute_dag = ComputeDAG(func(*args))
+            if workload_key is None:
+                workload_key = compute_dag.workload_key()
+        elif compute_dag is not None and workload_key is None:
+            if workload_key is None:
+                workload_key = compute_dag.workload_key()
+        else:
+            if func is not None:
+                workload_key = make_workload_key(func, args)
+            if compute_dag is None:
+                compute_dag = ComputeDAG(workload_key)
+
 
         assert target is not None, "Must specify a target."
 
@@ -469,6 +487,14 @@ class SearchTask(Object):
         elif task_inputs is not None:
             raise ValueError("task_inputs should be a dict or a list.")
 
+        print("----------------------------", compute_dag,
+              workload_key,
+              target,
+              target_host,
+              hardware_params,
+              layout_rewrite_option,
+              task_input_names,
+              desc, sep="\n-- ")
         self.__init_handle_by_constructor__(
             _ffi_api.SearchTask,
             compute_dag,
@@ -568,7 +594,18 @@ class SearchTask(Object):
             Replacement map.
 
         """
-        return _ffi_api.MakeSearchTaskConcrete(self, rmap)
+        concrete_compute_dag = _ffi_api.MakeComputeDAGConcrete(self.compute_dag, rmap)
+        return SearchTask(
+            func=None,
+            args=None,
+            compute_dag=concrete_compute_dag,
+            workload_key=None,
+            target=self.target,
+            target_host=None,
+            hardware_params=self.hardware_params,
+            layout_rewrite_option=self.layout_rewrite_option,
+            desc=self.desc,
+        )
 
 
     def print_best(self, log_file, print_mode="schedule"):

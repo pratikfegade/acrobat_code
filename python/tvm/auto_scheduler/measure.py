@@ -637,6 +637,8 @@ def _local_build_worker(inp_serialized, build_func, verbose):
             print(".", end="", flush=True)
         else:
             print(".E", end="", flush=True)  # Build error
+            print(error_no, error_msg, flush=True)
+            exit(0)
 
     return filename, args, error_no, error_msg, time.time() - tic
 
@@ -998,6 +1000,12 @@ def local_run(
     worker = PopenWorker()
     for inp, build_res in zip(inputs, build_results):
         if build_res.error_no != 0:
+
+            print("Build error!!")
+            import traceback
+            import sys
+            traceback.print_stack(file=sys.stdout)
+
             res = (
                 (MAX_FLOAT,),
                 build_res.error_no,

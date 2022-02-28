@@ -682,6 +682,11 @@ void CheckComputeValidity(const te::Schedule& sch) {
 }
 
 ComputeDAG::ComputeDAG(Array<te::Tensor> tensors) {
+  // std::cout << "[CD] Making compute DAG" << std::endl;
+  // for (auto t : tensors) {
+  // std::cout << "[CD]  Tensor " << t << std::endl;
+  // }
+
   auto node = make_object<ComputeDAGNode>();
   node->tensors = std::move(tensors);
   node->access_analyzer = AccessAnalyzer(node->tensors);
@@ -1390,9 +1395,12 @@ ComputeDAG ComputeDAG::ReplayAndGetDAG(const Array<Step>& transform_steps) const
 }
 
 ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
+  bool print = false;
   Map<tir::Var, PrimExpr> v_expr_map;
   for (auto it : vmap) {
-    // std::cout << "[CD] VMAP " << it.first->name_hint << " " << it.first.get() << std::endl;
+    if (print) {
+      std::cout << "[CD] VMAP " << it.first->name_hint << " " << it.first.get() << std::endl;
+    }
     v_expr_map.Set(it.first, it.second);
   }
 
@@ -1401,17 +1409,22 @@ ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
   std::unordered_map<te::Tensor, te::Tensor> tmap;
   auto top_order = self->access_analyzer->ops_topo_order;
   for (const auto& old_op : top_order) {
-    // std::cout << "[CD] OP " << old_op << " " << old_op->root_iter_vars().size() << std::endl;
-    auto op = old_op->ReplaceInputs(old_op, tmap);
     bool is_io_op =
         self->access_analyzer.IsOutput(old_op) || (old_op.as<te::PlaceholderOpNode>() != nullptr);
+    if (print) {
+      std::cout << "[CD] Op " << old_op << " " << is_io_op << std::endl;
+    }
+    auto op = old_op->ReplaceInputs(old_op, tmap);
 
-    te::Operation new_op;
+    bool replaced = false;
     if (auto placeholder_op = op.as<te::PlaceholderOpNode>()) {
       Array<PrimExpr> replaced_shape;
-      bool replaced = false;
       for (auto extent : op->output_shape(0)) {
         auto new_extent = tir::Substitute(extent, v_expr_map);
+        if (print) {
+          std::cout << "[CD]  Extent " << extent << " " << new_extent << " "
+                    << (extent.same_as(new_extent)) << std::endl;
+        }
         if (!extent.same_as(new_extent)) {
           replaced_shape.push_back(new_extent);
           replaced = true;
@@ -1420,11 +1433,10 @@ ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
         }
       }
       if (replaced) {
-        new_op = te::PlaceholderOp(placeholder_op->name, replaced_shape, placeholder_op->dtype);
+        op = te::PlaceholderOp(placeholder_op->name, replaced_shape, placeholder_op->dtype);
       }
     } else if (auto compute_op = op.as<te::ComputeOpNode>()) {
       Array<PrimExpr> replaced_extents;
-      bool replaced = false;
       for (auto iv : op->root_iter_vars()) {
         auto extent = iv->dom->extent;
         auto new_extent = tir::Substitute(extent, v_expr_map);
@@ -1443,26 +1455,25 @@ ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
           new_axis.push_back(IterVar(Range::FromMinExtent(0, replaced_extents[i]), iv->var,
                                      iv->iter_type, iv->thread_tag, iv->span));
         }
-        new_op = te::ComputeOp(compute_op->name, compute_op->tag, compute_op->attrs, new_axis,
-                               compute_op->body);
+        op = te::ComputeOp(compute_op->name, compute_op->tag, compute_op->attrs, new_axis,
+                           compute_op->body);
       }
     } else {
       ICHECK(false) << "Cannot handle this type of operation yet! " << op;
     }
-    // std::cout << "[CD]  Replaced " << new_op << std::endl;
-    if (new_op.defined()) {
-      for (size_t j = 0; j < op->num_outputs(); ++j) {
-        auto new_tensor = new_op.output(j);
+    if (print && replaced) {
+      std::cout << "[CD]  Replaced " << op << std::endl;
+    }
+    for (size_t j = 0; j < op->num_outputs(); ++j) {
+      auto new_tensor = op.output(j);
+      if (replaced) {
         tmap[old_op.output(j)] = new_tensor;
-        if (is_io_op) {
-          replaced_io_tensors.push_back(new_tensor);
-        }
+      }
+      if (is_io_op) {
+        replaced_io_tensors.push_back(new_tensor);
       }
     }
   }
-  // for (auto t : replaced_io_tensors) {
-  // std::cout << "[CD] RRRRReplaced tensor " << t << std::endl;
-  // }
   return ComputeDAG(replaced_io_tensors);
 }
 
@@ -1575,6 +1586,11 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ComputeDAGPrintPythonCodeFromState")
 TVM_REGISTER_GLOBAL("auto_scheduler.ComputeDAGPrintDAG")
     .set_body_typed([](const ComputeDAG& dag, bool simple_mode) {
       return dag.PrintDAG(simple_mode);
+    });
+
+TVM_REGISTER_GLOBAL("auto_scheduler.MakeComputeDAGConcrete")
+    .set_body_typed([](const ComputeDAG& dag, Map<tir::Var, Integer> vmap) {
+      return dag.MakeConcrete(vmap);
     });
 
 TVM_REGISTER_GLOBAL("auto_scheduler.ComputeDAGInferBoundFromState")

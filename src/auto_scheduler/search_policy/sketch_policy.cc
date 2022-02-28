@@ -382,6 +382,10 @@ Array<State> SketchPolicyNode::GenerateSketches() {
 }
 
 Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches) {
+  // for (auto state : sketches) {
+  // std::cout << "[SIP] Sketch: " << state << std::endl;
+  // }
+
   // Use this population as the parallel degree to do sampling
   int population = GetIntParam(params, SketchParamKey::EvolutionarySearch::population);
 
@@ -431,15 +435,17 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
 
     unchange_cnt++;
     if (!cand_states.empty()) {
-      // Run the cost model to make filter out states that failed to extract features.
-      // This may happen due to illegal schedules or the schedules that uses too much
-      // memory on GPU.
+      // std::cout << "[SP] Candidate states " << cand_states.size() << std::endl;
+      // Run the cost model to filter out states that failed to
+      // extract features.  This may happen due to illegal schedules
+      // or the schedules that uses too much memory on GPU.
       std::vector<float> pop_scores;
       pop_scores.reserve(cand_states.size());
       cand_states = search_task->compute_dag.InferBound(cand_states);
       PruneInvalidState(search_task, &cand_states);
       program_cost_model->Predict(search_task, cand_states, &pop_scores);
 
+      // std::cout << "[SP]   Pruning " << cand_states.size() << std::endl;
       for (size_t i = 0; i < cand_states.size(); i++) {
         const auto state_str = cand_states[i].ToStr();
         if (pop_scores[i] > -1e10 && explored_state_strs.count(state_str) == 0) {
@@ -447,6 +453,8 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
           out_states.push_back(std::move(cand_states[i]));
           unchange_cnt = 0;  // Reset the counter once we found a valid state
         } else {
+          // std::cout << "[SP]   Failed " << (pop_scores[i] > -1e10) << " "
+          // << (explored_state_strs.count(state_str) == 0) << std::endl;
           fail_ct++;
         }
       }

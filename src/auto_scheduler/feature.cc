@@ -1017,6 +1017,7 @@ inline float slog(float x) { return x < 0 ? -std::log2(-x + 1) : std::log2(x + 1
 void GetPerStoreFeature(const Stmt& stmt, int cache_line_size, int max_n_bufs,
                         std::vector<float>* ret) {
   PerStoreFeatureExtractor extractor(cache_line_size);
+  // std::cout << "[FE] Featuring " << stmt << std::endl;
   extractor(stmt);
 
   ret->push_back(extractor.buffer_features.size());
@@ -1262,6 +1263,9 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
   Array<te::Tensor> tensors;
 
   std::tie(sch, tensors) = task->compute_dag.ApplySteps(state->transform_steps);
+  // for (auto arg : tensors) {
+  // std::cout << "[FEAT] tensor " << arg << std::endl;
+  // }
 
   // When inlining, replace const matrices with const values.
   // Produces wrong IR, but good enough for feature extraction, and
@@ -1274,7 +1278,8 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
     auto pass_ctx = tvm::transform::PassContext::Current();
 
     auto mod = ScheduleToModule(sch, Array<ObjectRef>{tensors.begin(), tensors.end()}, name,
-                                std::unordered_map<te::Tensor, te::Buffer>(), Map<te::Tensor, tir::Buffer>());
+                                std::unordered_map<te::Tensor, te::Buffer>(),
+                                Map<te::Tensor, tir::Buffer>());
 
     bool disable_vectorize =
         pass_ctx->GetConfig<Bool>("tir.disable_vectorize", Bool(false)).value();
@@ -1311,6 +1316,8 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
     GetPerStoreFeature(prim_func->body, task->hardware_params->cache_line_bytes, max_n_bufs,
                        feature);
   } catch (Error& e) {
+    std::cout << "[FEAT] Scheduling error " << e.what() << std::endl;
+    exit(0);
     (*error_ct)++;
   }
 }
@@ -1328,6 +1335,8 @@ void GetPerStoreFeaturesFromStates(const Array<State>& states, const SearchTask&
                           GetPerStoreFeaturesWorkerFunc(task, states[i], max_n_bufs,
                                                         &(*features)[i], &error_ct);
                         });
+
+  // std::cout << "[FEAT] featuring states " << error_ct << " " << states.size() << std::endl;
 }
 
 void GetPerStoreFeaturesFromStates(const Array<State>& states, const std::vector<SearchTask>& tasks,

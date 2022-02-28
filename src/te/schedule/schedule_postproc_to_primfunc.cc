@@ -73,18 +73,21 @@ class TensorToBufferMapper : public StmtExprMutator {
       Operation operation = Downcast<Operation>(op->node);
       for (int i = operation->num_outputs(); i != 0; --i) {
         Buffer buffer = GetOrAllocBuffer(operation.output(i - 1));
+        // std::cout << "[SCHED] Alloced1 " << buffer->data << std::endl;
         body = AttrStmt(buffer, op->attr_key, op->value, body);
       }
       return body;
     } else if (op->attr_key == tir::attr::buffer_bind_scope) {
       Array<ObjectRef> tuple = Downcast<Array<ObjectRef>>(op->node);
       Tensor tensor = Downcast<Tensor>(tuple[1]);
+      // std::cout << "[SCHED] Alloced2 " << tensor << std::endl;
       return AttrStmt(Array<ObjectRef>{tuple[0], GetOrAllocBuffer(tensor)}, op->attr_key, op->value,
                       op->body);
     } else if (op->attr_key == tir::attr::buffer_dim_align ||
                op->attr_key == tir::attr::prefetch_scope) {
       Tensor tensor = Downcast<Tensor>(op->node);
       Buffer buffer = GetOrAllocBuffer(tensor);
+      // std::cout << "[SCHED] Alloced3 " << buffer << std::endl;
       return AttrStmt(buffer, op->attr_key, op->value, op->body);
     } else {
       return ret;
@@ -94,6 +97,7 @@ class TensorToBufferMapper : public StmtExprMutator {
   Stmt VisitStmt_(const ProducerRealizeNode* op) final {
     Tensor tensor = Downcast<Tensor>(op->producer);
     Buffer buffer = GetOrAllocBuffer(tensor, op->storage_scope);
+    // std::cout << "[SCHED] Alloced4 " << buffer << std::endl;
 
     auto ret = StmtExprMutator::VisitStmt_(op);
     op = ret.as<ProducerRealizeNode>();
@@ -148,6 +152,14 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
     extern_buffer = std::unordered_map<Tensor, Buffer>(v.begin(), v.end());
   }
 
+  // for (auto it : extern_buffer) {
+  //   std::cout << "[ABC] " << it.first << " " << it.second << std::endl;
+  // }
+
+  // for (auto arg : arg_list) {
+  //   std::cout << "[ABC] ARG " << arg << std::endl;
+  // }
+
   Array<tir::Var> params;
   Map<tir::Var, tir::Buffer> buffer_map;
 
@@ -184,6 +196,8 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
   // for (auto it : scatter_buffer_opt.value()) {
   //   std::cout << "[MNO] " << it.first->name_hint << " " << it.first.get() << std::endl;
   // }
+
+  // std::cout << "[SCHED] Body " << body << std::endl;
 
   body = TensorToBufferMapper(std::move(extern_buffer))(std::move(body));
   // We mark this PrimFunc as coming from a TE schedule

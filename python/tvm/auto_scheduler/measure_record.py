@@ -214,7 +214,7 @@ def save_records(filename, inputs, results):
 
 
 def load_best_record(filename, workload_key=None, target=None, include_compatible=False):
-    """Return the best measurement pair form a log file. This may return none results if
+    """Return the best measurement pair from a log file. This may return none results if
     there is no legal measure pair with the specified workload_key/target found from the log file.
 
     Parameters
@@ -243,6 +243,7 @@ def load_best_record(filename, workload_key=None, target=None, include_compatibl
     best_res = None
 
     for inp, res in log_reader:
+        print(inp, res, (res.error_no != MeasureErrorNo.NO_ERROR))
         if res.error_no != MeasureErrorNo.NO_ERROR:
             continue
         if target and inp.task.target.kind.name != target.kind.name:

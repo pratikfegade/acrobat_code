@@ -58,4 +58,4 @@ from .search_policy import (
     PreloadCustomSketchRule,
 )
 from .task_scheduler import TaskScheduler
-from .workload_registry import register_workload, make_workload_key
+from .workload_registry import register_workload, register_workload_tensors, make_workload_key

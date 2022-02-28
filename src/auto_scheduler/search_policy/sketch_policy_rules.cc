@@ -573,6 +573,7 @@ PopulationGenerationRule::ResultKind InitChangeComputeLocation::Apply(
   try {
     *state = policy->search_task->compute_dag.InferBound(*state);
   } catch (std::exception& e) {
+    // std::cout << "[SPR] Invalid 1 " << e.what() << std::endl;
     return ResultKind::kInvalid;
   }
   return ResultKind::kValid;
@@ -866,6 +867,7 @@ PopulationGenerationRule::ResultKind InitThreadBind::Apply(SketchPolicyNode* pol
       }
       const auto& vthread_it = state->fuse(stage_id, to_fuse);
       if (GetExtent(vthread_it) > policy->search_task->hardware_params->max_vthread_extent) {
+        // std::cout << "[SPR] Invalid 2" << std::endl;
         return ResultKind::kInvalid;
       }
       state->bind(stage_id, vthread_it, IteratorAnnotation::kVThread);
@@ -884,6 +886,7 @@ PopulationGenerationRule::ResultKind InitThreadBind::Apply(SketchPolicyNode* pol
       const auto& threadidx_it = state->fuse(stage_id, to_fuse);
       if (check_min_thread_extent &&
           GetExtent(threadidx_it) < policy->search_task->hardware_params->warp_size) {
+        // std::cout << "[SPR] Invalid 3" << std::endl;
         return ResultKind::kInvalid;
       }
       state->bind(stage_id, threadidx_it, IteratorAnnotation::kThreadX);
@@ -930,6 +933,7 @@ PopulationGenerationRule::ResultKind MutateTileSize::Apply(SketchPolicyNode* pol
   }
   if (split_step_ids.empty()) {
     // No tile size could be mutated.
+    // std::cout << "[SPR] Invalid 4" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -949,6 +953,7 @@ PopulationGenerationRule::ResultKind MutateTileSize::Apply(SketchPolicyNode* pol
 
   if (extent <= 1) {
     // Cannot find a step with extent larger than one.
+    // std::cout << "[SPR] Invalid 5" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1015,6 +1020,7 @@ PopulationGenerationRule::ResultKind MutateTileSize::Apply(SketchPolicyNode* pol
                            ps->inner_to_outer));
     return ResultKind::kValid;
   }
+  std::cout << "[SPR] Invalid 6" << std::endl;
   return ResultKind::kInvalid;
 }
 
@@ -1030,6 +1036,7 @@ PopulationGenerationRule::ResultKind MutateAutoUnroll::Apply(SketchPolicyNode* p
     }
   }
   if (pragma_steps.empty()) {
+    // std::cout << "[SPR] Invalid 7" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1057,6 +1064,7 @@ PopulationGenerationRule::ResultKind MutateComputeLocation::Apply(SketchPolicyNo
                                                                   State* state,
                                                                   std::mt19937* rand_gen) const {
   if (GetIntParam(policy->params, SketchParamKey::disable_change_compute_location)) {
+    // std::cout << "[SPR] Invalid 8" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1077,6 +1085,7 @@ PopulationGenerationRule::ResultKind MutateComputeLocation::Apply(SketchPolicyNo
     }
   }
   if (compute_at_steps.empty()) {
+    // std::cout << "[SPR] Invalid 9" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1090,6 +1099,7 @@ PopulationGenerationRule::ResultKind MutateComputeLocation::Apply(SketchPolicyNo
   std::vector<std::pair<int, int>> candidates =
       GetComputeLocationCandidates(policy->search_task, *state, ps->stage_id + stage_inc);
   if (candidates.empty()) {
+    // std::cout << "[SPR] Invalid 10" << std::endl;
     return ResultKind::kInvalid;
   }
   int choice = (*rand_gen)() % (candidates.size());
@@ -1108,6 +1118,7 @@ PopulationGenerationRule::ResultKind MutateComputeLocation::Apply(SketchPolicyNo
     try {
       StepApplyToState(tmp_s->transform_steps.back(), &tmp_s, policy->search_task->compute_dag);
     } catch (Error& e) {
+      // std::cout << "[SPR] Invalid 11" << std::endl;
       return ResultKind::kInvalid;
     }
   }
@@ -1142,6 +1153,7 @@ PopulationGenerationRule::ResultKind MutateParallel::Apply(SketchPolicyNode* pol
     parallel_steps.push_back(s);
   }
   if (parallel_steps.empty()) {
+    // std::cout << "[SPR] Invalid 12" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1174,6 +1186,7 @@ PopulationGenerationRule::ResultKind MutateParallel::Apply(SketchPolicyNode* pol
   }
 
   if (max_fusable_iter_id == 0) {
+    // std::cout << "[SPR] Invalid 13" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1185,6 +1198,7 @@ PopulationGenerationRule::ResultKind MutateParallel::Apply(SketchPolicyNode* pol
   }
   int iter_offset = fuse_step->fused_ids.back()->value - fused_ids.back()->value;
   if (iter_offset == 0) {
+    // std::cout << "[SPR] Invalid 14" << std::endl;
     return ResultKind::kInvalid;
   }
 
@@ -1216,6 +1230,7 @@ PopulationGenerationRule::ResultKind MutateParallel::Apply(SketchPolicyNode* pol
           step = PragmaStep(ps->stage_id, ps->iter_id + iter_offset, ps->pragma_type);
         }
       } else {
+        // std::cout << "[SPR] Invalid 15" << std::endl;
         return ResultKind::kInvalid;
       }
     }
@@ -1224,12 +1239,14 @@ PopulationGenerationRule::ResultKind MutateParallel::Apply(SketchPolicyNode* pol
       // out-dated. But here we just simply give up this mutation for simplicity.
       // This is not an issue because this will never happend in normal cases where all these steps
       // are before parallel steps.
+      // std::cout << "[SPR] Invalid 16" << std::endl;
       return ResultKind::kInvalid;
     }
     tmp_s.CopyOnWrite()->transform_steps.push_back(step);
     try {
       StepApplyToState(tmp_s->transform_steps.back(), &tmp_s, policy->search_task->compute_dag);
     } catch (Error& e) {
+      // std::cout << "[SPR] Invalid 17" << std::endl;
       return ResultKind::kInvalid;
     }
   }

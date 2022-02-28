@@ -221,6 +221,9 @@ def serialize_workload_registry_entry(workload_key):
         workload = json.loads(workload_key)
         sname = workload[0]
 
+    if sname not in WORKLOAD_FUNC_REGISTRY:
+        print(sname, WORKLOAD_FUNC_REGISTRY)
+        exit(0)
     svalue = WORKLOAD_FUNC_REGISTRY[sname]
     if not callable(svalue):
         # pylint: disable=assignment-from-no-return
