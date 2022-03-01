@@ -315,6 +315,7 @@ def register_task_input_buffer(
                 % (input_name, "set overwrite to True or this Tensor will not be registered")
             )
 
+    print("Input storing", workload_key, input_name)
     input_table[input_name] = input_data
     if save_to_file:
         _save_buffer_to_file(input_name, input_data)
@@ -341,6 +342,7 @@ def get_task_input_buffer(workload_key, input_name):
     """
     global TASK_INPUT_BUFFER_TABLE
 
+    print("Input looking", workload_key, input_name)
     if workload_key not in TASK_INPUT_BUFFER_TABLE:
         TASK_INPUT_BUFFER_TABLE[workload_key] = {}
     input_table = TASK_INPUT_BUFFER_TABLE[workload_key]
@@ -487,14 +489,6 @@ class SearchTask(Object):
         elif task_inputs is not None:
             raise ValueError("task_inputs should be a dict or a list.")
 
-        print("----------------------------", compute_dag,
-              workload_key,
-              target,
-              target_host,
-              hardware_params,
-              layout_rewrite_option,
-              task_input_names,
-              desc, sep="\n-- ")
         self.__init_handle_by_constructor__(
             _ffi_api.SearchTask,
             compute_dag,
@@ -594,11 +588,10 @@ class SearchTask(Object):
             Replacement map.
 
         """
-        concrete_compute_dag = _ffi_api.MakeComputeDAGConcrete(self.compute_dag, rmap)
         return SearchTask(
             func=None,
             args=None,
-            compute_dag=concrete_compute_dag,
+            compute_dag=self.compute_dag.make_concrete(),
             workload_key=None,
             target=self.target,
             target_host=None,

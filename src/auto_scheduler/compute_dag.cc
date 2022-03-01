@@ -1396,12 +1396,12 @@ ComputeDAG ComputeDAG::ReplayAndGetDAG(const Array<Step>& transform_steps) const
 
 ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
   bool print = false;
-  Map<tir::Var, PrimExpr> v_expr_map;
+  std::unordered_map<tir::Var, PrimExpr, StructuralHash, StructuralEqual> v_expr_map;
   for (auto it : vmap) {
     if (print) {
       std::cout << "[CD] VMAP " << it.first->name_hint << " " << it.first.get() << std::endl;
     }
-    v_expr_map.Set(it.first, it.second);
+    v_expr_map[it.first] = it.second;
   }
 
   auto self = operator->();
@@ -1420,7 +1420,7 @@ ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
     if (auto placeholder_op = op.as<te::PlaceholderOpNode>()) {
       Array<PrimExpr> replaced_shape;
       for (auto extent : op->output_shape(0)) {
-        auto new_extent = tir::Substitute(extent, v_expr_map);
+        auto new_extent = tir::SubstituteStructural(extent, v_expr_map);
         if (print) {
           std::cout << "[CD]  Extent " << extent << " " << new_extent << " "
                     << (extent.same_as(new_extent)) << std::endl;
@@ -1439,7 +1439,7 @@ ComputeDAG ComputeDAG::MakeConcrete(Map<tir::Var, Integer> vmap) const {
       Array<PrimExpr> replaced_extents;
       for (auto iv : op->root_iter_vars()) {
         auto extent = iv->dom->extent;
-        auto new_extent = tir::Substitute(extent, v_expr_map);
+        auto new_extent = tir::SubstituteStructural(extent, v_expr_map);
         if (!extent.same_as(new_extent)) {
           replaced_extents.push_back(new_extent);
           replaced = true;

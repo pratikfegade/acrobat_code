@@ -102,7 +102,10 @@ class ComputeDAG(Object):
 
     def __init__(self, compute_or_sche):
         if isinstance(compute_or_sche, str):
-            print("Creating DAG from workload key!!!", flush=True)
+            # print("Creating DAG from workload key!!!", flush=True)
+            # import traceback, sys
+            # traceback.print_stack(file=sys.stdout)
+
             compute = workload_key_to_tensors(compute_or_sche)
             sche = None
         elif isinstance(compute_or_sche, (list, tvm.ir.container.Array)):
@@ -122,6 +125,7 @@ class ComputeDAG(Object):
                 "Invalid compute type: %s. ComputeDAG expects string, list of Tensor, or Schedule"
                 % type(compute_or_sche)
             )
+        # print("  Compute " + str(compute))
         self.__init_handle_by_constructor__(_ffi_api.ComputeDAG, compute, sche)
 
     def get_init_state(self):
@@ -153,6 +157,18 @@ class ComputeDAG(Object):
         """
         state_obj = state if isinstance(state, StateObject) else state.state_object
         return _ffi_api.ComputeDAGApplyStepsFromState(self, state_obj, layout_rewrite)
+
+    def make_concrete(self, rmap):
+        """Make a compute dag concrete by replacing variable loop bounds with
+        constant ones
+
+        Parameters
+        ----------
+        rmap : Map[tir::Var, int]
+            Replacement map.
+
+        """
+        return _ffi_api.MakeComputeDAGConcrete(self, rmap)
 
     def print_python_code_from_state(self, state):
         """

@@ -512,13 +512,17 @@ class TECompilerImpl : public TECompilerNode {
   }
 
   Map<String, Integer> GetOpWeights() const {
+    bool batched_execution =
+        PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
     Map<String, Integer> weights;
     for (const auto& kv : cache_) {
       auto value = kv.second;
       auto name = value->cached_func->prim_fn_var->name_hint;
-      auto batched_name = value->batched_cached_func->prim_fn_var->name_hint;
       weights.Set(name, value->use_count);
-      weights.Set(batched_name, value->use_count);
+      if (batched_execution) {
+        auto batched_name = value->batched_cached_func->prim_fn_var->name_hint;
+        weights.Set(batched_name, value->use_count);
+      }
     }
     return weights;
   }

@@ -92,6 +92,7 @@ def register_workload(func_name, f=None, override=False):
         if func_name in WORKLOAD_FUNC_REGISTRY and not override:
             raise RuntimeError("%s has been registered already" % func_name)
         WORKLOAD_FUNC_REGISTRY[func_name] = myf
+        # print(" Inserting in registry", func_name, myf)
         return myf
 
     if f:
@@ -182,6 +183,7 @@ def workload_key_to_tensors(workload_key):
     # We register ComputeDAG with both hash and argumetns, which are fixed in ComputeDAG,
     # so we use an entire workload key to query the ComputeDAG.
     if workload_key in WORKLOAD_FUNC_REGISTRY:
+        # print("   Found", WORKLOAD_FUNC_REGISTRY[workload_key])
         return WORKLOAD_FUNC_REGISTRY[workload_key]
 
     # We register compute function with only the function name since
@@ -193,6 +195,7 @@ def workload_key_to_tensors(workload_key):
     assert callable(value)
 
     args = deserialize_args(workload[1:])
+    print("   Deserialized", str(workload[1:], "to", str(args)))
     return value(*args)
 
 
@@ -250,6 +253,7 @@ def deserialize_workload_registry_entry(data):
         if not callable(value):
             value = LoadJSON(value)
         WORKLOAD_FUNC_REGISTRY[name] = value
+        print("Inserting in registry", name, value)
 
 
 def save_workload_func_registry(filename):

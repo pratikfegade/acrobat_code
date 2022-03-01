@@ -395,6 +395,24 @@ inline auto Substitute(T input, const Map<Var, PrimExpr>& value_map) {
  * \tparam T the input type, can be PrimExpr or Stmt.
  */
 template <typename T>
+inline auto SubstituteStructural(
+    T input, const std::unordered_map<Var, PrimExpr, StructuralHash, StructuralEqual>& value_map) {
+  auto vmap = [&](const Var& var) -> Optional<PrimExpr> {
+    auto it = value_map.find(var);
+    if (it != value_map.end()) return (*it).second;
+    return Optional<PrimExpr>(nullptr);
+  };
+  return Substitute(std::move(input), vmap);
+}
+
+/*!
+ * \brief Sugar for substitute via a given map.
+ * \param input The input to be updated.
+ * \param value_map The map of new values.
+ * \return The result.
+ * \tparam T the input type, can be PrimExpr or Stmt.
+ */
+template <typename T>
 inline T Substitute(T input, const std::unordered_map<const VarNode*, PrimExpr>& value_map) {
   auto vmap = [&](const Var& var) -> Optional<PrimExpr> {
     auto it = value_map.find(var.get());

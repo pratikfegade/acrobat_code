@@ -179,7 +179,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     // No need to register schedule for device copy op.
     if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
       if (use_auto_scheduler_) {
-        std::cout << "[TCC] Invoking relay integration autoscheduler" << std::endl;
+        // std::cout << "[TCC] Invoking relay integration autoscheduler" << std::endl;
         const auto* fauto_schedule =
             runtime::Registry::Get("auto_scheduler.relay_integration.auto_schedule_topi_compute");
         ICHECK(fauto_schedule != nullptr)
@@ -235,7 +235,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     CachedFunc generated_batched_func;
 
     if (create_batched) {
-      std::cout << "[TCC] Creating batched functions" << std::endl;
+      // std::cout << "[TCC] Creating batched functions" << std::endl;
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
                                         std::vector<bool>* p_reuse_taints) {
         ICHECK_LE(tensors.size(), model_parameter_taints.size());
@@ -306,12 +306,13 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       // No need to register schedule for device copy op.
       if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
         if (use_auto_scheduler_) {
-          std::cout << "[TCC]  Invoking relay integration autoscheduler on batched" << std::endl;
+          Map<tir::Var, Integer> vmap{{batch_size_var, 876}};
+          // std::cout << "[TCC]  Invoking relay integration autoscheduler on batched" << std::endl;
           const auto* fauto_schedule =
               runtime::Registry::Get("auto_scheduler.relay_integration.auto_schedule_topi_compute");
           ICHECK(fauto_schedule != nullptr)
               << "auto_scheduler.relay_integration.auto_schedule_topi_compute is not registered";
-          ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs);
+          ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs, vmap);
           if (obj.defined()) {
             batched_schedule = Downcast<te::Schedule>(obj);
           }

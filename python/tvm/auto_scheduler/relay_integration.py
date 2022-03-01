@@ -145,24 +145,24 @@ def extract_tasks(
     tasks = []
     weights = []
     for wkl_key, (weight, func_names) in env.wkl_key_to_weight.items():
-        print("EXTRACT TASKS:", wkl_key)
-        tasks.append(
-            SearchTask(
-                workload_key=wkl_key,
-                target=target,
-                hardware_params=hardware_params,
-                # When auto scheduler is used in end to end network, try to apply layout rewrite
-                # to improve the overall performance
-                layout_rewrite_option=LayoutRewriteOption.get_target_default(target, True),
-                task_inputs=(
-                    env.wkl_key_to_input_names[wkl_key]
-                    if wkl_key in env.wkl_key_to_input_names
-                    else None
-                ),
-                task_inputs_save_to_file=True,
-                desc=",".join(func_names),
-            )
+        # print("EXTRACT TASKS:", wkl_key)
+        task = SearchTask(
+            workload_key=wkl_key,
+            target=target,
+            hardware_params=hardware_params,
+            # When auto scheduler is used in end to end network, try to apply layout rewrite
+            # to improve the overall performance
+            layout_rewrite_option=LayoutRewriteOption.get_target_default(target, True),
+            task_inputs=(
+                env.wkl_key_to_input_names[wkl_key]
+                if wkl_key in env.wkl_key_to_input_names
+            else None
+            ),
+            task_inputs_save_to_file=True,
+            desc=",".join(func_names),
         )
+        # print(" TASK: ", task.compute_dag)
+        tasks.append(task)
         weights.append(int(weight))
 
     if dump_workload_to_dag_log is not None:
@@ -212,7 +212,7 @@ class TracingEnvironment:
         workload_key: str
             The workload key of a task.
         """
-        print("   Adding key", func_name, workload_key, len(self.wkl_key_to_weight))
+        # print("   Adding key", func_name, workload_key, len(self.wkl_key_to_weight))
         self.func_name_to_wkl_key[func_name] = workload_key
         if workload_key not in self.wkl_key_to_weight:
             self.wkl_key_to_weight[workload_key] = (0, set())
@@ -231,6 +231,7 @@ class TracingEnvironment:
         input_names : List[str]
             A list of input names.
         """
+        print("INPMAP", workload_key, len(input_names), input_names[0])
         self.wkl_key_to_input_names[workload_key] = input_names
 
 
@@ -295,19 +296,21 @@ def traverse_to_get_io_tensors(outs):
 
     io_tensors = inputs + list(outs)
 
+    is_dynamic = False
     ##############################################
-    # for tensor in io_tensors:
-    #     # Reject the compute if any of its I/O tensors has dynamic shape.
-    #     if any([not isinstance(v, int) for v in get_const_tuple(tensor.shape)]):
-    #         # return ([], False, False)
-    #         print(" Found dynamic shapes!!")
+    for tensor in io_tensors:
+        # Reject the compute if any of its I/O tensors has dynamic shape.
+        if any([not isinstance(v, int) for v in get_const_tuple(tensor.shape)]):
+            # return ([], False, False)
+            is_dynamic = True
+            break
     ##############################################
 
-    return (io_tensors, len(layout_free_ops) > 0, has_complex_op)
+    return (io_tensors, len(layout_free_ops) > 0, has_complex_op, is_dynamic)
 
 
 @tvm._ffi.register_func("auto_scheduler.relay_integration.auto_schedule_topi_compute")
-def auto_schedule_topi(func_name, outs):
+def auto_schedule_topi(func_name, outs, vmap={}):
     """Use auto-scheduler to schedule any topi compute function.
 
     Note: This is used internally for relay integration. Do
@@ -334,17 +337,26 @@ def auto_schedule_topi(func_name, outs):
         prepare_input_map,
     )  # lazily import to avoid recursive dependency
 
-    io_tensors, has_layout_free, has_complex_op = traverse_to_get_io_tensors(outs)
-    if not io_tensors:  # The compute includes dynamic shapes which are not supported yet.
-        return None
+    io_tensors, has_layout_free, has_complex_op, is_dynamic = traverse_to_get_io_tensors(outs)
+    # if is_dynamic:  # The compute includes dynamic shapes which are not supported yet.
+        # return None
 
     # print(" Computing DAG")
     try:
         dag = ComputeDAG(io_tensors)
+        if is_dynamic:
+            assert len(vmap) > 0, "Empty vmap provided for a dynamic ComputeDAG"
+            dag = dag.make_concrete(vmap)
+            assert (
+                len(io_tensors) == len(dag.tensors),
+                "Lengths of IO tensors in the concrete and its corresponding dynamic ComputeDAG don't match!"
+            )
+            io_tensors = dag.tensors
     except tvm.error.TVMError as err:
         logger.info("Failed to create a ComputeDAG for auto_scheduler: %s", str(err))
         return None
 
+    # print("Registering", dag.workload_key(), io_tensors)
     key = register_workload_tensors(dag.workload_key(), io_tensors)
     target = tvm.target.Target.current()
 
