@@ -392,6 +392,7 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
   auto tic_begin = std::chrono::high_resolution_clock::now();
 
   int fail_ct = 0;
+  int success_ct = 0;
   Array<State> out_states;
   std::vector<std::mt19937> rand_gens;
   rand_gens.reserve(population);
@@ -428,6 +429,7 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
     for (auto tmp_s : temp_states) {
       if (tmp_s.defined()) {
         cand_states.push_back(std::move(tmp_s));
+        success_ct++;
       } else {
         fail_ct++;
       }
@@ -452,9 +454,11 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
           explored_state_strs.insert(state_str);
           out_states.push_back(std::move(cand_states[i]));
           unchange_cnt = 0;  // Reset the counter once we found a valid state
+          // std::cout << "[SP]   Not Failed " << explored_state_strs.size() << std::endl;
+          success_ct++;
         } else {
-          // std::cout << "[SP]   Failed " << (pop_scores[i] > -1e10) << " "
-          // << (explored_state_strs.count(state_str) == 0) << std::endl;
+          // std::cout << "[SP]   Failed " << explored_state_strs.size() << " "
+          // << explored_state_strs.count(state_str) << std::endl;
           fail_ct++;
         }
       }
@@ -466,8 +470,9 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
                             .count();
       StdCout(verbose) << "Sample Iter: " << iter << std::fixed << std::setprecision(4)
                        << "\t#Pop: " << out_states.size() << "\t#Target: " << sample_init_min_pop_
-                       << "\tfail_ct: " << fail_ct << "\tTime elapsed: " << std::fixed
-                       << std::setprecision(2) << duration << std::endl;
+                       << "\tsuccess_ct: " << success_ct << "\tfail_ct: " << fail_ct
+                       << "\tTime elapsed: " << std::fixed << std::setprecision(2) << duration
+                       << std::endl;
     }
 
     if (unchange_cnt == 5) {

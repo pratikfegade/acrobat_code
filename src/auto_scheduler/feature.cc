@@ -1445,6 +1445,8 @@ void GetPerStoreFeaturesFromMeasurePairs(const Array<MeasureInput>& inputs,
   tasks.reserve(inputs.size());
   normalized_throughputs->reserve(inputs.size());
   task_ids->reserve(inputs.size());
+  // int err_count = 0;
+  // bool printed = false;
   for (size_t i = 0; i < inputs.size(); ++i) {
     float cost = static_cast<float>(FloatArrayMean(results[i]->costs));
     const std::string& workload_key = inputs[i]->task->workload_key;
@@ -1468,6 +1470,11 @@ void GetPerStoreFeaturesFromMeasurePairs(const Array<MeasureInput>& inputs,
                          inputs[i]->task->hardware_params, inputs[i]->task->layout_rewrite_option,
                          inputs[i]->task->task_input_names);
         } catch (std::exception& e) {
+          // if (!printed) {
+          //   std::cout << "[FEAT]  ERROR " << e.what() << std::endl;
+          //   printed = true;
+          // }
+          // err_count++;
           // Cannot build ComputeDAG from workload key, the task may have not been registered in
           // this search round
           continue;
@@ -1492,6 +1499,10 @@ void GetPerStoreFeaturesFromMeasurePairs(const Array<MeasureInput>& inputs,
   for (size_t i = 0; i < normalized_throughputs->size(); ++i) {
     (*normalized_throughputs)[i] = min_costs[(*task_ids)[i]] / (*normalized_throughputs)[i];
   }
+
+  // std::cout << "[FEAT] Intermdiate sizes: " << std::endl;
+  // std::cout << "[FEAT]   : " << states.size() << " " << tasks.size() << " " << err_count
+  // << std::endl;
 
   GetPerStoreFeaturesFromStates(states, tasks, skip_first_n_feature_extraction, max_n_bufs,
                                 features);
@@ -1608,6 +1619,11 @@ TVM_REGISTER_GLOBAL("auto_scheduler.GetPerStoreFeaturesFromMeasurePairs")
       GetPerStoreFeaturesFromMeasurePairs(inputs, results, skip_first_n_feature_extraction,
                                           max_n_bufs, &features, &normalized_throughputs,
                                           &task_ids);
+
+      // std::cout << "[FEAT] Final sizes: " << std::endl;
+      // std::cout << "[FEAT]   : " << features.size() << " " << normalized_throughputs.size() << "
+      // "
+      // << task_ids.size() << std::endl;
 
       std::vector<char> byte_data;
       *ret = SerializeFeatures(std::move(features), std::move(normalized_throughputs),

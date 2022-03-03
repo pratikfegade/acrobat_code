@@ -10,7 +10,7 @@ parser.add_argument('--dtype', dest='dtype', nargs='?', default='float32')
 parser.add_argument('--batch-size', dest='batch_size', default=1, type=int)
 parser.add_argument('--peel-loops', dest='peel_loops', default=False, action='store_true')
 parser.add_argument('--debug', dest='debug', default=False, action='store_true')
-parser.add_argument('--debug-code', dest='debug_code', default=False, action='store_true')
+parser.add_argument('--debug-code', dest='debug_code', nargs='?', default='none')
 parser.add_argument('--manual-code', dest='manual_code', default=False, action='store_true')
 parser.add_argument('--hidden-size', dest='hidden_size', default=256, type=int)
 args = parser.parse_args()
@@ -79,6 +79,7 @@ if args.target == "cuda":
 else:
     x, y = s[O].leaf_iter_vars[0:2]
     s[O].parallel(x)
+    s[O].vectorize(y)
 
 def create_pointers_buffer(tensor, storage_type="float32"):
     name = tensor.name + "ptr"
@@ -103,7 +104,7 @@ Iptr = create_pointers_buffer(I)
 Optr = create_pointers_buffer(O)
 scatter_buffers_map = { I: Iptr, O: Optr }
 print_after_passes = [
-    # "tir.InferFragment",
+    "tir.VectorizeLoop",
     # "tir.VerifyMemory",
     # "tir.LowerThreadAllreduce",
     # "tir.LowerThreadAllreduce",
@@ -118,16 +119,17 @@ binds = { W: Wb }
 with tvm.transform.PassContext(config={ "tir.detect_global_barrier": False }):
     inputs = [Wb, I, Iptr, O, Optr]
 
-    if (args.debug_code):
-        # lowered = tvm.lower(s, inputs, simple_mode=False, scatter_buffers=scatter_buffers_map,
-                            # print_after_passes=print_after_passes, binds=binds)
-        # print(lowered)
+    if args.debug_code == "ir":
+        lowered = tvm.lower(s, inputs, simple_mode=False, scatter_buffers=scatter_buffers_map,
+                            print_after_passes=print_after_passes, binds=binds)
+        print(lowered)
+    elif args.debug_code == "code":
         fadd = tvm.build(s, inputs, args.target, scatter_buffers=scatter_buffers_map,
                          print_after_passes=print_after_passes, binds=binds)
-        # if args.target == 'cuda':
-            # print('-----GPU code-----\n' + fadd.imported_modules[0].get_source())
-        # else:
-            # print('-----CPU code-----\n' + fadd.get_source())
+        if args.target == 'cuda':
+            print('-----GPU code-----\n' + fadd.imported_modules[0].get_source())
+        else:
+            print('-----CPU code-----\n' + fadd.get_source())
     else:
         fadd = tvm.build(s, inputs, args.target)
         fadd.export_library('lstm.so')

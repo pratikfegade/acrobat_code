@@ -314,12 +314,28 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   PrimExpr VisitExpr_(const LoadNode* op) final {
     PrimExpr index = this->VisitExpr(op->index);
     PrimExpr pred = this->VisitExpr(op->predicate);
-    if (index.same_as(op->index) && pred.same_as(op->predicate)) {
+
+    PrimExpr scatter_elem_index;
+    PrimExpr scatter_batch_index;
+    if (op->scatter_buffer_var.defined()) {
+      scatter_elem_index = this->VisitExpr(op->scatter_elem_index);
+      scatter_batch_index = this->VisitExpr(op->scatter_batch_index);
+    }
+
+    if (index.same_as(op->index) && pred.same_as(op->predicate) &&
+        scatter_batch_index.same_as(op->scatter_batch_index) &&
+        scatter_elem_index.same_as(op->scatter_elem_index)) {
       return GetRef<PrimExpr>(op);
     } else {
       int lanes = std::max(index.dtype().lanes(), pred.dtype().lanes());
-      return Load(op->dtype.with_lanes(lanes), op->buffer_var, BroadcastTo(index, lanes),
-                  BroadcastTo(pred, lanes));
+      if (op->scatter_buffer_var.defined()) {
+        return Load(op->dtype.with_lanes(lanes), op->buffer_var, BroadcastTo(index, lanes),
+                    BroadcastTo(pred, lanes), op->scatter_buffer_var, scatter_batch_index,
+                    BroadcastTo(scatter_elem_index, lanes));
+      } else {
+        return Load(op->dtype.with_lanes(lanes), op->buffer_var, BroadcastTo(index, lanes),
+                    BroadcastTo(pred, lanes));
+      }
     }
   }
   // Let
@@ -355,13 +371,29 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
     PrimExpr value = this->VisitExpr(op->value);
     PrimExpr index = this->VisitExpr(op->index);
     PrimExpr pred = this->VisitExpr(op->predicate);
-    if (value.same_as(op->value) && index.same_as(op->index)) {
+
+    PrimExpr scatter_elem_index;
+    PrimExpr scatter_batch_index;
+    if (op->scatter_buffer_var.defined()) {
+      scatter_elem_index = this->VisitExpr(op->scatter_elem_index);
+      scatter_batch_index = this->VisitExpr(op->scatter_batch_index);
+    }
+
+    if (value.same_as(op->value) && index.same_as(op->index) &&
+        scatter_batch_index.same_as(op->scatter_batch_index) &&
+        scatter_elem_index.same_as(op->scatter_elem_index)) {
       return GetRef<Stmt>(op);
     } else {
       int lanes = std::max(value.dtype().lanes(), index.dtype().lanes());
       lanes = std::max(lanes, pred.dtype().lanes());
-      return Store(op->buffer_var, BroadcastTo(value, lanes), BroadcastTo(index, lanes),
-                   BroadcastTo(pred, lanes));
+      if (op->scatter_buffer_var.defined()) {
+        return Store(op->buffer_var, BroadcastTo(value, lanes), BroadcastTo(index, lanes),
+                     BroadcastTo(pred, lanes), op->scatter_buffer_var, scatter_batch_index,
+                     BroadcastTo(scatter_elem_index, lanes));
+      } else {
+        return Store(op->buffer_var, BroadcastTo(value, lanes), BroadcastTo(index, lanes),
+                     BroadcastTo(pred, lanes));
+      }
     }
   }
   // For

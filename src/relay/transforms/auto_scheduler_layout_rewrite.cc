@@ -25,6 +25,7 @@
 
 #include "auto_scheduler_layout_rewrite.h"
 
+#include <tvm/ir/transform.h>
 #include <tvm/relay/attrs/transform.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/op_attr_types.h>
@@ -34,6 +35,7 @@
 #include <functional>
 #include <vector>
 
+#include "../backend/model_parameter_taint_analysis.h"
 #include "../backend/te_compiler.h"
 #include "pattern_utils.h"
 
@@ -132,6 +134,7 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
 
   if (const auto* call = new_n.as<CallNode>()) {
     if (const auto* func = call->op.as<FunctionNode>()) {
+      auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
       if (PrimitiveFunctionBodyChecker().Check(func->body)) {
         global_ori_layouts_queue.clear();
         global_new_layouts_queue.clear();
@@ -144,8 +147,14 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
         CHECK(f) << "Could not find auto_scheduler.enter_layout_rewrite function.";
         (*f)();
 
-        tec::PrimFuncFor(GetRef<Function>(func), Target::Current(),
-                         [](std::string name) { return name; });
+        // std::cout << "[ASLR] Entering scope" << std::endl;
+        auto iit = model_parameter_taints_.find(Downcast<Function>(call->op));
+        ICHECK(iit != model_parameter_taints_.end());
+        auto func_model_parameter_taints = (*iit).second;
+        tec::PrimFuncFor(
+            GetRef<Function>(func), Target::Current(), [](std::string name) { return name; },
+            func_model_parameter_taints, batched_execution_, scattered_execution_);
+        // std::cout << "[ASLR] Exiting scope\n" << std::endl;
 
         f = runtime::Registry::Get("auto_scheduler.exit_layout_rewrite");
         CHECK(f) << "Could not find ansor.exit_layout_rewrite function.";
@@ -163,16 +172,23 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
   return new_n;
 }
 
-Expr AutoSchedulerLayoutRewrite(const Expr& expr) {
-  return AutoSchedulerLayoutRewriter().Mutate(expr);
+Expr AutoSchedulerLayoutRewrite(const Expr& expr, Map<Function, Array<Bool>> model_parameter_taints,
+                                bool batched_execution, bool scattered_execution) {
+  return AutoSchedulerLayoutRewriter(model_parameter_taints, batched_execution, scattered_execution)
+      .Mutate(expr);
 }
 
 namespace transform {
 
-Pass AutoSchedulerLayoutRewrite() {
+Pass AutoSchedulerLayoutRewrite(bool batched_execution, bool scattered_execution) {
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function f, IRModule m, PassContext pc) {
-        return Downcast<Function>(relay::AutoSchedulerLayoutRewrite(f));
+        auto parameter_taints = tec::ModelParameterTaintAnalysis(m);
+        // std::cout << "\n\n\n\n\n\n[ASLR] Starting ASLR" << std::endl;
+        auto ret = Downcast<Function>(relay::AutoSchedulerLayoutRewrite(
+            f, parameter_taints, batched_execution, scattered_execution));
+        // std::cout << "[ASLR] Ending ASLR\n\n\n\n\n\n" << std::endl;
+        return ret;
       };
   return CreateFunctionPass(pass_func, 3, "AutoSchedulerLayoutRewrite", {"InferType"});
 }

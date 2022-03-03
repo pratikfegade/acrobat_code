@@ -110,7 +110,11 @@ inline Stmt MakeAssertEQ(PrimExpr lhs, PrimExpr rhs, std::string msg) {
 
 PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
   auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
-  bool print = support::StartsWith(global_symbol.value(), "prim_func");
+  bool print = false;
+  // support::StartsWith(global_symbol.value(), "vm_mod_fused_nn_dense_expand_dims_add_batched");
+  if (print) {
+    std::cout << "[MPI] Packed API for " << func << std::endl;
+  }
 
   ICHECK(global_symbol) << "MakePackedAPI: Expect PrimFunc to have the global_symbol attribute";
 
@@ -314,7 +318,7 @@ PrimFunc MakePackedAPI(PrimFunc&& func, int num_unpacked_args) {
       os << " \'" << v->name_hint << "\' ";
     }
     os << " is not bound to any variables";
-    LOG(FATAL) << "Not all Vars are passed in api_args: " << os.str();
+    LOG(FATAL) << "Not all Vars are passed in api_args: " << os.str() << "\n" << func_ptr->body;
   }
 
   func_ptr->buffer_map = Map<Var, Buffer>();

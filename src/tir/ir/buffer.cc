@@ -312,10 +312,12 @@ PrimExpr Buffer::vload(Array<PrimExpr> begin, DataType dtype, Buffer scatter_buf
       PrimExpr scatter_batch_offset = begin[0];
       PrimExpr scatter_elem_offset = BufferOffset(n, scatter_begin, dtype);
       PrimExpr combined_offset = BufferOffset(n, begin, dtype);
-      // std::cout << "[VL] Offsets" << std::endl;
-      // std::cout << "[VL]  Batch " << scatter_batch_offset << std::endl;
-      // std::cout << "[VL]  Elem " << scatter_elem_offset << std::endl;
-      // std::cout << "[VL]  Combined " << combined_offset << std::endl;
+      // if (scatter_buffer->data->name_hint == "placeholder1ptr") {
+      //   std::cout << "[VL]  Offsets" << std::endl;
+      //   std::cout << "[VL]   Batch " << scatter_batch_offset << std::endl;
+      //   std::cout << "[VL]   Elem " << scatter_elem_offset << std::endl;
+      //   std::cout << "[VL]   Combined " << combined_offset << std::endl;
+      // }
       return tir::Load(dtype, n->data, combined_offset, const_true(dtype.lanes()),
                        scatter_buffer->data, scatter_batch_offset, scatter_elem_offset);
     } else {

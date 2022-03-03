@@ -1600,6 +1600,7 @@ TVM_REGISTER_GLOBAL("auto_scheduler.ComputeDAGInferBoundFromState")
 
 TVM_REGISTER_GLOBAL("auto_scheduler.ComputeDAGRewriteLayoutFromState")
     .set_body_typed([](const ComputeDAG& dag, const State& state) {
+      // std::cout << "[CD] STATE " << state.ToStr() << std::endl;
       Array<Step>* transform_steps = const_cast<Array<Step>*>(&state->transform_steps);
       return dag.RewriteLayout(transform_steps, LayoutRewriteOption::RewriteForPreTransformed);
     });

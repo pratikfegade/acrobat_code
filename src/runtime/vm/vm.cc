@@ -439,7 +439,7 @@ void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index out
                      shared_state_->batched_func_arg_mode_[packed_index], batched,
                      this->scattered_kernels_);
     } else {
-      std::cout << "[VM] Executing " << packed_index << std::endl;
+      // std::cout << "[VM] Executing " << packed_index << std::endl;
       InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args, {},
                      batched, this->scattered_kernels_);
     }
@@ -492,7 +492,7 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
       }
     }
 
-    if (true) {
+    if (coarsened_execution_) {
       std::cout << "[VM]   ArgAccessModes: [";
       for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
            ++i) {

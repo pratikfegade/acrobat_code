@@ -802,9 +802,12 @@ def prepare_input_map(args):
     tensor_input_map = {}
 
     # Case 0: Check placeholder name
+    # print("Making Arg Map")
     for arg in args:
         if isinstance(arg.op, tvm.te.PlaceholderOp):
-            if arg.op.name != "placeholder":
+            # print(" ", arg)
+            # if arg.op.name != "placeholder":
+            if not arg.op.name.startswith("placeholder"):
                 tensor_input_map[arg] = arg.op.name
 
     # Case 1: Check specific tensor inputs

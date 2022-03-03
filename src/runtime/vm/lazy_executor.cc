@@ -126,7 +126,7 @@ void LazyExecutor::ExecuteOpNodeBatch(
       ICHECK_EQ(func_nodes[0]->args_.size(), func_nodes[i]->args_.size());
     }
 
-    std::cout << "[VMU]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
+    // std::cout << "[VMU]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
     if (func_nodes.size() == 1) {
       // std::cout << "[VMU] Executing " << func_idx << " " << func_nodes.size() << std::endl;
       InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->arg_count_,
@@ -146,8 +146,8 @@ void LazyExecutor::ExecuteOpNodeBatch(
 }
 
 void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
-  std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
-            << std::endl;
+  // std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
+  // << std::endl;
   if (all_nodes_same_depth) {
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;
     for (auto& node : nodes_) {

@@ -158,11 +158,11 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
 
 
     # h2h = layers.dense_add_bias(
-    #     data=relay.TupleGetItem(states, 0),
-    #     units=num_hidden * 4,
-    #     weight=h2h_weight,
-    #     bias=h2h_bias,
-    #     name="%sh2h" % name,
+        # data=relay.TupleGetItem(states, 0),
+        # units=num_hidden * 4,
+        # weight=h2h_weight,
+        # bias=h2h_bias,
+        # name="%sh2h" % name,
     # )
 
     # gates = h2h
@@ -181,7 +181,7 @@ def lstm_cell(num_hidden, batch_size=1, dtype="float32", name=""):
     # body = builder.get()
 
     # return relay.Function(
-    #     [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
+        # [inputs, states, i2h_weight, i2h_bias, h2h_weight, h2h_bias], body, ret_type
     # )
 
 

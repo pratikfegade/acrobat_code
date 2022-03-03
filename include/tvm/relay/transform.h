@@ -361,10 +361,16 @@ TVM_DLL Pass CanonicalizeOps();
 TVM_DLL Pass AlterOpLayout();
 
 /*!
- * \brief Do layout rewrite according to the tile structure created by auto-scheduler.
+ * \brief Do layout rewrite according to the tile structure created by auto-scheduler. *
+ * \param batched_execution Whether to create batched kernels for
+ * dynamic batching.
+ * \param scattered_execution Whether to create batched kernels that
+ * operate on scattered tensors for dynamic batching.
+ *
  * \return The pass
  */
-TVM_DLL Pass AutoSchedulerLayoutRewrite();
+TVM_DLL Pass AutoSchedulerLayoutRewrite(bool batched_execution = false,
+                                        bool scattered_execution = false);
 
 /*!
  * \brief Given a dest layout, this pass transforms the expr such that most of the ops input data

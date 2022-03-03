@@ -40,6 +40,7 @@ def create_workflow_configs(lazy_execution=False,
                             concurrent_execution=False,
                             use_autoscheduler=True,
                             batch_size=1,
+                            dynamic_batch_size_estimate=64,
                             opt_level=3):
     config = {
         "relay.db_coarsen_granularity": coarsened_execution,
@@ -47,7 +48,8 @@ def create_workflow_configs(lazy_execution=False,
         "relay.db_lazy_execution": lazy_execution,
         "relay.db_scattered_kernels": scattered_kernels,
         "relay.db_concurrent_execution": concurrent_execution,
-        "relay.backend.use_auto_scheduler": use_autoscheduler
+        "relay.db_dynamic_batch_size_estimate": dynamic_batch_size_estimate,
+        "relay.backend.use_auto_scheduler": use_autoscheduler,
    }
     execution_options = tvm.runtime.vm.create_vm_execution_options(
         coarsened_execution=coarsened_execution,

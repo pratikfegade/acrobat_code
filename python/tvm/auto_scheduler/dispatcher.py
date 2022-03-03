@@ -116,11 +116,13 @@ class DispatchContext(object):
         raise NotImplementedError()
 
     def __enter__(self):
+        # print("Entering", type(self), flush=True)
         self._old_ctx = DispatchContext.current
         DispatchContext.current = self
         return self
 
     def __exit__(self, ptype, value, trace):
+        # print("Exiting", type(self), flush=True)
         DispatchContext.current = self._old_ctx
 
 
@@ -246,6 +248,7 @@ class ApplyHistoryBest(DispatchContext):
         logger.debug("Finish loading %d records", counter)
 
     def _query_inside(self, target, workload_key, func_name):
+        # print("Querying", target, workload_key, func_name, flush=True)
         if target is None:
             raise RuntimeError(
                 "Need a target context to find the history best. "
@@ -308,6 +311,10 @@ class ApplyHistoryBest(DispatchContext):
         for k in target.keys:
             entry, _, _ = self.get_workload_entry(self._best_user_defined, k, workload_key)
             entry[workload_args] = (state, 1)
+
+        ########################################################
+        # print(" Updated", (self._query_inside(target, workload_key, "") is None))
+        ########################################################
 
 
 class ApplyHistoryBestOrSample(ApplyHistoryBest):
@@ -425,13 +432,15 @@ class FallbackContext(DispatchContext):
             return self.memory[key]
 
         if self.verbose == 2 or (has_complex_op and self.verbose == 1):
+            # import traceback, sys
+            # traceback.print_stack(file=sys.stdout)
             msg = (
                 f"-----------------------------------\n"
                 f"{func_name}\n"
                 f"Cannot find tuned schedules for target={target}, workload_key={workload_key}. "
                 f"A fallback TOPI schedule is used, "
                 f"which may bring great performance regression or even compilation failure. "
-                f"Compute DAG info:\n{dag}"
+                # f"Compute DAG info:\n{dag}"
             )
             if msg not in self.messages:
                 self.messages.add(msg)
@@ -452,4 +461,5 @@ class FallbackContext(DispatchContext):
         self.memory[key] = state
 
 
+# print("Default", flush=True)
 DispatchContext.current = FallbackContext()

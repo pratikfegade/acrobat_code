@@ -65,6 +65,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_scattered_kernels", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_concurrent_execution", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_dynamic_batch_size_estimate", Integer);
 
 namespace relay {
 
@@ -938,7 +939,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   context_.module = OptimizeModuleImpl(std::move(mod));
 
   // for (auto it : context_.module->functions) {
-  // std::cout << "[CO] Lowering functions: " << it.first->name_hint << std::endl;
+  //   std::cout << "[CO] Lowering functions: " << it.first->name_hint << std::endl;
   // }
 
   // Build the map from global variables bound to Functions to a global index in the
@@ -1178,6 +1179,12 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     mod->Add(gvar, f);
   }
 
+  transform::PassContext pass_ctx = PassContext::Current();
+  bool batched_execution =
+      pass_ctx->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+  bool scattered_kernels =
+      pass_ctx->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
+
   Array<Pass> pass_seqs = relay::backend::GetPassPrefix(
       /*is_homogenous=*/config_->optional_homogeneous_target.defined(), /*is_vm=*/true);
 
@@ -1192,21 +1199,20 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   // Do layout rewrite for auto-scheduler.
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
-  transform::PassContext pass_ctx = PassContext::Current();
-  if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
-    Pass major_pass = transform::AutoSchedulerLayoutRewrite();
-    bool enable_layout_rewrite_targets =
-        config_->optional_homogeneous_target->kind->device_type == kDLCPU ||
-        config_->optional_homogeneous_target->GetAttr<String>("device", "") == "mali";
-    if (enable_layout_rewrite_targets && pass_ctx.PassEnabled(major_pass->Info())) {
-      With<Target> tctx(config_->optional_homogeneous_target);
-      pass_seqs.push_back(major_pass);
-      // Defuse ops to fold constants, then fuse them again
-      pass_seqs.push_back(transform::DefuseOps());
-      pass_seqs.push_back(transform::FoldConstant());
-      pass_seqs.push_back(transform::FuseOps());
-    }
-  }
+  // if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
+  //   Pass major_pass = transform::AutoSchedulerLayoutRewrite(batched_execution,
+  //   scattered_kernels); bool enable_layout_rewrite_targets =
+  //       config_->optional_homogeneous_target->kind->device_type == kDLCPU ||
+  //       config_->optional_homogeneous_target->GetAttr<String>("device", "") == "mali";
+  //   if (enable_layout_rewrite_targets && pass_ctx.PassEnabled(major_pass->Info())) {
+  //     With<Target> tctx(config_->optional_homogeneous_target);
+  //     pass_seqs.push_back(major_pass);
+  //     // Defuse ops to fold constants, then fuse them again
+  //     pass_seqs.push_back(transform::DefuseOps());
+  //     pass_seqs.push_back(transform::FoldConstant());
+  //     pass_seqs.push_back(transform::FuseOps());
+  //   }
+  // }
 
   pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
@@ -1217,7 +1223,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
   // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
@@ -1226,6 +1231,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1248,14 +1254,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::InferType());
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
-    bool batched_execution =
-        pass_ctx->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
-    bool scattered_kernels =
-        pass_ctx->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

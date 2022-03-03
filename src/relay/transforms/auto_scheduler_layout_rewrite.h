@@ -36,7 +36,17 @@ namespace relay {
 
 class AutoSchedulerLayoutRewriter : public ExprMutator {
  public:
+  AutoSchedulerLayoutRewriter(Map<Function, Array<Bool>> model_parameter_taints,
+                              bool batched_execution, bool scattered_execution)
+      : model_parameter_taints_(model_parameter_taints),
+        batched_execution_(batched_execution),
+        scattered_execution_(scattered_execution) {}
+
   Expr VisitExpr_(const CallNode* n) final;
+
+  Map<Function, Array<Bool>> model_parameter_taints_;
+  bool batched_execution_;
+  bool scattered_execution_;
 
   // Two global variables for receiving layout information from python
   static std::deque<std::string> global_ori_layouts_queue;

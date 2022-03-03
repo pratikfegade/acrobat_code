@@ -131,7 +131,8 @@ class TensorToBufferMapper : public StmtExprMutator {
   Buffer GetBuffer(const Tensor& tensor, String storage_scope = "", bool allow_alloc = false) {
     auto it = buffer_map_.find(tensor);
     if (it != buffer_map_.end()) return it->second;
-    ICHECK(allow_alloc) << "Cannot find the Realization point of tensor " << tensor;
+    ICHECK(allow_alloc) << "Cannot find the Realization point of tensor " << tensor << " "
+                        << tensor->op;
 
     auto buffer = CreateBufferFor(tensor, storage_scope);
     buffer_map_[tensor] = buffer;
@@ -153,7 +154,8 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
   }
 
   // for (auto it : extern_buffer) {
-  //   std::cout << "[ABC] " << it.first << " " << it.second << std::endl;
+  //   std::cout << "[ABC] " << it.first << " " << it.first->op.get() << " " << it.second <<
+  //   std::endl;
   // }
 
   // for (auto arg : arg_list) {

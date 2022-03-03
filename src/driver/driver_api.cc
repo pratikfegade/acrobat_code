@@ -420,7 +420,9 @@ IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args, const std
   IRModule mod = ScheduleToModule(std::move(sch), args, name, binds, scatter_buffers);
   // Get the legacy TE pass list
   Array<transform::Pass> pass_list = CreatePassList(simple_mode);
-  return LowerWithPassList(mod, AddPrintPasses(pass_list, print_after_passes));
+  auto list = AddPrintPasses(pass_list, print_after_passes);
+  // list = AddPrintPasses(list, {"tir.VectorizeLoop"});
+  return LowerWithPassList(mod, list);
 }
 
 TVM_REGISTER_GLOBAL("driver.lower_schedule")

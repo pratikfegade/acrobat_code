@@ -31,6 +31,8 @@ namespace tir {
 
 class ScatterLowerer : public StmtExprMutator {
  public:
+  ScatterLowerer(bool print) : print_(print) {}
+
   Stmt VisitStmt_(const StoreNode* op) final {
     if (op->scatter_buffer_var.defined()) {
       return ScatterStore(Downcast<Var>(VisitExpr(op->scatter_buffer_var)), VisitExpr(op->value),
@@ -42,6 +44,10 @@ class ScatterLowerer : public StmtExprMutator {
   }
 
   PrimExpr VisitExpr_(const LoadNode* op) final {
+    if (print_ && op->buffer_var->name_hint == "placeholder1") {
+      std::cout << "[LSM]  Visitin load " << GetRef<PrimExpr>(op) << " " << op->scatter_buffer_var
+                << std::endl;
+    }
     if (op->scatter_buffer_var.defined()) {
       return ScatterLoad(op->dtype, Downcast<Var>(VisitExpr(op->scatter_buffer_var)),
                          VisitExpr(op->scatter_batch_index), VisitExpr(op->scatter_elem_index),
@@ -50,14 +56,22 @@ class ScatterLowerer : public StmtExprMutator {
       return StmtExprMutator::VisitExpr_(op);
     }
   }
+
+  bool print_;
 };
 
 namespace transform {
 
 Pass LowerScatterLoadsAndStores() {
   auto pass_func = [](PrimFunc f, IRModule m, PassContext ctx) {
+    auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol);
+    bool print =
+        false;  //(global_symbol.value() == "vm_mod_fused_nn_dense_expand_dims_add_batched");
+    if (print) {
+      std::cout << "[LSM]  Staring lowering " << global_symbol << std::endl;
+    }
     auto* n = f.CopyOnWrite();
-    ScatterLowerer lowerer;
+    ScatterLowerer lowerer(print);
     n->body = lowerer(n->body);
     return f;
   };

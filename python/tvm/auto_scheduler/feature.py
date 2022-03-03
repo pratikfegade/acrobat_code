@@ -203,9 +203,11 @@ def get_per_store_features_from_measure_pairs(
     task_ids: np.ndarray
         Task ids
     """
+    # print("[FEAT] Initial sizes:", len(inputs), len(results))
     byte_arr = _ffi_api.GetPerStoreFeaturesFromMeasurePairs(
         inputs, results, skip_first_n_feature_extraction, max_n_bufs or DEFAULT_MAX_N_BUFS
     )
+    # print("BYTEARR", byte_arr)
     return unpack_feature(byte_arr)
 
 

@@ -1080,6 +1080,12 @@ class StorageFlattener : public StmtExprMutator {
  public:
   static transform::Pass Pass(int cache_line_size, bool create_bound_attributes) {
     auto pass_func = [=](PrimFunc func, IRModule m, transform::PassContext ctx) {
+      auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
+      bool print =
+          false;  //(global_symbol.value() == "vm_mod_fused_nn_dense_expand_dims_add_batched");
+      if (print) {
+        std::cout << "[SF] Staring lowering " << global_symbol << std::endl;
+      }
       IRVisitorWithAnalyzer bound_analyzer;
 
       bound_analyzer(func->body);
@@ -1087,7 +1093,7 @@ class StorageFlattener : public StmtExprMutator {
       auto fptr = func.CopyOnWrite();
       fptr->body =
           StorageFlattener(fptr->buffer_map, fptr->scatter_buffer_map, cache_line_size,
-                           create_bound_attributes, &bound_analyzer)(std::move(fptr->body));
+                           create_bound_attributes, &bound_analyzer, print)(std::move(fptr->body));
       return func;
     };
     return transform::CreatePrimFuncPass(pass_func, 0, "tir.StorageFlattener", {});
@@ -1095,10 +1101,12 @@ class StorageFlattener : public StmtExprMutator {
 
   explicit StorageFlattener(const Map<Var, Buffer>& extern_buffer_map,
                             const Map<Var, Buffer>& scatter_buffer_map, int cache_line_size,
-                            bool create_bound_attributes, IRVisitorWithAnalyzer* bound_analyzer)
+                            bool create_bound_attributes, IRVisitorWithAnalyzer* bound_analyzer,
+                            bool print)
       : bound_analyzer_(bound_analyzer),
         create_bound_attributes_(create_bound_attributes),
-        scatter_buffer_map_(scatter_buffer_map) {
+        scatter_buffer_map_(scatter_buffer_map),
+        print_(print) {
     for (auto kv : extern_buffer_map) {
       BufferEntry e;
       e.buffer = kv.second;
@@ -1106,6 +1114,13 @@ class StorageFlattener : public StmtExprMutator {
       buf_map_[kv.second] = e;
     }
     cache_line_size_ = cache_line_size;
+
+    if (print) {
+      for (auto pair : scatter_buffer_map_) {
+        std::cout << "[SF]  Scatter buffer map " << pair.first << " " << pair.first.get()
+                  << std::endl;
+      }
+    }
   }
 
   Stmt VisitStmt_(const StoreNode* op) final {
@@ -1286,6 +1301,11 @@ class StorageFlattener : public StmtExprMutator {
       scatter_buffer = scatter_buffer_map_.at(key->data);
     }
 
+    if (print_ && key->data->name_hint == "placeholder1") {
+      std::cout << "[SF]   Scatter buffer " << scatter_buffer << " " << key->data.get()
+                << std::endl;
+    }
+
     auto it = buf_map_.find(key);
     ICHECK(it != buf_map_.end()) << "Cannot find allocated buffer for " << key;
     const BufferEntry& e = it->second;
@@ -1294,7 +1314,12 @@ class StorageFlattener : public StmtExprMutator {
     if (create_bound_attributes_ && ShapeIsValid(e.buffer->shape)) {
       shape_collector_.push_back(std::make_pair(e.buffer->data, e.buffer->shape));
     }
-    return e.buffer.vload(op->indices, e.buffer->dtype, scatter_buffer);
+    auto ret = e.buffer.vload(op->indices, e.buffer->dtype, scatter_buffer);
+    if (print_ && key->data->name_hint == "placeholder1") {
+      std::cout << "[SF]    Returning " << ret << " " << ret.as<LoadNode>()->scatter_buffer_var
+                << std::endl;
+    }
+    return ret;
   }
 
   Stmt VisitStmt_(const PrefetchNode* op) final {
@@ -1422,6 +1447,7 @@ class StorageFlattener : public StmtExprMutator {
   bool create_bound_attributes_{false};
   // Mapping from tensors to their scattered underlying storage.
   const Map<Var, Buffer>& scatter_buffer_map_;
+  bool print_;
 };
 
 /*!

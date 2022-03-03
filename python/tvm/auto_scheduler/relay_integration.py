@@ -152,7 +152,8 @@ def extract_tasks(
             hardware_params=hardware_params,
             # When auto scheduler is used in end to end network, try to apply layout rewrite
             # to improve the overall performance
-            layout_rewrite_option=LayoutRewriteOption.get_target_default(target, True),
+            # layout_rewrite_option=LayoutRewriteOption.get_target_default(target, True),
+            layout_rewrite_option=LayoutRewriteOption.NO_REWRITE,
             task_inputs=(
                 env.wkl_key_to_input_names[wkl_key]
                 if wkl_key in env.wkl_key_to_input_names
@@ -187,7 +188,7 @@ class TracingEnvironment:
     current = None
 
     def __init__(self, tracing_mode):
-        print("New env")
+        # print("New env")
         self.tracing_mode = tracing_mode
         self.relay_disable_build_cache = "false"
         self.func_name_to_wkl_key = {}
@@ -231,7 +232,7 @@ class TracingEnvironment:
         input_names : List[str]
             A list of input names.
         """
-        print("INPMAP", workload_key, len(input_names), input_names[0])
+        # print("INPMAP", workload_key, len(input_names), input_names)
         self.wkl_key_to_input_names[workload_key] = input_names
 
 
@@ -341,9 +342,12 @@ def auto_schedule_topi(func_name, outs, vmap={}):
     # if is_dynamic:  # The compute includes dynamic shapes which are not supported yet.
         # return None
 
-    # print(" Computing DAG")
+    # print("     IO Tensors", flush=True)
+    # for t in io_tensors:
+        # print("       ", t, flush=True)
     try:
         dag = ComputeDAG(io_tensors)
+        maybe_dynamic_dag = dag
         if is_dynamic:
             assert len(vmap) > 0, "Empty vmap provided for a dynamic ComputeDAG"
             dag = dag.make_concrete(vmap)
@@ -352,6 +356,9 @@ def auto_schedule_topi(func_name, outs, vmap={}):
                 "Lengths of IO tensors in the concrete and its corresponding dynamic ComputeDAG don't match!"
             )
             io_tensors = dag.tensors
+            # print("     Updated IO Tensors", flush=True)
+            # for t in io_tensors:
+            #     print("       ", t, flush=True)
     except tvm.error.TVMError as err:
         logger.info("Failed to create a ComputeDAG for auto_scheduler: %s", str(err))
         return None
@@ -363,14 +370,18 @@ def auto_schedule_topi(func_name, outs, vmap={}):
     dispatch_ctx = DispatchContext.current
     state = dispatch_ctx.query(target, key, has_complex_op, dag, func_name)
     schedule = None
+    # print("STATE", state, flush=True)
 
     env = TracingEnvironment.current
+
+    # print("KEY", (env is None), key, flush=True)
+
     if env is None:
         # in the final build mode
         if state is None:
             return None
 
-        schedule, _ = dag.apply_steps_from_state(state)
+        schedule, _ = maybe_dynamic_dag.apply_steps_from_state(state)
         return schedule
 
     # print(" Tracing DAG now")
@@ -383,19 +394,23 @@ def auto_schedule_topi(func_name, outs, vmap={}):
             if input_map:
                 env.add_workload_input_names(key, list(input_map.values()))
     elif env.tracing_mode == TracingMode.PREPARE_LAYOUT_REWRITE:
-        # in prepare_layout_rewrite mode
-        if (
-            LayoutRewriteOption.get_target_default(target, True) != LayoutRewriteOption.NO_REWRITE
-            and has_layout_free
-        ):
-            if state is None:
-                return None
+        pass
+        #######################################################################
+        # # in prepare_layout_rewrite mode
+        # if (
+        #     LayoutRewriteOption.get_target_default(target, True) != LayoutRewriteOption.NO_REWRITE
+        #     and has_layout_free
+        # ):
+        #     if state is None:
+        #         return None
 
-            # rewrite the layout and update the context for the new dag
-            new_dag = dag.rewrite_layout_from_state(state)
-            new_key = new_dag.workload_key()
-            if new_key != key:
-                dispatch_ctx.update(target, new_key, state)
+
+        #     # rewrite the layout and update the context for the new dag
+        #     new_dag = dag.rewrite_layout_from_state(state)
+        #     new_key = new_dag.workload_key()
+        #     if new_key != key:
+        #         dispatch_ctx.update(target, new_key, state)
+        #######################################################################
     else:
         raise ValueError("Invalid tracing mode: " + env.tracing_mode)
 
