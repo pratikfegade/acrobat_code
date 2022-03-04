@@ -1,0 +1,13 @@
+#[version = "0.0.5"]
+
+def @main(%inputs: List[Tensor[(1, 256), float32]], %weight: Tensor[(256, 256), float32]) ->
+    List[Tensor[(1, 256), float32]] {
+  let %linear_fn = fn(%tt: Tensor[(1, 256), float32]) -> Tensor[(1, 256), float32] {
+    nn.dense(%tt, %weight, units=256)
+  };
+  let %lineared = @map(%linear_fn, %inputs);
+  let %relu_fn = fn(%tt: Tensor[(1, 256), float32]) -> Tensor[(1, 256), float32] {
+    nn.relu(%tt)
+  };
+  @map(%relu_fn, %lineared)
+}

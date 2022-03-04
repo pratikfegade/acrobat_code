@@ -136,6 +136,14 @@ TVM_DLL Pass SplitArgs(int max_function_args);
 TVM_DLL Pass FuseOps(int fuse_opt_level = -1);
 
 /*!
+ * \brief Lower calls to list maps over plain TIR code to full batched
+ * TIR code.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass LowerMapToTIR(bool batched_exection, bool scattered_kernels);
+
+/*!
  * \brief Coarsen granularity of primitive funcs by fusing all ops
  * with not intervening control flow.
  *

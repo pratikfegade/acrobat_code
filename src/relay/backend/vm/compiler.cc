@@ -1218,6 +1218,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::LambdaLift());
 
+  // pass_seqs.push_back(transform::LowerMapToTIR(batched_execution, scattered_kernels));
+
   // Eliminate dead-code before we lower. We don't track the purity of PrimFuncs, thus after
   // lowering all calls to lowered functions will be kept.
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));

@@ -13,6 +13,8 @@ iterations = 1
 batch_size = 20
 
 mod, params = relay.testing.lstm.get_workload(iterations, hidden_size)
+print(mod)
+exit()
 
 lazy_execution=True
 coarsened_execution=False
@@ -20,7 +22,7 @@ batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
 dynamic_batch_size_estimate=64
-use_autoscheduler=True
+use_autoscheduler=False
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
     coarsened_execution=coarsened_execution,
@@ -66,7 +68,7 @@ def execute():
                 datas = []
                 for i in range(iterations):
                     datas.append(tvm.nd.array(np.zeros((1, hidden_size)).astype("float32"), device=tvm.cpu(0)))
-                # params_list += [params["i2h_weight"], params["i2h_bias"], params["h2h_weight"], params["h2h_bias"]]
+                params_list += [params["i2h_weight"], params["i2h_bias"], params["h2h_weight"], params["h2h_bias"]]
                 params_list += datas
 
             executor.vm.set_input("main", batch_size, *params_list)
@@ -76,6 +78,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule(False)
+# auto_schedule(False)
 print("===============================================================================", flush=True)
 execute()

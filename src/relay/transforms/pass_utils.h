@@ -35,6 +35,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "../../printer/text_printer.h"
 #include "../analysis/dependency_graph.h"
 #include "../op/annotation/annotation.h"
 #include "../op/memory/on_device.h"
@@ -231,6 +232,11 @@ Expr ToBasicBlockNormalFormAux(const Expr& e);
 
 // Remove on_device calls for easier printing and analysis.
 Expr RemoveOnDeviceCalls(const Expr& e);
+
+// Pretty print individual relay expressions.
+inline std::string DebugPrint(const ObjectRef& obj) {
+  return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
+}
 
 // ToANormalForm for expressions and as a Pass are declared in transform.h
 

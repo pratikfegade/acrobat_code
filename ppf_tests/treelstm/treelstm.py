@@ -3,22 +3,28 @@ from tvm import relay
 from tvm.relay import op, var, Var, Function, Clause, PatternConstructor, PatternVar, Match
 from tvm.relay import TupleGetItem, Tuple, TensorType, TupleType
 
+def unique_var(name, shape=None, dtype=None):
+    unique_var.ctr += 1
+    var_ = var(name + str(unique_var.ctr), shape=shape, dtype=dtype)
+    return var_
+unique_var.ctr = 0
+
 class Linear(Network):
     def build_impl(self, input_size, output_size, dtype="float32"):
         self.ret_type = TensorType(shape=(1, output_size,), dtype=dtype)
-        x = self.input(var("linear_input", shape=(1, input_size), dtype=dtype))
-        w = self.weight(var("linear_weight", shape=(output_size, input_size), dtype=dtype))
-        b = self.weight(var("linear_bias", shape=(1, output_size,), dtype=dtype))
+        x = self.input(unique_var("linear_input", shape=(1, input_size), dtype=dtype))
+        w = self.weight(unique_var("linear_weight", shape=(output_size, input_size), dtype=dtype))
+        b = self.weight(unique_var("linear_bias", shape=(1, output_size,), dtype=dtype))
         return op.add(op.nn.dense(x, w), b)
 
 def lam(names, func):
-    args = [Var(name) for name in names]
+    args = [unique_var(name) for name in names]
     return Function(args, func(*args))
 
 class LSTMCell(Network):
     def build_impl(self, input_size, memory_size, dtype="float32"):
         t = TensorType(shape=(1, memory_size), dtype=dtype)
-        i = self.input(var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+        i = self.input(unique_var("lstmcell_input", shape=(1, input_size), dtype=dtype))
         c = self.input(Var("lstmcell_children", self.l(TupleType([t, t]))))
         sum = lam(["x", "y"], lambda x, y: x + y)
         child_h_sum = self.p.foldl(sum,
@@ -41,7 +47,7 @@ class LSTMCell(Network):
 
     # def build_impl(self, input_size, memory_size, dtype="float32"):
         # t = TensorType(shape=(1, memory_size), dtype=dtype)
-        # i = self.input(var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+        # i = self.input(unique_var("lstmcell_input", shape=(1, input_size), dtype=dtype))
         # c = self.input(Var("lstmcell_children", self.l(TupleType([t, t]))))
         # sum = lam(["x", "y"], lambda x, y: x + y)
         # child_h_sum = self.p.foldl(sum,

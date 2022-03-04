@@ -60,10 +60,6 @@ Op GetInvokeTVMOp() {
   return op;
 }
 
-std::string DebugPrint(const ObjectRef& obj) {
-  return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
-}
-
 class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
  public:
   LeafTensorAccessModeCalculator(const tir::PrimFunc& func) : func_(func) {}
