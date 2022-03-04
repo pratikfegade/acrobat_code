@@ -1316,7 +1316,7 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
     GetPerStoreFeature(prim_func->body, task->hardware_params->cache_line_bytes, max_n_bufs,
                        feature);
   } catch (Error& e) {
-    std::cout << "[FEAT] Scheduling error " << e.what() << std::endl;
+    // std::cout << "[FEAT] Scheduling error " << e.what() << std::endl;
     exit(0);
     (*error_ct)++;
   }

@@ -7,11 +7,12 @@ from tvm import auto_scheduler
 from converter import initialize_tlstm, generate_random_trees, get_random_tensor
 
 device = tvm.runtime.device("cpu")
-target = "llvm"
 
 hidden_size = 256
 batch_size = 5
 num_nodes = 6
+
+target = "llvm"
 lazy_execution=True
 coarsened_execution=False
 batched_execution=True
@@ -45,13 +46,20 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     batch_size=batch_size,
     opt_level=3)
 
-def get_ansor_log_file(model_name, parameters):
+def get_ansor_log_file(model_name, parameters, pass_context):
+    batched_execution = pass_context.config["relay.db_batched_execution"]
+    scattered_kernels = pass_context.config["relay.db_scattered_kernels"]
+    dynamic_batch_size_estimate = pass_context.config["relay.db_dynamic_batch_size_estimate"]
+    config_str = ("%d_%d_%d") % (batched_execution, scattered_kernels, dynamic_batch_size_estimate)
+    model_str = model_name + "_" + "_".join([str(i) for i in parameters])
+    file_name = model_str + "_" + config_str + ".log"
+    print(file_name)
     log_dir = "ansor_logs/"
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    return log_dir + model_name + "_" + "_".join([str(i) for i in parameters]) + ".log"
+    return log_dir + file_name
 
-log_file = get_ansor_log_file("treelstm", [hidden_size])
+log_file = get_ansor_log_file("treelstm", [hidden_size], pass_context)
 def auto_schedule(tune):
     with pass_context:
         # print("extracting task")
@@ -67,7 +75,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20,  # change this to 20000 to achieve the best performance
+                num_measure_trials=2000,  # change this to 20000 to achieve the best performance
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
@@ -90,6 +98,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule(False)
+auto_schedule(True)
 print("===============================================================================", flush=True)
 execute()
