@@ -95,6 +95,10 @@ class LazyExecutor {
   const VMSharedState* vm_shared_state_;
   /*! \brief list of nodes to execute */
   std::vector<OpNode> nodes_;
+  //   /*! \brief Profiling data storage */
+  // #ifdef PROFILE_VM
+  //   std::unordered_map<Index, float> profiling_data_;
+  // #endif
 };
 
 }  // namespace vm

@@ -60,8 +60,12 @@ class BatchifyRewriter : public te::ExprMutator {
 
 std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
-    const std::vector<bool>& reuse_taints) {
-  // std::cout << "[BR] Batchifying" << std::endl;
+    const std::vector<bool>& reuse_taints, const std::string& unbatched_name) {
+  bool print = false;
+  // bool print = (unbatched_name == "vm_mod_fused_zeros");
+  if (print) {
+    std::cout << "[BR] Batchifying " << unbatched_name << std::endl;
+  }
   Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
   if (inputs.size() == 0) {
     for (auto tensor : outputs) {
@@ -71,9 +75,11 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
 
   std::unordered_set<const Object*> no_batchify;
   for (size_t i = 0; i < inputs.size(); ++i) {
+    if (print) {
+      std::cout << "[BR]  Input " << inputs[i] << " " << reuse_taints[i] << std::endl;
+    }
     if (reuse_taints[i]) {
       no_batchify.insert(inputs[i]->op.get());
-      // std::cout << "[BR]  NoBatchB " << inputs[i]->op << std::endl;
     }
   }
 
@@ -88,7 +94,9 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
       }
       if (reuse) {
         no_batchify.insert(cop);
-        // std::cout << "[BR]  NoBatchD " << cop->body[0] << std::endl;
+        if (print) {
+          std::cout << "[BR]    NoBatchD " << op << std::endl;
+        }
       }
     }
   }
@@ -96,8 +104,15 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
   Map<te::Operation, te::Operation> rewritten;
   Map<te::Operation, te::Operation> ret;
   for (auto op : graph_ops) {
+    if (print) {
+      std::cout << "[BR]  Op " << op << std::endl;
+    }
+
     auto batchified_op = op;
     if (!no_batchify.count(op.get())) {
+      if (print) {
+        std::cout << "[BR]   Batching" << std::endl;
+      }
       if (auto pop = op.as<te::PlaceholderOpNode>()) {
         Array<PrimExpr> new_shape;
         new_shape.push_back(batch_size);
@@ -121,6 +136,9 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
       }
     }
     if (!op.same_as(batchified_op)) {
+      if (print) {
+        std::cout << "[BR]    Batched " << batchified_op << std::endl;
+      }
       rewritten.Set(op, batchified_op);
     }
     ret.Set(op, batchified_op);

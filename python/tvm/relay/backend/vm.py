@@ -108,6 +108,50 @@ def compile(mod, target=None, target_host=None, params=None):
     compiler.codegen()
     return compiler.get_exec()
 
+def optimize(mod, target=None, target_host=None, params=None):
+    """Compile the module to VM executable. A helper function for VMCompiler.
+
+    Parameters
+    ----------
+    mod : tvm.IRModule
+        The Relay module to build.
+
+    target : str, :any:`tvm.target.Target`, or dict of str(i.e.
+        device/context name) to str/tvm.target.Target, optional
+        For heterogeneous compilation, it is a dictionary indicating context
+        to target mapping. For homogeneous compilation, it is a build target.
+
+    target_host : str or :any:`tvm.target.Target`, optional
+        Host compilation target, if target is device.
+        When TVM compiles device specific program such as CUDA,
+        we also need host(CPU) side code to interact with the driver
+        to setup the dimensions and parameters correctly.
+        target_host is used to specify the host side codegen target.
+        By default, llvm is used if it is enabled,
+        otherwise a stackvm intepreter is used.
+
+    params : dict of str to NDArray
+        Input parameters to the graph that do not change
+        during inference time. Used for constant folding.
+
+    Returns
+    -------
+    exec : tvm.runtime.vm.Executable
+        The VM executable that contains both library code and bytecode.
+    """
+    if target_host is not None:
+        warnings.warn(
+            "target_host parameter is going to be deprecated. "
+            "Please pass in tvm.target.Target(target, host=target_host) instead."
+        )
+    target, target_host = Target.check_and_update_host_consist(
+        target, target_host, target_is_dict_key=False
+    )
+    compiler = VMCompiler()
+    if params:
+        compiler.set_params(params)
+    return compiler.optimize(mod, target, params=params)
+
 
 class VMCompiler(object):
     """Compiler that compiles Relay module to VM executable."""
@@ -322,6 +366,9 @@ class VMExecutor(Executor):
         self.target = target
         self.executable = None
         self.vm = None
+
+    def optimize_module(self):
+        return optimize(self.mod, self.target)
 
     def _make_executor(self, expr=None, execution_options=None):
         if expr:

@@ -36,6 +36,7 @@
 #include "../../support/utils.h"
 #include "../analysis/call_graph.h"
 #include "../op/memory/on_device.h"
+#include "../transforms/pass_utils.h"
 
 namespace tvm {
 namespace relay {
@@ -86,7 +87,13 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
                              Map<Function, Array<Bool>>* p_function_state)
       : mod_(mod), p_var_state_(p_var_state), p_function_state_(p_function_state) {}
 
-  void Run(const Function& func) { this->VisitExpr(func); }
+  void Run(const Function& func, std::string name) {
+    print_ = false;  //(name == "lstm_cell");
+    if (print_) {
+      std::cout << "[MPTA]  Fyunc " << name << " " << RemoveOnDeviceCalls(func) << std::endl;
+    }
+    this->VisitExpr(func);
+  }
 
   template <typename T>
   Array<Bool> MergeAndSet(Map<T, Array<Bool>>* p_map, T key, Array<Bool> vals2) {
@@ -109,7 +116,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
   }
 
   Array<Bool> MergeAndSet(Function func, Array<Bool> vals2) {
-    return MergeAndSet<Function>(p_function_state_, func, vals2);
+    auto ret = MergeAndSet<Function>(p_function_state_, func, vals2);
+    ICHECK(p_function_state_->count(func));
+    return ret;
   }
 
   Array<Bool> VisitExpr_(const ConstantNode* op) { return Array<Bool>({Bool(true)}); }
@@ -142,32 +151,45 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
   Array<Bool> VisitExpr_(const GlobalVarNode* op) { return Array<Bool>({Bool(false)}); };
 
   Array<Bool> VisitExpr_(const FunctionNode* op) {
-    bool print = op->GetAttr<String>("dst_layout", "YOLO").value() == "NC8n";
-    // std::cout << "[FUNC] Visiting function " << op->GetAttr<String>("hash", "YOLO").value()
-    // << std::endl;
+    if (print_) {
+      std::cout << "[FUNC] Visiting function " << op << " " << ObjectHash()(GetRef<Expr>(op))
+                << std::endl;
+    }
     auto func = GetRef<Function>(op);
-    if (!visited_functions_.count(op)) {
-      visited_functions_.insert(op);
+    if (!visited_functions_.count(func)) {
+      visited_functions_.Set(func, Bool(true));
+      if (print_) {
+        std::cout << "[FUNC]  Visiting first" << std::endl;
+      }
       bool all_params_model_params = true;
       for (auto p : op->params) {
         auto it = p_var_state_->find(p);
         if (it == p_var_state_->end() || AndState((*it).second).operator bool()) continue;
-        // if (print) {
-        // std::cout << "[FUNC]  Bad param found " << p->vid->name_hint << std::endl;
-        // }
         all_params_model_params = false;
         break;
       }
       if (all_params_model_params) {
-        // if (print) {
-        // std::cout << "[FUNC] Returning 1 for function" << std::endl;
-        // }
+        if (print_) {
+          std::cout << "[FUNC]   Returning 1 for function " << ret << " "
+                    << p_function_state_->count(func) << std::endl;
+        }
         return MergeAndSet(func, CreateStateForType(op->ret_type, true));
       } else {
-        return MergeAndSet(func, VisitExpr(op->body));
+        auto ret = MergeAndSet(func, VisitExpr(op->body));
+        if (print_) {
+          std::cout << "[FUNC]   Returning 2 for function " << ret << " "
+                    << p_function_state_->count(func) << std::endl;
+        }
+        return ret;
       }
     } else {
-      return p_function_state_->at(func);
+      auto it = p_function_state_->find(func);
+      if (it == p_function_state_->end()) {
+        // Recursive function visiting twice
+        return CreateStateForType(op->ret_type, true);
+      } else {
+        return (*it).second;
+      }
     }
   }
 
@@ -175,6 +197,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
     auto on_device_props = GetOnDeviceProps(op);
     if (on_device_props.body.defined()) {
       return VisitExpr(on_device_props.body);
+    }
+    if (print_) {
+      // std::cout << "[CALL] Call  " << op->op << std::endl;
     }
     bool print = false;
     auto get_function = [&](const Expr& expr) {
@@ -231,8 +256,8 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
   }
 
   Array<Bool> VisitExpr_(const LetNode* op) {
+    // std::cout << "[MPTA] Let " << op->var << std::endl;
     if (op->value.as<GlobalVarNode>() || op->value.as<VarNode>() || op->value.as<FunctionNode>()) {
-      // std::cout << "[MPTA] Let shortcut " << op->var << " " << op->value << std::endl;
       let_shortcuts_.insert({op->var, op->value});
     }
     Array<Bool> value_taints = VisitExpr(op->value);
@@ -270,6 +295,8 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
     return res;
   }
 
+  bool isConstantPrimFunc(const tir::PrimFunc& func) { return (func->params.size() == 0); }
+
   bool changed{false};
 
  private:
@@ -277,7 +304,9 @@ class ModelParameterTaintVisitor : public ExprFunctor<Array<Bool>(const Expr& n)
   Map<Var, Array<Bool>>* p_var_state_;
   Map<Function, Array<Bool>>* p_function_state_;
   std::unordered_map<Var, Expr, ObjectPtrHash, ObjectPtrEqual> let_shortcuts_;
-  std::unordered_set<const Object*> visited_functions_;
+  Map<Function, Bool> visited_functions_;
+  Map<tir::PrimFunc, Bool> constant_prim_funcs_;
+  bool print_;
 };
 
 class ResultGatherer : public ExprVisitor {
@@ -351,9 +380,11 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
 
   Map<Var, Array<Bool>> var_states;
   Map<Function, Array<Bool>> function_states;
-  // std::cout << "[MPTA]  Initing func params" << std::endl;
   for (auto pair : mod->functions) {
     auto function = pair.second;
+    // std::cout << "[MPTA]  Initing func params " << pair.first << " " <<
+    // function.as<FunctionNode>()
+    // << std::endl;
     auto model_parameter_list =
         function->GetAttr<Array<Integer>>("model_parameters", Array<Integer>()).value();
     if (model_parameter_list.size() == 0) {
@@ -373,11 +404,11 @@ Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
 
   for (size_t i = 0; i < 50; ++i) {
     ModelParameterTaintVisitor visitor(mod, &var_states, &function_states);
-    // std::cout << "[MPTA] Iteration " << i << std::endl;
     for (auto cge : call_graph->TopologicalOrder()) {
       auto func = mod->Lookup(cge->GetGlobalVar());
       if (func.as<FunctionNode>()) {
-        visitor.Run(Downcast<Function>(func));
+        // std::cout << "[MPTA] Func " << cge->GetGlobalVar() << std::endl;
+        visitor.Run(Downcast<Function>(func), cge->GetGlobalVar()->name_hint);
       }
     }
     if (!visitor.changed) {

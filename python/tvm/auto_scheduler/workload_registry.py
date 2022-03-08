@@ -196,7 +196,7 @@ def workload_key_to_tensors(workload_key):
     assert callable(value)
 
     args = deserialize_args(workload[1:])
-    print("   Deserialized", str(workload[1:], "to", str(args)))
+    # print("   Deserialized", str(workload[1:], "to", str(args)))
     return value(*args)
 
 
@@ -254,7 +254,7 @@ def deserialize_workload_registry_entry(data):
         if not callable(value):
             value = LoadJSON(value)
         WORKLOAD_FUNC_REGISTRY[name] = value
-        print("Inserting in registry", name, value)
+        # print("Inserting in registry", name, value)
 
 
 def save_workload_func_registry(filename):

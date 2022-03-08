@@ -403,10 +403,14 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
+  // auto start = std::chrono::high_resolution_clock::now();
+
   for (int i = 0; i < batch_size_; ++i) {
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();
   }
+
+  // auto mid = std::chrono::high_resolution_clock::now();
 
   if (lazy_execution_) {
     if (batched_execution_) {
@@ -415,6 +419,13 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
       shared_state_->lazy_executor_.Execute();
     }
   }
+
+  // auto end = std::chrono::high_resolution_clock::
+  // std::cout << "[TIME] "
+  // << std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count() / 1000
+  // << " "
+  // << std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count() / 1000
+  // << std::endl;
 
   return return_register_;
 }
@@ -447,19 +458,33 @@ void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index out
 }
 
 void VirtualMachine::LoadExecutable(Executable* exec) {
+  std::cout << "HL 2.1" << std::endl;
+
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
       << "Need to load late-bound-constants before creating VM";
+
+  std::cout << "HL 2.1.1" << std::endl;
+
   shared_state_->exec_ = exec;
 
+  std::cout << "HL 2.1.2" << std::endl;
+
   runtime::Module lib = shared_state_->exec_->GetLib();
+
+  std::cout << "HL 2.1.3" << std::endl;
 
   ICHECK(exec->primitive_map.empty() || lib.operator->())
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
+  std::cout << "HL 2.1.4 " << this->shared_state_ << " " << shared_state_->exec_ << std::endl;
+
   this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
+  std::cout << "HL 2.1.5" << std::endl;
   this->shared_state_->prim_func_arg_access_mode_ = shared_state_->exec_->prim_func_arg_access_mode;
+
+  std::cout << "HL 2.2" << std::endl;
 
   for (const auto& it : shared_state_->exec_->primitive_map) {
     const auto& packed_name = it.first;
@@ -513,6 +538,7 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
   //     std::cout << "[VM] NoBody1 " << name << std::endl;
   //   }
   // }
+  std::cout << "HL 2.5" << std::endl;
 
   for (size_t i = 0; i < shared_state_->packed_funcs_.size(); ++i) {
     ICHECK(shared_state_->packed_funcs_[i] != nullptr)

@@ -392,7 +392,6 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
   auto tic_begin = std::chrono::high_resolution_clock::now();
 
   int fail_ct = 0;
-  int success_ct = 0;
   Array<State> out_states;
   std::vector<std::mt19937> rand_gens;
   rand_gens.reserve(population);
@@ -424,12 +423,12 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
       }
     });
 
+    int num_temp_states = temp_states.size();
     // Filter out the states that were failed to apply initial rules
     Array<State> cand_states;
     for (auto tmp_s : temp_states) {
       if (tmp_s.defined()) {
         cand_states.push_back(std::move(tmp_s));
-        success_ct++;
       } else {
         fail_ct++;
       }
@@ -455,7 +454,6 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
           out_states.push_back(std::move(cand_states[i]));
           unchange_cnt = 0;  // Reset the counter once we found a valid state
           // std::cout << "[SP]   Not Failed " << explored_state_strs.size() << std::endl;
-          success_ct++;
         } else {
           // std::cout << "[SP]   Failed " << explored_state_strs.size() << " "
           // << explored_state_strs.count(state_str) << std::endl;
@@ -464,6 +462,7 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
       }
     }
 
+    int success_ct = num_temp_states - fail_ct;
     if (iter % 5 == 0) {
       double duration = std::chrono::duration_cast<std::chrono::duration<double>>(
                             std::chrono::high_resolution_clock::now() - tic_begin)

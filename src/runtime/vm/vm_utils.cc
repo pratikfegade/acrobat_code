@@ -114,12 +114,12 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
 
 void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
                             const std::vector<NDArray>& args) {
+  // std::cout << "[UMA] Executing" << std::endl;
   size_t arity = arg_count;
 
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
-  // std::cout << "Executing " << arity << std::endl;
   for (size_t i = 0; i < arity; i++) {
     setter(i, args[i]);
   }
@@ -142,6 +142,8 @@ std::string ShapeToString(const ShapeTuple& st) {
 void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode*>& nodes) {
+  // std::cout << "[UMA] Executing" << std::endl;
+  bool print = false;
   ICHECK_EQ(arity, arg_modes.size());
   int32_t batch_size = nodes.size();
 
@@ -150,20 +152,25 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
   std::vector<NDArray> arg_holder(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   setter(0, batch_size);
-  // std::cout << "[VMU]  BatchSize 0 " << batch_size << std::endl;
+  if (print) {
+    std::cout << "[VMU]   BatchSize 0 " << batch_size << std::endl;
+  }
   int ctr = 1;
   for (Index i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
       case kIgnore: {
-        // std::cout << "[VMU]  Ignoring " << i << std::endl;
+        if (print) {
+          std::cout << "[VMU]   Ignoring " << i << std::endl;
+        }
         break;
       }
       case kReuse: {
         arg_holder[i] = nodes[0]->args_[i];
         setter(ctr, nodes[0]->args_[i]);
-        // std::cout << "[VMU]  ArgReuse " << ctr << " " <<
-        // ShapeToString(nodes[0]->args_[i].Shape())
-        // << std::endl;
+        if (print) {
+          std::cout << "[VMU]   ArgReuse " << ctr << " "
+                    << ShapeToString(nodes[0]->args_[i].Shape()) << std::endl;
+        }
         ctr += 1;
         break;
       }
@@ -175,8 +182,10 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         auto ptr_array = CreatePointerNDArray(to_scatter);
         arg_holder[i] = ptr_array;
         setter(ctr, ptr_array);
-        // std::cout << "[VMU]  ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
-        // << std::endl;
+        if (print) {
+          std::cout << "[VMU]   ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+                    << std::endl;
+        }
         ctr += 1;
         break;
       }
@@ -189,8 +198,10 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         auto concat_array = CreateConcatenatedNDArray(to_concat);
         arg_holder[i] = concat_array;
         setter(ctr, concat_array);
-        // std::cout << "[VMU]  ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
-        // << std::endl;
+        if (print) {
+          std::cout << "[VMU]   ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
+                    << std::endl;
+        }
         ctr += 1;
 
         // ICHECK(false) << "Concat not implemented yet!";

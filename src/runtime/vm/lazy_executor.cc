@@ -148,6 +148,21 @@ void LazyExecutor::ExecuteOpNodeBatch(
 void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
   // std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
   // << std::endl;
+
+  /////////////////////////////////////////////////////////////////////////////////////////
+  for (OpNode& node : nodes_) {
+    // auto batched_func_idx = vm_shared_state_->batched_funcs_[node.func_idx_];
+    // InvokePackedFnBatchedUnrolled(
+    // vm_shared_state_->packed_funcs_[batched_func_idx], node.arg_count_, node.output_size_,
+    // vm_shared_state_->batched_func_arg_mode_[batched_func_idx], {&node});
+
+    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
+                           node.output_size_, node.args_);
+  }
+  nodes_.clear();
+  return;
+  /////////////////////////////////////////////////////////////////////////////////////////
+
   if (all_nodes_same_depth) {
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;
     for (auto& node : nodes_) {

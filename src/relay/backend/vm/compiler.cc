@@ -57,7 +57,8 @@
 #include "../../transforms/device_aware_visitors.h"
 #include "../../transforms/pass_utils.h"
 #include "../utils.h"
-#include "./compiler.h"
+#include "aot_compiler.h"
+#include "compiler.h"
 
 namespace tvm {
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_coarsen_granularity", Bool);
@@ -1078,6 +1079,9 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   if (backend::IsAutoSchedulerEnabled()) {
     backend::UpdateAutoSchedulerOpWeights(context_.module);
   }
+
+  // std::cout << exec_->GetBytecode() << std::endl;
+  VMAOTCompiler(*exec_, context_.module).GenerateCPP();
 }
 
 transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
@@ -1259,7 +1263,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, true));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

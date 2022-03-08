@@ -1,6 +1,6 @@
 import numpy as np
 import tvm
-from tvm import relay
+from tvm import ir, relay
 from tvm import IRModule as Module
 from tvm.relay import op
 from tvm.relay.prelude import Prelude
@@ -106,7 +106,9 @@ class Network:
             inputs = [copy_var(v) for v in self.inputs]
             body = relay.Let(self.recurse, relay.Function(inputs, self.call_from_outside(self, *inputs)), body)
         weights = [self.get_replacement_weight(weight) for weight in self.all_weights()]
-        self.mod[self.f] = relay.Function(weights + self.inputs, body, self.ret_type)
+        attr_dict = {"model_parameters": [1] * len(weights) + [0] * len(self.inputs)}
+        attrs = ir.make_node("DictAttrs", **attr_dict)
+        self.mod[self.f] = relay.Function(weights + self.inputs, body, self.ret_type, attrs=attrs)
 
     def get_replacement_weight(self, weight):
         if weight in self.weights:

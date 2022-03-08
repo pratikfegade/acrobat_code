@@ -36,7 +36,7 @@ namespace tec {
 
 std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
-    const std::vector<bool>& reuse_taints);
+    const std::vector<bool>& reuse_taints, const std::string& unbatched_name);
 
 }  // namespace tec
 }  // namespace relay

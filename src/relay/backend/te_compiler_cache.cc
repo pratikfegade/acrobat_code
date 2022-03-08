@@ -243,6 +243,14 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
     // std::cout << "[TCC] Create batched functions? " << create_batched << std::endl;
     if (create_batched) {
+      // bool print = false;
+      bool print = (unique_name == "vm_mod_fused_zeros");
+
+      if (print) {
+        std::cout << "[TCC] ParamTaint " << unique_name << " " << model_parameter_taints
+                  << std::endl;
+      }
+
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
                                         std::vector<bool>* p_reuse_taints) {
         ICHECK_LE(tensors.size(), model_parameter_taints.size());
@@ -258,7 +266,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       std::vector<bool> reuse_taints;
       construct_reuse_taints(fn_inputs, &reuse_taints);
 
-      auto res = BatchifyTEGraph(fn_inputs, outputs, reuse_taints);
+      auto res = BatchifyTEGraph(fn_inputs, outputs, reuse_taints, unique_name);
       Map<te::Operation, te::Operation> mapping = res.first;
       tir::Var batch_size_var = res.second;
 

@@ -94,6 +94,7 @@ PackedFunc Executable::GetFunction(const std::string& name, const ObjectPtr<Obje
       }
       vm->SetExecutionOptions(options);
       vm->InitSharedState();
+      std::cout << "HL 2" << std::endl;
       vm->LoadExecutable(this);
       *rv = Module(vm);
     });
@@ -164,15 +165,17 @@ std::string Executable::GetBytecode() const {
     oss << "opcode, fields # inst(text):" << std::endl;
     for (size_t idx = 0; idx < func.instructions.size(); ++idx) {
       const auto& instr = func.instructions[idx];
-      const auto& serialized_instr = SerializeInstruction(instr);
-      std::ostringstream line;
-      line << std::setw(2) << idx << ": " << serialized_instr.opcode << " ";
-      for (auto it : serialized_instr.fields) {
-        line << it << " ";
-      }
-      oss << std::setw(40) << std::setfill(' ') << std::left << line.str();
-      oss << "  # " << instr;
-      if (oss.str().back() != '\n') oss << std::endl;
+      oss << instr << std::endl;
+
+      // const auto& serialized_instr = SerializeInstruction(instr);
+      // std::ostringstream line;
+      // line << std::setw(2) << idx << ": " << serialized_instr.opcode << " ";
+      // for (auto it : serialized_instr.fields) {
+      //   line << it << " ";
+      // }
+      // oss << std::setw(40) << std::setfill(' ') << std::left << line.str();
+      // oss << "  # " << instr;
+      // if (oss.str().back() != '\n') oss << std::endl;
     }
     oss << std::endl;
   }

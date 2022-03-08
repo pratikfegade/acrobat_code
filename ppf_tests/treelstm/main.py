@@ -8,13 +8,13 @@ from converter import initialize_tlstm, generate_random_trees, get_random_tensor
 
 device = tvm.runtime.device("cpu")
 
-hidden_size = 256
-batch_size = 5
+hidden_size = 1
+batch_size = 8
 num_nodes = 6
 
 target = "llvm"
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
@@ -26,7 +26,6 @@ mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execut
 weight_vars = tlstm.all_weights()
 
 trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
-# exit(0)
 
 weights_list = []
 weights_dict = {}
@@ -46,11 +45,10 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     batch_size=batch_size,
     opt_level=3)
 
-def get_ansor_log_file(model_name, parameters, pass_context):
+def get_ansor_log_file(model_name, parameters, pass_context, target):
     batched_execution = pass_context.config["relay.db_batched_execution"]
-    scattered_kernels = pass_context.config["relay.db_scattered_kernels"]
     dynamic_batch_size_estimate = pass_context.config["relay.db_dynamic_batch_size_estimate"]
-    config_str = ("%d_%d_%d") % (batched_execution, scattered_kernels, dynamic_batch_size_estimate)
+    config_str = ("%d_%d_%s") % (batched_execution, dynamic_batch_size_estimate, target)
     model_str = model_name + "_" + "_".join([str(i) for i in parameters])
     file_name = model_str + "_" + config_str + ".log"
     print(file_name)
@@ -59,23 +57,34 @@ def get_ansor_log_file(model_name, parameters, pass_context):
         os.makedirs(log_dir)
     return log_dir + file_name
 
-log_file = get_ansor_log_file("treelstm", [hidden_size], pass_context)
+def print_time(time):
+    print(
+        lazy_execution,
+        coarsened_execution,
+        batched_execution,
+        scattered_kernels,
+        concurrent_execution,
+        use_autoscheduler,
+        dynamic_batch_size_estimate,
+        batch_size,
+        time
+    )
+
+log_file = get_ansor_log_file("treelstm", [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
-        # print("extracting task")
         tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                            include_simple_tasks=True)
-        # print("extracting task done")
 
-        for idx, task in enumerate(tasks):
-            print("========== Task %d  (workload key: %s) ==========" % (idx, task.workload_key))
-            print(task.compute_dag)
-        # exit(0)
+        # for idx, task in enumerate(tasks):
+            # print("========== Task %d  (workload key: %s, weight: %s) ==========" %
+                  # (idx, task.workload_key, task_weights[idx]))
+            # print(task.compute_dag)
         if tune:
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=2000,  # change this to 20000 to achieve the best performance
+                num_measure_trials=1000,  # change this to 20000 to achieve the best performance
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
@@ -89,15 +98,17 @@ def execute():
             fin_executor = executor._make_executor(execution_options=execution_options)
 
             params_list = []
-            for tree in trees: params_list += weights_list + [tree]
-            # for tree in trees: params_list += [tree]
+            if use_autoscheduler:
+                for tree in trees: params_list += [tree]
+            else:
+                for tree in trees: params_list += weights_list + [tree]
 
             executor.vm.set_input("main", batch_size, *params_list)
 
             # fin_executor()
-            iters = 1000
-            print(timeit.timeit(fin_executor, number=iters)*1000/iters)
+            iters = 20
+            print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule(True)
+# auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()
