@@ -243,8 +243,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
     // std::cout << "[TCC] Create batched functions? " << create_batched << std::endl;
     if (create_batched) {
-      // bool print = false;
-      bool print = (unique_name == "vm_mod_fused_zeros");
+      bool print = false;
+      // bool print = (unique_name == "vm_mod_fused_zeros");
 
       if (print) {
         std::cout << "[TCC] ParamTaint " << unique_name << " " << model_parameter_taints

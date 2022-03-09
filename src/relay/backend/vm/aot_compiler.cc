@@ -22,134 +22,449 @@
  * \brief A compiler from relay::Module to the VM byte code.
  */
 
-#ifndef TVM_RELAY_BACKEND_VM_COMPILER_H_
-#define TVM_RELAY_BACKEND_VM_COMPILER_H_
-
 #include "aot_compiler.h"
 
-#include <tvm/ir/error.h>
-#include <tvm/relay/expr_functor.h>
-#include <tvm/relay/interpreter.h>
-#include <tvm/relay/transform.h>
-#include <tvm/runtime/logging.h>
-#include <tvm/runtime/vm/vm.h>
-#include <tvm/tir/function.h>
-
-#include <iostream>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
+#include <sstream>
 
 namespace tvm {
 namespace relay {
 namespace vm {
 
-void VMAOTCompiler::HandleFunction(const VMFunction& vm_func, const Function& relay_func) {
-  std::unordered_map<Index, std::string> targets;
-  int target_count = 0;
+using namespace tvm::runtime;
+using namespace tvm::runtime::vm;
+using namespace relay::transform;
 
-  for (size_t i = 0; i < vm_func.instructions.size(); ++i) {
-    auto& instr = vm_func.instructions[i];
-    switch (instr.op) {
-      case Opcode::Goto: {
-        targets.insert({instr.pc_offset + i, "target" + std::to_string(target_count++)});
-        break;
-      }
-      case Opcode::If: {
-        targets.insert({instr.if_op.true_offset + i, , "target" + std::to_string(target_count++)});
-        targets.insert({instr.if_op.false_offset + i, , "target" + std::to_string(target_count++)});
-        break;
+void RelayTypeToCppStr(std::ostream& os, const Type& type) {
+  if (auto tt = type.as<TensorTypeNode>()) {
+    os << "NDArray";
+  } else if (auto pt = type.as<PrimTypeNode>()) {
+    os << pt->dtype;
+  } else if (auto td = type.as<TypeDataNode>()) {
+    if (td->header->name_hint == "Storage") {
+      os << "Storage";
+    } else {
+      os << td->header->name_hint << "*";
+    }
+  } else if (auto ft = type.as<FuncTypeNode>()) {
+    ICHECK_EQ(ft->type_params.size(), 0);
+    os << "std::function<";
+    RelayTypeToCppStr(os, ft->ret_type);
+    os << "(";
+    for (size_t i = 0; i < ft->arg_types.size(); ++i) {
+      RelayTypeToCppStr(os, ft->arg_types[i]);
+      if (i < ft->arg_types.size() - 1) {
+        os << ",";
       }
     }
-  }
-
-  for (size_t i = 0; i < vm_func.instructions.size(); ++i) {
-    auto& instr = vm_func.instructions[i];
-    std::cout << instr << std::endl;
-
-    auto it = targets.find(i);
-    if (it != targets.end()) {
-      this->PrintIndent(-1);
-      os << it->second << ":\n";
+    os << ")>";
+  } else if (auto tv = type.as<TypeVarNode>()) {
+    os << tv->name_hint;
+  } else if (auto tt = type.as<TupleTypeNode>()) {
+    os << "std::tuple<";
+    for (size_t i = 0; i < tt->fields.size(); ++i) {
+      RelayTypeToCppStr(os, tt->fields[i]);
+      if (i < tt->fields.size() - 1) {
+        os << ",";
+      }
     }
-
-    switch (instr.op) {
-      case Opcode::Move: {
-        RegName src = instr.from;
-        RegName dst = instr.dst;
-        SrcVar src_var = GetVarForReg(src);
-        SrcVar dst_var = GetVarForReg(dst);
-        this->PrintIndent();
-        os << dst_var << " = " << src_var << ";\n";
-        break;
+    os << ">";
+  } else if (auto tc = type.as<TypeCallNode>()) {
+    auto type_func_gv = tc->func.as<GlobalTypeVarNode>();
+    ICHECK(type_func_gv) << type;
+    os << type_func_gv->name_hint;
+    if (tc->args.size() > 0) {
+      os << "<";
+      for (size_t i = 0; i < tc->args.size(); ++i) {
+        RelayTypeToCppStr(os, tc->args[i]);
+        if (i < tc->args.size() - 1) {
+          os << ",";
+        }
       }
-      case Opcode::Fatal: {
-        this->PrintIndent();
-        os << "throw std::runtime_error(\"Fatal error\");\n";
-        break;
-      }
-      case Opcode::LoadConst: {
-      }
-      case Opcode::LoadConsti:
-      case Opcode::Invoke:
-      case Opcode::InvokePacked:
-      case Opcode::InvokeClosure:
-      case Opcode::GetField:
-      case Opcode::GetTag: {
-        RegName object = instr.object;
-        RegName dst = instr.dst;
-        SrcVar object_var = GetVarForReg(object);
-        SrcVar dst_var = GetVarForReg(dst);
-        this->PrintIndent();
-        os << dst_var << " = " << src_var << "->tag;\n";
-        break;
-      }
-      case Opcode::Goto: {
-        Index target = i + instr.pc_offset;
-        auto label = targets.at(target);
-        this->PrintIndent();
-        os << "goto " << label << ";\n";
-      }
-      case Opcode::If: {
-        RegName dst = instr.dst;
-      }
-      case Opcode::AllocTensor:
-      case Opcode::AllocTensorReg:
-      case Opcode::AllocADT:
-      case Opcode::AllocClosure:
-      case Opcode::AllocStorage:
-      case Opcode::ShapeOf:
-      case Opcode::Ret: {
-        RegName result = instr.result;
-        SrcVar result_var = GetVarForReg(result);
-        this->PrintIndent();
-        os << "return " << src_var << ";\n";
-        break;
-      }
-      case Opcode::ReshapeTensor:
-      case Opcode::DeviceCopy:
-      default:
-        LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
-        return false;
+      os << ">";
     }
+    if (type_func_gv->name_hint != "Storage") {
+      os << "*";
+    }
+  } else {
+    std::cout << "DEFAULT " << type << std::endl;
+    os << "DEFAULT";
   }
 }
 
+class VMAOTFunctionCompiler : SourcePrinter {
+ public:
+  VMAOTFunctionCompiler(const Executable& exec, const IRModule& mod, const VMFunction& vm_func,
+                        const Function& relay_func,
+                        const std::unordered_map<size_t, Type>& register_types,
+                        const std::unordered_map<Index, Array<Type>>& invoke_type_vars)
+      : exec_(exec),
+        mod_(mod),
+        vm_func_(vm_func),
+        relay_func_(relay_func),
+        register_types_(register_types),
+        invoke_type_vars_(invoke_type_vars) {}
+
+  void GenerateCPPForFunction() {
+    std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
+    Type function_type = relay_func_->checked_type_;
+    CreateFunctionDeclaration(vm_func_, relay_func_);
+
+    stream_ << " {\n";
+    this->BeginScope();
+
+    this->GenerateLocalDecls();
+
+    this->VisitBytecode();
+
+    this->EndScope();
+    stream_ << "}\n";
+
+    // std::cout << "[FUN] Visited " << vm_func_.name << std::endl;
+    std::cout << "[FUN]\n" << stream_.str() << std::endl;
+  }
+
+ private:
+  void CreateFunctionDeclaration(const VMFunction& vm_func, const Function& relay_func) {
+    FuncType function_type = Downcast<FuncType>(relay_func->checked_type_);
+
+    if (function_type->type_params.size() > 0) {
+      stream_ << "template<";
+      for (size_t i = 0; i < function_type->type_params.size(); ++i) {
+        auto tvar = function_type->type_params[i];
+        stream_ << "class " << tvar->name_hint;
+        if (i != function_type->type_params.size() - 1) {
+          stream_ << ", ";
+        }
+      }
+      stream_ << ">\n";
+    }
+    RelayTypeToCppStr(stream_, function_type->ret_type);
+    stream_ << " " << vm_func.name << "(";
+
+    for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
+      auto arg_type = function_type->arg_types[i];
+      RelayTypeToCppStr(stream_, arg_type);
+      stream_ << " " << GetVarForReg(i);
+      if (i != function_type->arg_types.size() - 1) {
+        stream_ << ", ";
+      }
+    }
+    stream_ << ")";
+  }
+
+  void GenerateLocalDecls() {
+    for (size_t i = vm_func_.params.size(); i < vm_func_.register_file_size; ++i) {
+      auto it = register_types_.find(i);
+      ICHECK(it != register_types_.end()) << i;
+      Type reg_type = it->second;
+      this->PrintIndent();
+      RelayTypeToCppStr(stream_, reg_type);
+      stream_ << " " << GetVarForReg(i) << ";\n";
+    }
+  }
+
+  void VisitBytecode() {
+    // std::cout << "[BT] Visiting BT" << std::endl;
+    std::unordered_map<Index, std::string> targets;
+    int target_count = 0;
+
+    // std::cout << "[BT]  Visiting targets" << std::endl;
+    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
+      auto& instr = vm_func_.instructions[i];
+      if (instr.op == Opcode::Goto) {
+        targets[instr.pc_offset + i] = "target" + std::to_string(target_count++);
+        // std::cout << "[BT]   Added goto target " << i << " " << instr.pc_offset + i << " "
+        // << targets[instr.pc_offset + i] << std::endl;
+      } else if (instr.op == Opcode::If) {
+        targets[instr.if_op.true_offset + i] = "target" + std::to_string(target_count++);
+        targets[instr.if_op.false_offset + i] = "target" + std::to_string(target_count++);
+        // std::cout << "[BT]   Added if target " << i << " " << instr.if_op.true_offset + i << " "
+        // << targets[instr.if_op.true_offset + i] << std::endl;
+        // std::cout << "[BT]   Added else target " << i << " " << instr.if_op.false_offset + i << "
+        // "
+        // << targets[instr.if_op.false_offset + i] << std::endl;
+      }
+    }
+
+    // std::cout << "[BT]  Visiting code" << std::endl;
+    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
+      auto& instr = vm_func_.instructions[i];
+      // std::cout << "[BT]   " << instr << std::endl;
+
+      auto it = targets.find(i);
+      if (it != targets.end()) {
+        this->PrintIndent(-1);
+        stream_ << it->second << ":\n";
+      }
+
+      switch (instr.op) {
+        case Opcode::Move: {
+          auto src_var = GetVarForReg(instr.from);
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = " << src_var << ";\n";
+          break;
+        }
+        case Opcode::Fatal: {
+          this->PrintIndent();
+          stream_ << "throw std::runtime_error(\"Fatal error\");\n";
+          break;
+        }
+        case Opcode::LoadConst: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = LoadConstant();\n";
+          break;
+        }
+        case Opcode::LoadConsti: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
+          break;
+        }
+        case Opcode::Invoke: {
+          auto dst_var = GetVarForReg(instr.dst);
+          auto callee_name = exec_.functions[instr.func_index].name;
+          this->PrintIndent();
+          stream_ << dst_var << " = " << callee_name;
+          auto it = invoke_type_vars_.find(i);
+          if (it != invoke_type_vars_.end() && it->second.size() > 0) {
+            auto types = it->second;
+            stream_ << "<";
+            for (size_t j = 0; j < types.size(); ++j) {
+              RelayTypeToCppStr(stream_, types[j]);
+              if (j < types.size() - 1) {
+                stream_ << ",";
+              }
+            }
+            stream_ << ">";
+          }
+          stream_ << "(";
+          for (size_t i = 0; i < instr.num_args; ++i) {
+            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+            if (i < instr.num_args - 1) {
+              stream_ << ",";
+            }
+          }
+          stream_ << ");\n";
+          break;
+        }
+        case Opcode::InvokePacked: {
+          break;
+        }
+        case Opcode::InvokeClosure: {
+          break;
+        }
+        case Opcode::GetField: {
+          auto object_var = GetVarForReg(instr.object);
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = " << object_var << "->" << this->GetFieldName(instr.field_index)
+                  << ";\n";
+          break;
+        }
+        case Opcode::GetTag: {
+          auto object_var = GetVarForReg(instr.object);
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = " << object_var << "->tag;\n";
+          break;
+        }
+        case Opcode::Goto: {
+          Index target = i + instr.pc_offset;
+          // std::cout << "[BT]    Target offset " << i << " " << target << std::endl;
+          if (!targets.count(target)) {
+            for (auto kv : targets) {
+              // std::cout << "[BT]    Map " << kv.first << " " << kv.second << std::endl;
+            }
+          }
+          auto label = targets.at(target);
+          this->PrintIndent();
+          stream_ << "goto " << label << ";\n";
+          // std::cout << "[BT]    Emitted goto " << label << std::endl;
+          break;
+        }
+        case Opcode::If: {
+          Index true_target = i + instr.if_op.true_offset;
+          auto true_label = targets.at(true_target);
+
+          Index false_target = i + instr.if_op.false_offset;
+          auto false_label = targets.at(false_target);
+
+          auto test_var = GetVarForReg(instr.if_op.test);
+          auto target_var = GetVarForReg(instr.if_op.target);
+
+          this->PrintIndent();
+          stream_ << "if (" << test_var << " = " << target_var << ") {\n";
+          this->BeginScope();
+          this->PrintIndent();
+          stream_ << "goto " << true_label << ";\n";
+          this->EndScope();
+          this->PrintIndent();
+          stream_ << "} else {\n";
+          this->BeginScope();
+          this->PrintIndent();
+          stream_ << "goto " << false_label << ";\n";
+          this->EndScope();
+          this->PrintIndent();
+          stream_ << "}\n";
+          break;
+        }
+        case Opcode::AllocTensor: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = AllocTensor();\n";
+          break;
+        }
+        case Opcode::AllocTensorReg: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = AllocTensorReg();\n";
+          break;
+        }
+        case Opcode::AllocADT: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          if (instr.constructor_tag == 0) {
+            stream_ << dst_var << " = allocate<std::tuple<";
+            for (size_t j = 0; j < instr.num_fields; ++j) {
+              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+              Type field_type = register_types_.at(instr.datatype_fields[j]);
+              RelayTypeToCppStr(stream_, field_type);
+              if (j < instr.num_fields - 1) {
+                stream_ << ",";
+              }
+            }
+            stream_ << ">>(";
+            for (size_t j = 0; j < instr.num_fields; ++j) {
+              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+              auto field_var = GetVarForReg(instr.datatype_fields[j]);
+              stream_ << field_var;
+              if (j < instr.num_fields - 1) {
+                stream_ << ",";
+              }
+            }
+            stream_ << ");\n";
+          } else {
+            auto constructor = mod_->LookupTag(instr.constructor_tag);
+            std::string type_name = constructor->belong_to->name_hint;
+            stream_ << dst_var << " = allocate<" << type_name << ">();\n";
+            this->PrintIndent();
+            stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";
+            for (size_t j = 0; j < instr.num_fields; ++j) {
+              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+              auto field_var = GetVarForReg(instr.datatype_fields[j]);
+              this->PrintIndent();
+              stream_ << dst_var << "->" << GetFieldName(j) << " = " << field_var << ";\n";
+            }
+          }
+          break;
+        }
+        case Opcode::AllocClosure: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = AllocClosure();\n";
+          break;
+        }
+        case Opcode::AllocStorage: {
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << dst_var << " = AllocStorage();\n";
+          break;
+        }
+        case Opcode::ShapeOf: {
+          break;
+        }
+        case Opcode::Ret: {
+          auto result_var = GetVarForReg(instr.result);
+          this->PrintIndent();
+          stream_ << "return " << result_var << ";\n";
+          break;
+        }
+        case Opcode::ReshapeTensor: {
+          break;
+        }
+        case Opcode::DeviceCopy: {
+          break;
+        }
+        default:
+          LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
+          return;
+      }
+    }
+    // std::cout << "[BT] Done visiting BT" << std::endl;
+  }
+
+  const Executable& exec_;
+  const IRModule& mod_;
+  const VMFunction& vm_func_;
+  const Function& relay_func_;
+  const std::unordered_map<size_t, Type>& register_types_;
+  const std::unordered_map<Index, Array<Type>>& invoke_type_vars_;
+};
+
+void VMAOTCompiler::DeclareADT(const TypeData& adt) {
+  if (adt->type_vars.size() > 0) {
+    stream_ << "template<";
+    for (size_t i = 0; i < adt->type_vars.size(); ++i) {
+      auto tvar = adt->type_vars[i];
+      stream_ << "class " << tvar->name_hint;
+      if (i != adt->type_vars.size() - 1) {
+        stream_ << ", ";
+      }
+    }
+    stream_ << ">\n";
+  }
+
+  stream_ << "struct " << adt->header->name_hint << " {\n";
+  this->BeginScope();
+  this->PrintIndent();
+  stream_ << "int tag;\n\n";
+  this->PrintIndent();
+  stream_ << "union {\n";
+  this->BeginScope();
+
+  for (auto constructor : adt->constructors) {
+    this->PrintIndent();
+    stream_ << "struct {\n";
+    this->BeginScope();
+    for (size_t i = 0; i < constructor->inputs.size(); ++i) {
+      auto field = constructor->inputs[i];
+      this->PrintIndent();
+      RelayTypeToCppStr(stream_, field);
+      stream_ << " " << GetFieldName(i) << ";\n";
+    }
+    this->EndScope();
+    this->PrintIndent();
+    stream_ << "} " << constructor->name_hint << ";\n";
+  }
+  this->EndScope();
+  this->PrintIndent();
+  stream_ << "};\n";
+
+  this->EndScope();
+  this->PrintIndent();
+  stream_ << "};\n\n";
+}
+
 void VMAOTCompiler::GenerateCPP() {
+  for (auto var : mod_->GetGlobalTypeVars()) {
+    auto type = mod_->LookupTypeDef(var);
+    // std::cout << "[TYPES] " << var << " " << type << std::endl;
+    this->DeclareADT(type);
+  }
+  std::cout << stream_.str() << std::endl;
   for (auto vm_func : exec_.functions) {
-    std::cout << "[AOT] Function " << vm_func.name << " " << vm_func.register_file_size
-              << std::endl;
-    auto relay_func = mod_->Lookup(vm_func.name);
-    HandleFunction(function);
-    std::cout << std::endl;
+    auto relay_func = Downcast<Function>(mod_->Lookup(vm_func.name));
+    ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
+    auto function_register_types = register_types_.at(vm_func.name);
+    auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
+    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
+                                            function_register_types, function_invoke_type_vars);
+    function_compiler.GenerateCPPForFunction();
   }
 }
 
 }  // namespace vm
 }  // namespace relay
 }  // namespace tvm
-
-#endif  // TVM_RELAY_BACKEND_VM_COMPILER_H_

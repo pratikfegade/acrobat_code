@@ -13,10 +13,10 @@ batch_size = 8
 num_nodes = 6
 
 target = "llvm"
-lazy_execution=True
-coarsened_execution=True
-batched_execution=True
-scattered_kernels=True
+lazy_execution=False
+coarsened_execution=False
+batched_execution=False
+scattered_kernels=False
 concurrent_execution=False
 use_autoscheduler=False
 dynamic_batch_size_estimate=64

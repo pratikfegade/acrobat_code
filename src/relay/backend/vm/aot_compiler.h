@@ -55,15 +55,46 @@ using namespace tvm::runtime;
 using namespace tvm::runtime::vm;
 using namespace relay::transform;
 
-class VMAOTCompiler {
+class SourcePrinter {
+ protected:
+  inline void BeginScope() { indent_ += 2; }
+
+  inline void EndScope() { indent_ -= 2; }
+
+  inline void PrintIndent(int offset = 0) {
+    for (int i = 0; i < indent_ + offset; ++i) {
+      this->stream_ << ' ';
+    }
+  }
+
+  inline std::string GetVarForReg(RegName reg) { return "local_" + std::to_string(reg); }
+
+  inline std::string GetFieldName(size_t index) { return "field_" + std::to_string(index); }
+
+  int indent_ = 0;
+  std::stringstream stream_;
+};
+
+class VMAOTCompiler : SourcePrinter {
  public:
-  VMAOTCompiler(const Executable& exec, const IRModule& mod) : exec_(exec), mod_(mod) {}
+  VMAOTCompiler(
+      const Executable& exec, const IRModule& mod,
+      std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types,
+      std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars)
+      : exec_(exec),
+        mod_(mod),
+        register_types_(register_types),
+        invoke_type_vars_(invoke_type_vars) {}
 
   void GenerateCPP();
 
  private:
+  void DeclareADT(const TypeData& adt);
+
   const Executable& exec_;
   const IRModule& mod_;
+  const std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types_;
+  const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>& invoke_type_vars_;
 };
 
 }  // namespace vm
