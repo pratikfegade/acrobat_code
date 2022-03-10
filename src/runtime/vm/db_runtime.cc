@@ -140,6 +140,40 @@ NDArray DynBatchRuntime::DeviceCopy(const NDArray& src_data, const int64_t src_d
   return src_data.CopyTo(dst_dev);
 }
 
+NDArray DynBatchRuntime::ReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor) {
+  Device cpu_dev = GetDevice(shared_state_->exec_->host_device_index);
+  // Read the shape from shape tensor
+  const DLTensor* dl_tensor = shape_tensor.operator->();
+  ICHECK_EQ(dl_tensor->dtype.code, 0u);
+  ICHECK_EQ(dl_tensor->dtype.bits, 64u);
+  int64_t* dims = reinterpret_cast<int64_t*>(dl_tensor->data);
+  int64_t ndim = shape_tensor->shape[0];
+  std::vector<int64_t> shape(dims, dims + ndim);
+  // Reshape the input tensor
+#if TVM_LOG_DEBUG
+  std::ostringstream os;
+  os << "ReshapeTensor: ";
+  os << "shape=[";
+  for (auto i : shape) {
+    os << i << ",";
+  }
+  os << "]";
+  os << ", dtype=" << DLDataType2String(tensor_arr->dtype);
+  VLOG(2) << os.str();
+#endif
+  return tensor_arr.CreateView(shape, tensor_arr->dtype);
+}
+
+NDArray DynBatchRuntime::ShapeOf(const NDArray& input_array) {
+  int ndim = input_array->ndim;
+  auto out_tensor =
+      NDArray::Empty({ndim}, {kDLInt, 64, 1}, GetDevice(shared_state_->exec_->host_device_index));
+  for (int i = 0; i < ndim; ++i) {
+    reinterpret_cast<int64_t*>(out_tensor->data)[i] = input_array->shape[i];
+  }
+  return out_tensor;
+}
+
 PackedFunc DynBatchRuntime::GetFunction(const std::string& name,
                                         const ObjectPtr<Object>& sptr_to_self) {
   return {};

@@ -116,18 +116,31 @@ std::string GetCppFunctionName(const std::string& name) {
   return name;
 }
 
+Function GetCompiledRelayFunction(
+    const std::unordered_map<std::string, Function>& compiled_functions, const IRModule& mod,
+    const std::string& name) {
+  auto it = compiled_functions.find(name);
+  if (it != compiled_functions.end()) {
+    return it->second;
+  } else {
+    return Downcast<Function>(mod->Lookup(name));
+  }
+}
+
 class VMAOTFunctionCompiler : SourcePrinter {
  public:
   VMAOTFunctionCompiler(const Executable& exec, const IRModule& mod, const VMFunction& vm_func,
                         const Function& relay_func,
                         const std::unordered_map<size_t, Type>& register_types,
-                        const std::unordered_map<Index, Array<Type>>& invoke_type_vars)
+                        const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
+                        const std::unordered_map<std::string, Function>& compiled_functions)
       : exec_(exec),
         mod_(mod),
         vm_func_(vm_func),
         relay_func_(relay_func),
         register_types_(register_types),
-        invoke_type_vars_(invoke_type_vars) {}
+        invoke_type_vars_(invoke_type_vars),
+        compiled_functions_(compiled_functions) {}
 
   void GenerateCPPForFunction() {
     std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
@@ -144,15 +157,18 @@ class VMAOTFunctionCompiler : SourcePrinter {
     this->EndScope();
     stream_ << "}\n";
 
-    // std::cout << "[FUN] Visited " << vm_func_.name << std::endl;
+    std::cout << "[FUN] Visited " << vm_func_.name << std::endl;
     std::cout << "[FUN]\n" << stream_.str() << std::endl;
   }
 
  private:
   void CreateFunctionDeclaration(const VMFunction& vm_func, const Function& relay_func) {
     FuncType function_type = Downcast<FuncType>(relay_func->checked_type_);
+    ICHECK_EQ(vm_func.params.size(), function_type->arg_types.size())
+        << vm_func.params.size() << " " << function_type->arg_types.size() << " "
+        << relay_func->params.size();
 
-    if (function_type->type_params.size() > 0) {
+    if (relay_func->type_params.size() > 0) {
       stream_ << "template<";
       for (size_t i = 0; i < function_type->type_params.size(); ++i) {
         auto tvar = function_type->type_params[i];
@@ -175,6 +191,21 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
     stream_ << ")";
+
+    // std::cout << relay_func << "\n" << std::endl;
+    // std::cout << stream_.str() << std::endl;
+    // if (vm_func.params.size() != function_type->arg_types.size()) {
+    //   std::cout << " VM Func Params" << std::endl;
+    //   for (auto param : vm_func.params) {
+    //     std::cout << "   " << param << std::endl;
+    //   }
+
+    //   std::cout << "  Relay Func Params" << std::endl;
+    //   for (auto param : relay_func->params) {
+    //     std::cout << "   " << param->name_hint() << std::endl;
+    //   }
+    // }
+    // std::cout << "\n\n" << std::endl;
   }
 
   bool IsStorageType(const Type& type) {
@@ -327,6 +358,30 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::InvokeClosure: {
+          auto dst_var = GetVarForReg(instr.dst);
+          auto callee_var = GetVarForReg(instr.closure);
+          this->PrintIndent();
+          stream_ << dst_var << " = " << callee_var;
+          // auto it = invoke_type_vars_.find(i);
+          // if (it != invoke_type_vars_.end() && it->second.size() > 0) {
+          //   auto types = it->second;
+          //   stream_ << "<";
+          //   for (size_t j = 0; j < types.size(); ++j) {
+          //     RelayTypeToCppStr(stream_, types[j]);
+          //     if (j < types.size() - 1) {
+          //       stream_ << ",";
+          //     }
+          //   }
+          //   stream_ << ">";
+          // }
+          stream_ << "(";
+          for (size_t i = 0; i < instr.num_closure_args; ++i) {
+            stream_ << GetVarForReg(instr.closure_args[i]);
+            if (i < instr.num_closure_args - 1) {
+              stream_ << ",";
+            }
+          }
+          stream_ << ");\n";
           break;
         }  //
         case Opcode::GetField: {
@@ -384,6 +439,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         case Opcode::AllocTensor: {
           auto dst_var = GetVarForReg(instr.dst);
           auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
+          auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
           std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
 
           std::string shape_arr_name = "shape_arr" + std::to_string(tmp_var_counter++);
@@ -398,22 +454,27 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           stream_ << "};\n";
 
+          // TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t
+          // offset,
+          //                                 uint32_t ndim, int64_t* shape, DLDataType dtype,
+          //                                 tvm::runtime::NDArray* out);
+
           this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBAllocateTensor(" << storage_var << ", "
-                  << instr.alloc_tensor.offset << ", " << instr.alloc_tensor.ndim << ", "
-                  << shape_arr_name << ".data(), " << dtype_str << ", &" << dst_var << "));\n";
+          stream_ << "TVM_API_CALL(TVMDBAllocateTensor(" << storage_var << ", " << offset_var
+                  << ", " << instr.alloc_tensor.ndim << ", " << shape_arr_name << ".data(), "
+                  << dtype_str << ", &" << dst_var << "));\n";
           break;
         }
         case Opcode::AllocTensorReg: {
           auto dst_var = GetVarForReg(instr.dst);
           auto storage_var = GetVarForReg(instr.alloc_tensor_reg.storage);
+          auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
           std::string dtype_str = DTypeToStr(instr.alloc_tensor_reg.dtype);
 
           std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
           this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBAllocateTensorReg(" << storage_var << ", "
-                  << instr.alloc_tensor.offset << ", " << shape_var << ", " << dtype_str << ", &"
-                  << dst_var << "));\n";
+          stream_ << "TVM_API_CALL(TVMDBAllocateTensorReg(" << storage_var << ", " << offset_var
+                  << ", " << shape_var << ", " << dtype_str << ", &" << dst_var << "));\n";
           break;
         }
         case Opcode::AllocADT: {
@@ -472,9 +533,51 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::AllocClosure: {
+          std::cout << "[Closure] " << exec_.functions[instr.clo_index].name << " "
+                    << exec_.functions[instr.clo_index].params.size() << " " << instr.num_freevar
+                    << std::endl;
+          auto& closure_func = exec_.functions[instr.clo_index];
+          auto closure_relay_func =
+              GetCompiledRelayFunction(compiled_functions_, mod_, closure_func.name);
           auto dst_var = GetVarForReg(instr.dst);
           this->PrintIndent();
-          stream_ << dst_var << " = AllocClosure();\n";
+          stream_ << dst_var << " = [";
+          for (size_t i = 0; i < instr.num_freevar; ++i) {
+            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+            if (i < instr.num_freevar - 1) {
+              stream_ << ",";
+            }
+          }
+          stream_ << "](";
+          for (size_t j = instr.num_freevar; j < closure_func.params.size(); ++j) {
+            Type arg_type = closure_relay_func->params[j]->checked_type_;
+            RelayTypeToCppStr(stream_, arg_type);
+            stream_ << " " << GetTmpVarName(j);
+            if (j < closure_func.params.size() - 1) {
+              stream_ << ", ";
+            }
+          }
+          stream_ << ") {\n";
+          this->BeginScope();
+          this->PrintIndent();
+          stream_ << "return " << closure_func.name << "(";
+          size_t j = 0;
+          for (; j < instr.num_freevar; ++j) {
+            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+            if (j < closure_func.params.size() - 1) {
+              stream_ << ", ";
+            }
+          }
+          for (; j < closure_func.params.size(); ++j) {
+            stream_ << GetTmpVarName(j);
+            if (j < closure_func.params.size() - 1) {
+              stream_ << ", ";
+            }
+          }
+          stream_ << ");\n";
+          this->EndScope();
+          this->PrintIndent();
+          stream_ << "}\n";
           break;
         }  //
         case Opcode::AllocStorage: {
@@ -491,8 +594,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::ShapeOf: {
+          auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << "TVM_API_CALL(TVMDBShapeOf(" << tensor_var << ", &" << dst_var << "));\n";
           break;
-        }  //
+        }
         case Opcode::Ret: {
           auto result_var = GetVarForReg(instr.result);
           this->PrintIndent();
@@ -500,8 +607,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::ReshapeTensor: {
+          auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
+          auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
+          auto dst_var = GetVarForReg(instr.dst);
+          this->PrintIndent();
+          stream_ << "TVM_API_CALL(TVMDBReshapeTensor(" << tensor_var << ", " << shape_var << ", &"
+                  << dst_var << "));\n";
           break;
-        }  //
+        }
         case Opcode::DeviceCopy: {
           auto src_var = GetVarForReg(instr.device_copy.src);
           auto dst_var = GetVarForReg(instr.dst);
@@ -526,6 +639,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const Function& relay_func_;
   const std::unordered_map<size_t, Type>& register_types_;
   const std::unordered_map<Index, Array<Type>>& invoke_type_vars_;
+  const std::unordered_map<std::string, Function>& compiled_functions_;
 };
 
 void VMAOTCompiler::EmitHeader() {
@@ -597,12 +711,13 @@ void VMAOTCompiler::GenerateCPP() {
   }
   std::cout << stream_.str() << std::endl;
   for (auto vm_func : exec_.functions) {
-    auto relay_func = Downcast<Function>(mod_->Lookup(vm_func.name));
+    Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
     ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
-                                            function_register_types, function_invoke_type_vars);
+                                            function_register_types, function_invoke_type_vars,
+                                            compiled_functions_);
     function_compiler.GenerateCPPForFunction();
   }
 }

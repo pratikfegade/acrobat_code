@@ -120,9 +120,9 @@ TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t offset,
-                                tvm::runtime::NDArray shape, DLDataType dtype,
-                                tvm::runtime::NDArray* out);
+TVM_DLL int TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int64_t offset,
+                                   tvm::runtime::NDArray shape, DLDataType dtype,
+                                   tvm::runtime::NDArray* out);
 
 /*!
  * \brief Copy a tensor between devices.
@@ -133,6 +133,21 @@ TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_
  */
 TVM_DLL int TVMDBDeviceCopy(const NDArray& src_data, const int64_t src_device_index,
                             const int64_t dst_device_index, NDArray* out);
+
+/*!
+ * \brief Rehape a tensor.
+ * \param tensor_arr The tensor to be reshaped.
+ * \param shape_tensor The new shape
+ * \param out The reshaped tensor object
+ */
+TVM_DLL int TVMDBReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor, NDArray* out);
+
+/*!
+ * \brief Obtain the shape of a tensor.
+ * \param input_array The input tensor.
+ * \param out The shape of the input tensor
+ */
+TVM_DLL int TVMDBShapeOf(const NDArray& input_array, NDArray* out);
 
 #ifdef __cplusplus
 }  // TVM_EXTERN_C

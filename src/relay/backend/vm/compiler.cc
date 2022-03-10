@@ -313,6 +313,7 @@ class TIRCalleeCollector : public tir::StmtExprVisitor {
 
 struct VMFunctionCompilerResult {
  public:
+  Function compiled_function;
   VMFunction vm_func;
   std::unordered_map<size_t, Type> register_types;
   std::unordered_map<Index, Array<Type>> invoke_type_vars;
@@ -332,6 +333,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
   VMFunctionCompilerResult Compile(const GlobalVar& var, const Function& func) {
     std::vector<Index> param_device_indexes;
+    Function compiled_function = func;
     if (IsClosure(func)) {
       // After lifting we'll have functions of the form:
       //   fn(closure args) { fn(lifted function args) { body } }
@@ -340,18 +342,21 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       // Do that flattening on-the-fly here.
       Function inner_func = Downcast<Function>(func->body);
       std::vector<Var> params;
+      Array<Type> param_types;
       std::vector<SEScope> param_se_scopes;
       params.reserve(func->params.size() + inner_func->params.size());
       param_se_scopes.reserve(func->params.size() + inner_func->params.size());
       param_device_indexes.reserve(func->params.size() + inner_func->params.size());
       for (size_t i = 0; i < func->params.size(); ++i) {
         params.emplace_back(func->params[i]);
+        param_types.push_back(func->params[i]->checked_type_);
         SEScope param_se_scope = GetFunctionParamSEScope(func.get(), i);
         param_se_scopes.push_back(param_se_scope);
         param_device_indexes.push_back(GetDeviceIndex(param_se_scope));
       }
       for (size_t i = 0; i < inner_func->params.size(); ++i) {
         params.emplace_back(inner_func->params[i]);
+        param_types.push_back(inner_func->params[i]->checked_type_);
         SEScope param_se_scope = GetFunctionParamSEScope(inner_func.get(), i);
         param_se_scopes.push_back(param_se_scope);
         param_device_indexes.push_back(GetDeviceIndex(param_se_scope));
@@ -366,6 +371,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       }
       Function flattened_func = Function(params, inner_func->body, inner_func->ret_type,
                                          type_params, func->attrs, func->span);
+      auto function_type = FuncType(param_types, inner_func->ret_type, type_params, {});
+      flattened_func->checked_type_ = function_type;
+      compiled_function = flattened_func;
       VisitExpr(MaybeFunctionOnDevice(flattened_func, param_se_scopes,
                                       GetFunctionResultSEScope(inner_func.get())));
     } else {
@@ -375,7 +383,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       }
       VisitExpr(func);
     }
-    return {VMFunction(var->name_hint, params_, instructions_, registers_num_,
+    return {compiled_function,
+            VMFunction(var->name_hint, params_, instructions_, registers_num_,
                        std::move(param_device_indexes)),
             register_types_, invoke_type_vars_};
   }
@@ -718,7 +727,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    this->VisitExpr(args[0]);
                    auto storage_register = last_register_;
 
-                   // The storage will be passed dynamically.
+                   // The offset will be passed dynamically.
                    this->VisitExpr(args[1]);
                    auto offset_register = last_register_;
 
@@ -1080,6 +1089,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
   std::unordered_map<std::string, std::unordered_map<size_t, Type>> register_types;
   std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars;
+  std::unordered_map<std::string, Function> compiled_functions;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -1095,6 +1105,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       auto func_invoke_type_vars = result.invoke_type_vars;
       register_types[vm_func.name] = func_register_types;
       invoke_type_vars[vm_func.name] = func_invoke_type_vars;
+      compiled_functions[vm_func.name] = result.compiled_function;
       // std::cout << "[REG_TYPES] " << vm_func.name << " " << func_register_types.size() <<
       // std::endl;
 
@@ -1223,8 +1234,9 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     backend::UpdateAutoSchedulerOpWeights(context_.module);
   }
 
-  // std::cout << exec_->GetBytecode() << std::endl;
-  VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars).GenerateCPP();
+  std::cout << exec_->GetBytecode() << std::endl;
+  VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions)
+      .GenerateCPP();
   exit(0);
 }
 

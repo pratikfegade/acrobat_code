@@ -103,6 +103,20 @@ int TVMDBDeviceCopy(const NDArray& src_data, const int64_t src_device_index,
   API_END();
 }
 
+int TVMDBReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor, NDArray* out) {
+  API_BEGIN();
+  auto db_runtime = DynBatchRuntime::Current();
+  *out = db_runtime->ReshapeTensor(tensor_arr, shape_tensor);
+  API_END();
+}
+
+int TVMDBShapeOf(const NDArray& input_array, NDArray* out) {
+  API_BEGIN();
+  auto db_runtime = DynBatchRuntime::Current();
+  *out = db_runtime->ShapeOf(input_array);
+  API_END();
+}
+
 #ifdef __cplusplus
 }
 #endif

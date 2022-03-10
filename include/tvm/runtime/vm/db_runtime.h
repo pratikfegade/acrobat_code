@@ -166,6 +166,24 @@ class DynBatchRuntime : public runtime::ModuleNode {
    */
   NDArray DeviceCopy(const NDArray& src_data, const int64_t src_device_index,
                      const int64_t dst_device_index);
+
+  /*!
+   * \brief Reshape a tensor.
+   * \param tensor_arr The tensor to be reshaped.
+   * \param shape_tensor The new shape
+   *
+   * \return The reshaped tensor object
+   */
+  NDArray ReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor);
+
+  /*!
+   * \brief Obtain the shape of a tensor.
+   * \param input_array The input tensor.
+   *
+   * \return The shape of the input tensor
+   */
+  NDArray ShapeOf(const NDArray& input_array);
+
   /*!
    * \brief Get the current instance of the runtime.
    */

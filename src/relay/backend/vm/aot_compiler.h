@@ -71,6 +71,8 @@ class SourcePrinter {
 
   inline std::string GetFieldName(size_t index) { return "field_" + std::to_string(index); }
 
+  inline std::string GetTmpVarName(size_t index) { return "tmp_" + std::to_string(index); }
+
   int indent_ = 0;
   std::stringstream stream_;
 };
@@ -80,11 +82,13 @@ class VMAOTCompiler : SourcePrinter {
   VMAOTCompiler(
       const Executable& exec, const IRModule& mod,
       std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types,
-      std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars)
+      std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars,
+      std::unordered_map<std::string, Function> compiled_functions)
       : exec_(exec),
         mod_(mod),
         register_types_(register_types),
-        invoke_type_vars_(invoke_type_vars) {}
+        invoke_type_vars_(invoke_type_vars),
+        compiled_functions_(compiled_functions) {}
 
   void GenerateCPP();
 
@@ -99,6 +103,7 @@ class VMAOTCompiler : SourcePrinter {
   const IRModule& mod_;
   const std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types_;
   const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>& invoke_type_vars_;
+  const std::unordered_map<std::string, Function>& compiled_functions_;
 };
 
 }  // namespace vm
