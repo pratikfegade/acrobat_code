@@ -613,6 +613,65 @@ TVM_DLL int TVMDeviceCopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHandl
 TVM_DLL int TVMObjectDerivedFrom(uint32_t child_type_index, uint32_t parent_type_index,
                                  int* is_derived);
 
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////
+
+/* TVM_DLL int TVMDBCallTest(); */
+
+/* /\*! */
+/*  * \brief Load constant from the executable. */
+/*  * \param const_index The constant index in the executable. */
+/*  * \param out The result constant array */
+/*  * */
+/*  * \return 0 when success, nonzero when failure happens */
+/*  *\/ */
+/* TVM_DLL int TVMDBLoadConstant(int64_t const_index, tvm::runtime::NDArray* out); */
+
+/* /\*! */
+/*  * \brief Invoke a packed function. */
+/*  * \param packed_index The index of the callee in the executable. */
+/*  * \param arity The arity of the function */
+/*  * \param output_size The number of outputs of the function */
+/*  * \param args Pointer to args */
+/*  * \param num_args number of arguments */
+/*  * */
+/*  * \return 0 when success, nonzero when failure happens */
+/*  *\/ */
+/* TVM_DLL int TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size, */
+/*                               const ObjectRef* args, const int64_t num_args); */
+
+/* /\*! */
+/*  * \brief Allocate a memory storage object. */
+/*  * \param allocation_size The size of the storage to be allocated. */
+/*  * \param alignment The alignment of the storage to be allocated. */
+/*  * \param dtype The datatype of the storage to be allocated. */
+/*  * \param device_index The device the memory is to be allocated on */
+/*  * \param out The allocated storage object */
+/*  * */
+/*  * \return 0 when success, nonzero when failure happens */
+/*  *\/ */
+/* TVM_DLL int TVMDBAllocatetvm::runtime::vm::Storage(int64_t allocation_size, int64_t alignment, */
+/*                                                    DLDataType dtype, int64_t device_index, */
+/*                                                    tvm::runtime::vm::Storage* out); */
+
+/* /\*! */
+/*  * \brief Allocate a tensor. */
+/*  * \param storage The storage to allocate from. */
+/*  * \param offset The offset into the storage to allocate from */
+/*  * \param ndim The number of dimensions. */
+/*  * \param shape The shape of tensor. */
+/*  * \param dtype The datatype of tensor to be allocated */
+/*  * \param out The allocated tensor object */
+/*  * */
+/*  * \return 0 when success, nonzero when failure happens */
+/*  *\/ */
+/* TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t offset, */
+/*                                 uint32_t ndim, int64_t* shape, DLDataType dtype, */
+/*                                 tvm::runtime::NDArray* out); */
+
 #ifdef __cplusplus
 }  // TVM_EXTERN_C
 #endif

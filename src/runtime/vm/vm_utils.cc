@@ -43,6 +43,59 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+/* Other utils */
+std::vector<int64_t> ToShape(NDArray shape_tensor) {
+  std::vector<int64_t> shape;
+  auto rank = shape_tensor.Shape().size();
+  auto dtype = shape_tensor.DataType();
+
+  // For 0-rank shapes we need to allocate a single scalar.
+  if (rank == 0) {
+    return shape;
+  }
+
+  // Otherwise we should be rank-1, and we will extract the number of dimensions
+  // for the output vector.
+  ICHECK_EQ(rank, 1U) << "shape tensor should be a k-length vector, found " << rank;
+  int64_t ndim = shape_tensor.Shape().at(0);
+  shape.resize(ndim);
+
+  const DLTensor* dl_tensor = shape_tensor.operator->();
+  if (dtype.is_int() && dtype.bits() == 32 && dtype.lanes() == 1) {
+    int32_t* dims = reinterpret_cast<int32_t*>(dl_tensor->data);
+    shape.assign(dims, dims + ndim);
+  } else if (dtype.is_int() && dtype.bits() == 64 && dtype.lanes() == 1) {
+    int64_t* dims = reinterpret_cast<int64_t*>(dl_tensor->data);
+    shape.assign(dims, dims + ndim);
+  } else {
+    LOG(FATAL) << "invalid shape tensor datatype: " << dtype;
+  }
+
+  return shape;
+}
+
+ObjectRef CopyTo(ObjectRef src, const DLDevice& dev) {
+  if (src->IsInstance<NDArray::ContainerType>()) {
+    auto nd_array = Downcast<NDArray>(src);
+    // TODO(mbs): Should respect device id also.
+    if (nd_array->device.device_type != dev.device_type) {
+      VLOG(2) << "copying from " << nd_array->device.device_type << " to " << dev.device_type;
+      return nd_array.CopyTo(dev);
+    }
+    return src;
+  } else {
+    ICHECK(src->IsInstance<ADTObj>())
+        << "VM data must be NDArray or a list of NDArray, but received: " << src->_type_key;
+    std::vector<ObjectRef> ret;
+    ADT adt = Downcast<ADT>(src);
+    for (size_t i = 0; i < adt.size(); i++) {
+      ret.push_back(CopyTo(adt[i], dev));
+    }
+    return ADT(adt->tag, ret.begin(), ret.end());
+  }
+}
+
+/* Invoking packed functions */
 void TestNDArray(const NDArray& array) {
   size_t total_nums = 1;
   ICHECK(array.defined());

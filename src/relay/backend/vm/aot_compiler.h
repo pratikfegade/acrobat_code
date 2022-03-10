@@ -91,6 +91,10 @@ class VMAOTCompiler : SourcePrinter {
  private:
   void DeclareADT(const TypeData& adt);
 
+  void EmitHeader();
+
+  void GenerateMainFunction();
+
   const Executable& exec_;
   const IRModule& mod_;
   const std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types_;

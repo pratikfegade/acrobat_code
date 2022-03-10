@@ -263,8 +263,8 @@ file(GLOB_RECURSE COMPILER_SRCS
     )
 
 file(GLOB CODEGEN_SRCS
-  src/target/*.cc
-  src/target/source/*.cc
+    src/target/*.cc
+    src/target/source/*.cc
     )
 
 list(APPEND COMPILER_SRCS ${CODEGEN_SRCS})

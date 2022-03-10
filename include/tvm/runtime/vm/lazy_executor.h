@@ -89,6 +89,7 @@ class LazyExecutor {
 
   friend class VirtualMachine;
   friend class ConcurrentVirtualMachine;
+  friend class DynBatchRuntime;
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */

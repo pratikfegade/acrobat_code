@@ -44,6 +44,29 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+/* Other utils */
+
+/*!
+ * \brief Convert NDArray to vector
+ *
+ * \param shape_tensor The source NDArray.
+ *
+ * \return The vector.
+ */
+std::vector<int64_t> ToShape(NDArray shape_tensor);
+
+/*!
+ * \brief Copy objects (arrays or lists of arrays) across devices
+ *
+ * \param src The source object.
+ * \param dev The destinationd device.
+ *
+ * \return The copied object.
+ */
+ObjectRef CopyTo(ObjectRef src, const DLDevice& dev);
+
+/* Invoking packed functions */
+
 /*!
  * \brief Invoke a PackedFunction (refactored out to avoid code
  * duplication). This functions assumes that all ADT args have already
