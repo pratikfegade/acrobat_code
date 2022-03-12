@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -50,16 +51,27 @@ std::string DTypeToStr(const DLDataType& dtype) {
          std::to_string(dtype.lanes) + "}";
 }
 
-void RelayTypeToCppStr(std::ostream& os, const Type& type) {
-  if (auto tt = type.as<TensorTypeNode>()) {
+void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = false,
+                       const std::string& replacement = "") {
+  if (type.as<TensorTypeNode>()) {
     os << "NDArray";
   } else if (auto pt = type.as<PrimTypeNode>()) {
-    os << pt->dtype;
+    os << pt->dtype << "_t";
   } else if (auto td = type.as<TypeDataNode>()) {
     if (td->header->name_hint == "Storage") {
       os << "Storage";
     } else {
-      os << td->header->name_hint << "*";
+      auto type_name = td->header->name_hint;
+      if (replacement.size() > 0) {
+        type_name = replacement;
+      }
+      if (!no_shared_ptr) {
+        os << "std::shared_ptr<";
+      }
+      os << type_name;
+      if (!no_shared_ptr) {
+        os << ">";
+      }
     }
   } else if (auto ft = type.as<FuncTypeNode>()) {
     ICHECK_EQ(ft->type_params.size(), 0);
@@ -76,6 +88,9 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type) {
   } else if (auto tv = type.as<TypeVarNode>()) {
     os << tv->name_hint;
   } else if (auto tt = type.as<TupleTypeNode>()) {
+    if (!no_shared_ptr) {
+      os << "std::shared_ptr<";
+    }
     os << "std::tuple<";
     for (size_t i = 0; i < tt->fields.size(); ++i) {
       RelayTypeToCppStr(os, tt->fields[i]);
@@ -83,11 +98,22 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type) {
         os << ",";
       }
     }
+    if (!no_shared_ptr) {
+      os << ">";
+    }
     os << ">";
   } else if (auto tc = type.as<TypeCallNode>()) {
     auto type_func_gv = tc->func.as<GlobalTypeVarNode>();
     ICHECK(type_func_gv) << type;
-    os << type_func_gv->name_hint;
+
+    if (type_func_gv->name_hint != "Storage" && !no_shared_ptr) {
+      os << "std::shared_ptr<";
+    }
+    if (replacement.size() > 0) {
+      os << replacement;
+    } else {
+      os << type_func_gv->name_hint;
+    }
     if (tc->args.size() > 0) {
       os << "<";
       for (size_t i = 0; i < tc->args.size(); ++i) {
@@ -98,13 +124,20 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type) {
       }
       os << ">";
     }
-    if (type_func_gv->name_hint != "Storage") {
-      os << "*";
+    if (type_func_gv->name_hint != "Storage" && !no_shared_ptr) {
+      os << ">";
     }
   } else {
     std::cout << "DEFAULT " << type << std::endl;
     os << "DEFAULT";
   }
+}
+
+std::string RelayTypeToCppStrString(const Type& type, bool no_shared_ptr = false,
+                                    const std::string& replacement = "") {
+  std::stringstream ss;
+  RelayTypeToCppStr(ss, type, no_shared_ptr, replacement);
+  return ss.str();
 }
 
 std::string GetModelMainFunctionName() { return "model_main"; }
@@ -133,32 +166,37 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         const Function& relay_func,
                         const std::unordered_map<size_t, Type>& register_types,
                         const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
-                        const std::unordered_map<std::string, Function>& compiled_functions)
+                        const std::unordered_map<std::string, Function>& compiled_functions,
+                        const std::unordered_map<Index, int32_t>& get_field_tags,
+                        std::ostream& stream)
       : exec_(exec),
         mod_(mod),
         vm_func_(vm_func),
         relay_func_(relay_func),
         register_types_(register_types),
         invoke_type_vars_(invoke_type_vars),
-        compiled_functions_(compiled_functions) {}
+        compiled_functions_(compiled_functions),
+        get_field_tags_(get_field_tags),
+        stream_(stream) {}
 
-  void GenerateCPPForFunction() {
-    std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
+  void GenerateCPPForFunction(bool definition) {
+    // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
     Type function_type = relay_func_->checked_type_;
     CreateFunctionDeclaration(vm_func_, relay_func_);
 
-    stream_ << " {\n";
-    this->BeginScope();
+    if (definition) {
+      stream_ << " {\n";
+      this->BeginScope();
 
-    this->GenerateLocalDecls();
+      this->GenerateLocalDecls();
 
-    this->VisitBytecode();
+      this->VisitBytecode();
 
-    this->EndScope();
-    stream_ << "}\n";
-
-    std::cout << "[FUN] Visited " << vm_func_.name << std::endl;
-    std::cout << "[FUN]\n" << stream_.str() << std::endl;
+      this->EndScope();
+      stream_ << "}\n";
+    } else {
+      stream_ << ";\n";
+    }
   }
 
  private:
@@ -220,7 +258,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
   void GenerateLocalDecls() {
     std::unordered_map<std::string, std::vector<std::string>> type2vars;
-    for (size_t i = vm_func_.params.size(); i < vm_func_.register_file_size; ++i) {
+    for (int i = vm_func_.params.size(); i < vm_func_.register_file_size; ++i) {
       auto it = register_types_.find(i);
       ICHECK(it != register_types_.end()) << i;
       Type reg_type = it->second;
@@ -230,14 +268,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
         auto type_str = ss.str();
         type2vars[type_str].push_back(GetVarForReg(i));
       } else {
-        this->PrintIndent();
-        RelayTypeToCppStr(stream_, reg_type);
-        stream_ << " " << GetVarForReg(i) << ";\n";
+        auto type_str = RelayTypeToCppStrString(reg_type);
+        this->PrintIndent(stream_);
+        stream_ << type_str << " " << GetVarForReg(i) << ";\n";
       }
     }
 
     for (auto kv : type2vars) {
-      this->PrintIndent();
+      this->PrintIndent(stream_);
       stream_ << kv.first << " ";
       auto vars = kv.second;
       for (size_t i = 0; i < vars.size(); ++i) {
@@ -261,16 +299,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
       auto& instr = vm_func_.instructions[i];
       if (instr.op == Opcode::Goto) {
         targets[instr.pc_offset + i] = "target" + std::to_string(target_count++);
-        // std::cout << "[BT]   Added goto target " << i << " " << instr.pc_offset + i << " "
-        // << targets[instr.pc_offset + i] << std::endl;
       } else if (instr.op == Opcode::If) {
         targets[instr.if_op.true_offset + i] = "target" + std::to_string(target_count++);
         targets[instr.if_op.false_offset + i] = "target" + std::to_string(target_count++);
-        // std::cout << "[BT]   Added if target " << i << " " << instr.if_op.true_offset + i << " "
-        // << targets[instr.if_op.true_offset + i] << std::endl;
-        // std::cout << "[BT]   Added else target " << i << " " << instr.if_op.false_offset + i << "
-        // "
-        // << targets[instr.if_op.false_offset + i] << std::endl;
       }
     }
 
@@ -282,7 +313,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
       auto it = targets.find(i);
       if (it != targets.end()) {
-        this->PrintIndent(-1);
+        this->PrintIndent(stream_, -1);
         stream_ << it->second << ":\n";
       }
 
@@ -290,33 +321,32 @@ class VMAOTFunctionCompiler : SourcePrinter {
         case Opcode::Move: {
           auto src_var = GetVarForReg(instr.from);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = " << src_var << ";\n";
           break;
         }
         case Opcode::Fatal: {
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "throw std::runtime_error(\"Fatal error\");\n";
           break;
         }
         case Opcode::LoadConst: {
           auto dst_var = GetVarForReg(instr.dst);
           ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBLoadConstant(" << instr.const_index << ", &" << dst_var
-                  << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBLoadConstant(" << instr.const_index << ", &" << dst_var << ");\n";
           break;
         }
         case Opcode::LoadConsti: {
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
           break;
         }
         case Opcode::Invoke: {
           auto dst_var = GetVarForReg(instr.dst);
           auto callee_name = exec_.functions[instr.func_index].name;
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = " << callee_name;
           auto it = invoke_type_vars_.find(i);
           if (it != invoke_type_vars_.end() && it->second.size() > 0) {
@@ -331,7 +361,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             stream_ << ">";
           }
           stream_ << "(";
-          for (size_t i = 0; i < instr.num_args; ++i) {
+          for (int i = 0; i < instr.num_args; ++i) {
             stream_ << GetVarForReg(instr.invoke_args_registers[i]);
             if (i < instr.num_args - 1) {
               stream_ << ",";
@@ -341,26 +371,39 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::InvokePacked: {
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
-          stream_ << "std::vector<ObjectRef> " << args_vec << " = {";
+          std::vector<std::string> flattened_args;
           for (int j = 0; j < instr.arity; ++j) {
-            stream_ << GetVarForReg(instr.packed_args[j]);
-            if (j < instr.arity - 1) {
+            if (auto tt = register_types_.at(instr.packed_args[j]).as<TupleTypeNode>()) {
+              auto tuple_var = GetVarForReg(instr.packed_args[j]);
+              for (size_t k = 0; k < tt->fields.size(); ++k) {
+                flattened_args.push_back("std::get<" + std::to_string(k) + ">(*" + tuple_var + ")");
+              }
+            } else {
+              flattened_args.push_back(GetVarForReg(instr.packed_args[j]));
+            }
+          }
+          stream_ << "std::vector<NDArray> " << args_vec << " = {";
+
+          for (size_t j = 0; j < flattened_args.size(); ++j) {
+            stream_ << flattened_args[j];
+            if (j < flattened_args.size() - 1) {
               stream_ << ", ";
             }
           }
+
           stream_ << "};\n";
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBInvokePacked(" << instr.packed_index << ", " << instr.arity
-                  << ", " << instr.output_size << ", " << args_vec << ".data(), " << instr.arity
-                  << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBInvokePacked(" << instr.packed_index << ", " << instr.arity << ", "
+                  << instr.output_size << ", " << args_vec << ".data(), " << flattened_args.size()
+                  << ");\n";
           break;
         }
         case Opcode::InvokeClosure: {
           auto dst_var = GetVarForReg(instr.dst);
           auto callee_var = GetVarForReg(instr.closure);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = " << callee_var;
           // auto it = invoke_type_vars_.find(i);
           // if (it != invoke_type_vars_.end() && it->second.size() > 0) {
@@ -375,7 +418,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           //   stream_ << ">";
           // }
           stream_ << "(";
-          for (size_t i = 0; i < instr.num_closure_args; ++i) {
+          for (int i = 0; i < instr.num_closure_args; ++i) {
             stream_ << GetVarForReg(instr.closure_args[i]);
             if (i < instr.num_closure_args - 1) {
               stream_ << ",";
@@ -383,19 +426,34 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           stream_ << ");\n";
           break;
-        }  //
+        }
         case Opcode::GetField: {
           auto object_var = GetVarForReg(instr.object);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
-          stream_ << dst_var << " = " << object_var << "->" << this->GetFieldName(instr.field_index)
-                  << ";\n";
+
+          this->PrintIndent(stream_);
+          if (register_types_.at(instr.object).as<TupleTypeNode>()) {
+            stream_ << dst_var << " = std::get<" << instr.field_index << ">(*" << object_var
+                    << ");\n";
+          } else {
+            // auto tag = get_field_tags_.at(i);
+            // auto constructor_name = ToLowerCase(mod_->LookupTag(tag)->name_hint);
+            // stream_ << dst_var << " = " << object_var << "->" << constructor_name << "."
+            //         << this->GetFieldName(instr.field_index) << ";\n";
+
+            auto tag = get_field_tags_.at(i);
+            auto constructor_name = mod_->LookupTag(tag)->name_hint;
+            stream_ << dst_var << " = static_cast<";
+            RelayTypeToCppStr(stream_, register_types_.at(instr.object), true, constructor_name);
+            stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
+                    << ";\n";
+          }
           break;
         }
         case Opcode::GetTag: {
           auto object_var = GetVarForReg(instr.object);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = " << object_var << "->tag;\n";
           break;
         }
@@ -406,7 +464,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             }
           }
           auto label = targets.at(target);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "goto " << label << ";\n";
           break;
         }
@@ -420,19 +478,19 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto test_var = GetVarForReg(instr.if_op.test);
           auto target_var = GetVarForReg(instr.if_op.target);
 
-          this->PrintIndent();
-          stream_ << "if (" << test_var << " = " << target_var << ") {\n";
+          this->PrintIndent(stream_);
+          stream_ << "if (" << test_var << " == " << target_var << ") {\n";
           this->BeginScope();
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "goto " << true_label << ";\n";
           this->EndScope();
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "} else {\n";
           this->BeginScope();
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "goto " << false_label << ";\n";
           this->EndScope();
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "}\n";
           break;
         }
@@ -442,27 +500,24 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
           std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
 
-          std::string shape_arr_name = "shape_arr" + std::to_string(tmp_var_counter++);
-          this->PrintIndent();
-          stream_ << "std::array<int64_t, " << instr.alloc_tensor.ndim << "> " << shape_arr_name
-                  << " = {";
+          std::stringstream shape_arr;
+          shape_arr << "{";
           for (size_t j = 0; j < instr.alloc_tensor.ndim; ++j) {
-            stream_ << instr.alloc_tensor.shape[j];
+            shape_arr << instr.alloc_tensor.shape[j];
             if (j < instr.alloc_tensor.ndim - 1) {
-              stream_ << ", ";
+              shape_arr << ", ";
             }
           }
-          stream_ << "};\n";
+          shape_arr << "}";
 
-          // TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t
-          // offset,
-          //                                 uint32_t ndim, int64_t* shape, DLDataType dtype,
-          //                                 tvm::runtime::NDArray* out);
+          this->PrintIndent(stream_);
+          std::string offset_var_str = offset_var;
+          if (register_types_.at(instr.alloc_tensor.offset).as<TensorTypeNode>()) {
+            offset_var_str = "NDToInt64(" + offset_var_str + ")";
+          }
+          stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str << ", "
+                  << shape_arr.str() << ", " << dtype_str << ");\n";
 
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBAllocateTensor(" << storage_var << ", " << offset_var
-                  << ", " << instr.alloc_tensor.ndim << ", " << shape_arr_name << ".data(), "
-                  << dtype_str << ", &" << dst_var << "));\n";
           break;
         }
         case Opcode::AllocTensorReg: {
@@ -472,84 +527,73 @@ class VMAOTFunctionCompiler : SourcePrinter {
           std::string dtype_str = DTypeToStr(instr.alloc_tensor_reg.dtype);
 
           std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBAllocateTensorReg(" << storage_var << ", " << offset_var
-                  << ", " << shape_var << ", " << dtype_str << ", &" << dst_var << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBAllocateTensorReg(" << storage_var << ", " << offset_var << ", "
+                  << shape_var << ", " << dtype_str << ", &" << dst_var << ");\n";
           break;
         }
         case Opcode::AllocADT: {
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           if (instr.constructor_tag == 0) {
-            stream_ << dst_var << " = allocate<std::tuple<";
-            for (size_t j = 0; j < instr.num_fields; ++j) {
+            std::stringstream types_str, args_str;
+            for (int j = 0; j < instr.num_fields; ++j) {
               ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
-              Type field_type = register_types_.at(instr.datatype_fields[j]);
-              RelayTypeToCppStr(stream_, field_type);
-              if (j < instr.num_fields - 1) {
-                stream_ << ",";
-              }
-            }
-            stream_ << ">>(";
-            for (size_t j = 0; j < instr.num_fields; ++j) {
-              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+              auto field_type = register_types_.at(instr.datatype_fields[j]);
               auto field_var = GetVarForReg(instr.datatype_fields[j]);
-              stream_ << field_var;
+              RelayTypeToCppStr(types_str, field_type);
+              args_str << field_var;
               if (j < instr.num_fields - 1) {
-                stream_ << ",";
+                args_str << ", ";
+                types_str << ", ";
               }
             }
-            stream_ << ");\n";
+
+            // stream_ << dst_var << " = Arena::Current()->make<std::tuple<";
+            // stream_ << dst_var << " = std::make_shared<std::tuple<" << types_str.str() << ">, "
+            // << types_str.str() << ">(" << args_str.str() << ");\n";
+            stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
+                    << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str() << "));\n";
           } else {
             auto constructor = mod_->LookupTag(instr.constructor_tag);
-            std::string type_name = constructor->belong_to->name_hint;
-            stream_ << dst_var << " = allocate<" << type_name;
+            auto concrete_type_without_shptr =
+                RelayTypeToCppStrString(register_types_.at(instr.dst), true);
+            auto concrete_constructor_without_shptr = RelayTypeToCppStrString(
+                register_types_.at(instr.dst), true, constructor->name_hint);
 
-            auto it = invoke_type_vars_.find(i);
-            if (it != invoke_type_vars_.end() && it->second.size() > 0) {
-              auto types = it->second;
-              stream_ << "<";
-              for (size_t j = 0; j < types.size(); ++j) {
-                RelayTypeToCppStr(stream_, types[j]);
-                if (j < types.size() - 1) {
-                  stream_ << ",";
-                }
-              }
-              stream_ << ">";
-            }
+            stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
+                    << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
 
-            stream_ << ">();\n";
-            this->PrintIndent();
+            this->PrintIndent(stream_);
             stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";
-            auto constructor_field_name = ToLowerCase(constructor->name_hint);
-            for (size_t j = 0; j < instr.num_fields; ++j) {
+            for (int j = 0; j < instr.num_fields; ++j) {
               ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
               auto field_var = GetVarForReg(instr.datatype_fields[j]);
-              this->PrintIndent();
-              stream_ << dst_var << "->" << constructor_field_name << "." << GetFieldName(j)
-                      << " = " << field_var << ";\n";
+              this->PrintIndent(stream_);
+              stream_ << "static_cast<" << concrete_constructor_without_shptr << "*>(" << dst_var
+                      << ".get())->" << GetFieldName(j) << " = " << field_var << ";\n";
             }
           }
           break;
         }
         case Opcode::AllocClosure: {
-          std::cout << "[Closure] " << exec_.functions[instr.clo_index].name << " "
-                    << exec_.functions[instr.clo_index].params.size() << " " << instr.num_freevar
-                    << std::endl;
+          // std::cout << "[Closure] " << exec_.functions[instr.clo_index].name << " "
+          // << exec_.functions[instr.clo_index].params.size() << " " << instr.num_freevar
+          // << std::endl;
           auto& closure_func = exec_.functions[instr.clo_index];
           auto closure_relay_func =
               GetCompiledRelayFunction(compiled_functions_, mod_, closure_func.name);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << dst_var << " = [";
-          for (size_t i = 0; i < instr.num_freevar; ++i) {
+          for (int i = 0; i < instr.num_freevar; ++i) {
             stream_ << GetVarForReg(instr.invoke_args_registers[i]);
             if (i < instr.num_freevar - 1) {
               stream_ << ",";
             }
           }
           stream_ << "](";
-          for (size_t j = instr.num_freevar; j < closure_func.params.size(); ++j) {
+          for (int j = instr.num_freevar; j < closure_func.params.size(); ++j) {
             Type arg_type = closure_relay_func->params[j]->checked_type_;
             RelayTypeToCppStr(stream_, arg_type);
             stream_ << " " << GetTmpVarName(j);
@@ -559,11 +603,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           stream_ << ") {\n";
           this->BeginScope();
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "return " << closure_func.name << "(";
-          size_t j = 0;
+          int j = 0;
           for (; j < instr.num_freevar; ++j) {
-            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+            stream_ << GetVarForReg(instr.invoke_args_registers[j]);
             if (j < closure_func.params.size() - 1) {
               stream_ << ", ";
             }
@@ -576,10 +620,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           stream_ << ");\n";
           this->EndScope();
-          this->PrintIndent();
-          stream_ << "}\n";
+          this->PrintIndent(stream_);
+          stream_ << "};\n";
           break;
-        }  //
+        }
         case Opcode::AllocStorage: {
           auto dst_var = GetVarForReg(instr.dst);
           auto allocation_size_var = GetVarForReg(instr.alloc_storage.allocation_size);
@@ -587,22 +631,26 @@ class VMAOTFunctionCompiler : SourcePrinter {
           std::string dtype_str = "{" + std::to_string(dtype.code) + ", " +
                                   std::to_string(dtype.bits) + ", " + std::to_string(dtype.lanes) +
                                   "}";
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBAllocateStorage(" << allocation_size_var << ", "
+          this->PrintIndent(stream_);
+          std::string allocation_size_str = allocation_size_var;
+          if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
+            allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
+          }
+          stream_ << "TVMDBAllocateStorage(" << allocation_size_str << ", "
                   << instr.alloc_storage.alignment << ", " << dtype_str << ", "
-                  << instr.alloc_storage.device_index << ", &" << dst_var << "));\n";
+                  << instr.alloc_storage.device_index << ", &" << dst_var << ");\n";
           break;
         }
         case Opcode::ShapeOf: {
           auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBShapeOf(" << tensor_var << ", &" << dst_var << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBShapeOf(" << tensor_var << ", &" << dst_var << ");\n";
           break;
         }
         case Opcode::Ret: {
           auto result_var = GetVarForReg(instr.result);
-          this->PrintIndent();
+          this->PrintIndent(stream_);
           stream_ << "return " << result_var << ";\n";
           break;
         }
@@ -610,19 +658,18 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
           auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
           auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBReshapeTensor(" << tensor_var << ", " << shape_var << ", &"
-                  << dst_var << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBReshapeTensor(" << tensor_var << ", " << shape_var << ", &" << dst_var
+                  << ");\n";
           break;
         }
         case Opcode::DeviceCopy: {
           auto src_var = GetVarForReg(instr.device_copy.src);
           auto dst_var = GetVarForReg(instr.dst);
 
-          this->PrintIndent();
-          stream_ << "TVM_API_CALL(TVMDBDeviceCopy(" << src_var << ", "
-                  << instr.device_copy.src_device_index << ", "
-                  << instr.device_copy.dst_device_index << ", &" << dst_var << "));\n";
+          this->PrintIndent(stream_);
+          stream_ << "TVMDBDeviceCopy(" << src_var << ", " << instr.device_copy.src_device_index
+                  << ", " << instr.device_copy.dst_device_index << ", &" << dst_var << ");\n";
           break;
         }
         default:
@@ -630,7 +677,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
           return;
       }
     }
-    // std::cout << "[BT] Done visiting BT" << std::endl;
   }
 
   const Executable& exec_;
@@ -640,86 +686,208 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<size_t, Type>& register_types_;
   const std::unordered_map<Index, Array<Type>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
+  const std::unordered_map<Index, int32_t>& get_field_tags_;
+  std::ostream& stream_;
 };
 
-void VMAOTCompiler::EmitHeader() {
-  const std::string api_call_check_macro =
-      "#define TVM_API_CALL(call)                               \\"
-      "  if (call != 0) {                                       \\"
-      "    throw std::runtime_error(\"API call returned error\"); \\"
-      "  }";
-  stream_ << api_call_check_macro << "\n\n";
-}
-
-void VMAOTCompiler::DeclareADT(const TypeData& adt) {
-  if (adt->type_vars.size() > 0) {
-    stream_ << "template<";
+void VMAOTCompiler::DeclareADT(std::ostream& os, const TypeData& adt, bool include_definitions) {
+  if (adt->header->name_hint == "Storage") {
+    return;
+  }
+  bool has_type_vars = (adt->type_vars.size() > 0);
+  std::stringstream type_vars_decl_stream, type_vars_list_stream;
+  std::string type_name = adt->header->name_hint;
+  std::string type_name_with_type_vars = type_name;
+  std::string type_vars_list, type_vars_decl;
+  if (has_type_vars) {
     for (size_t i = 0; i < adt->type_vars.size(); ++i) {
       auto tvar = adt->type_vars[i];
-      stream_ << "class " << tvar->name_hint;
+      type_vars_decl_stream << "class " << tvar->name_hint;
+      type_vars_list_stream << tvar->name_hint;
       if (i != adt->type_vars.size() - 1) {
-        stream_ << ", ";
+        type_vars_decl_stream << ", ";
+        type_vars_list_stream << ", ";
       }
     }
-    stream_ << ">\n";
+    type_vars_decl = type_vars_decl_stream.str();
+    type_vars_list = type_vars_list_stream.str();
+    type_name_with_type_vars += "<" + type_vars_list + ">";
   }
 
-  stream_ << "struct " << adt->header->name_hint << " {\n";
-  this->BeginScope();
-  this->PrintIndent();
-  stream_ << "int32_t tag;\n\n";
-  this->PrintIndent();
-  stream_ << "union {\n";
-  this->BeginScope();
-
-  for (auto constructor : adt->constructors) {
-    this->PrintIndent();
-    stream_ << "struct {\n";
+  // Create superclass
+  if (has_type_vars) {
+    os << "template<" << type_vars_decl << ">\n";
+  }
+  os << "class " << type_name;
+  if (include_definitions) {
+    os << " {\n";
     this->BeginScope();
-    for (size_t i = 0; i < constructor->inputs.size(); ++i) {
-      auto field = constructor->inputs[i];
-      this->PrintIndent();
-      RelayTypeToCppStr(stream_, field);
-      stream_ << " " << GetFieldName(i) << ";\n";
-    }
+    this->PrintIndent(os, -1);
+    os << "public: \n";
+    this->PrintIndent(os);
+    os << "int32_t tag;\n";
     this->EndScope();
-    this->PrintIndent();
-    stream_ << "} " << ToLowerCase(constructor->name_hint) << ";\n";
+    os << "};\n";
+  } else {
+    os << ";\n";
   }
-  this->EndScope();
-  this->PrintIndent();
-  stream_ << "};\n";
 
-  this->EndScope();
-  this->PrintIndent();
-  stream_ << "};\n\n";
+  // For each constructor, create a subclass
+  for (auto constructor : adt->constructors) {
+    std::string constructor_name = constructor->name_hint;
+    if (has_type_vars) {
+      os << "template<" << type_vars_decl << ">\n";
+    }
+
+    if (include_definitions) {
+      os << "class " << constructor_name << ": public " << type_name_with_type_vars;
+      os << " {\n";
+      this->BeginScope();
+      this->PrintIndent(os, -1);
+      os << "public: \n";
+      for (size_t i = 0; i < constructor->inputs.size(); ++i) {
+        auto field = constructor->inputs[i];
+        this->PrintIndent(os);
+        RelayTypeToCppStr(os, field);
+        os << " " << GetFieldName(i) << ";\n";
+      }
+      this->EndScope();
+      os << "};\n";
+    } else {
+      os << "class " << constructor_name << ";\n";
+    }
+  }
 }
 
-void VMAOTCompiler::GenerateMainFunction() {
-  stream_ << "int main(int argc, char *argv[]) {\n";
-  this->BeginScope();
+void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
+  auto nd_to_int64_func =
+      "int64_t NDToInt64(const NDArray& nd) {\n"
+      "  static auto int64_dtype = DataType::Int(64);\n"
+      "  DLDevice cpu_ctx{kDLCPU, 0};\n"
+      "  NDArray cpu_array = nd.CopyTo(cpu_ctx);\n"
+      "  CHECK_EQ(DataType(cpu_array->dtype), int64_dtype);\n"
+      "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
+      "}";
 
-  this->EndScope();
-  stream_ << "}\n";
+  // auto alloc_tensor_func =
+  //     "inline void AllocTensorWrapper(const Storage& storage, int64_t offset, uint32_t ndim,\n"
+  //     "                               std::vector<int64_t> shape, DLDataType dtype, NDArray* out)
+  //     "
+  //     "{\n"
+  //     "  *out = storage->AllocNDArray(offset, shape, dtype);\n"
+  //     "}";
+
+  os << nd_to_int64_func << "\n" << std::endl;
+  // os << alloc_tensor_func << "\n" << std::endl;
 }
 
-void VMAOTCompiler::GenerateCPP() {
-  for (auto var : mod_->GetGlobalTypeVars()) {
-    auto type = mod_->LookupTypeDef(var);
-    // std::cout << "[TYPES] " << var << " " << type << std::endl;
-    this->DeclareADT(type);
-  }
-  std::cout << stream_.str() << std::endl;
+void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
+  cpp_stream_ << "#include \"" << header_file_name << "\"\n\n";
+
+  EmitUtilFunctions(cpp_stream_);
+
   for (auto vm_func : exec_.functions) {
     Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
     ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
-    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
-                                            function_register_types, function_invoke_type_vars,
-                                            compiled_functions_);
-    function_compiler.GenerateCPPForFunction();
+    auto function_get_field_tags = get_field_tags_.at(vm_func.name);
+    VMAOTFunctionCompiler function_compiler(
+        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
+        compiled_functions_, function_get_field_tags, cpp_stream_);
+    function_compiler.GenerateCPPForFunction(true);
+    cpp_stream_ << "\n";
   }
+}
+
+void VMAOTCompiler::EmitMacros(std::ostream& os) {
+  // const std::string api_call_check_macro =
+  //     "#define TVM_API_CALL(call)                               \\\n"
+  //     "  if (call != 0) {                                       \\\n"
+  //     "    throw std::runtime_error(\"API call returned error\"); \\\n"
+  //     "  }";
+  // os << api_call_check_macro << "\n\n";
+}
+
+void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
+  os << "#include <dlpack/dlpack.h>\n";
+  os << "#include <tvm/runtime/db_runtime_api.h>\n";
+  os << "#include <tvm/runtime/vm/arena.h>\n";
+  os << "#include <stdexcept>\n";
+  os << "#include <vector>\n";
+  os << "#include <functional>\n";
+  os << "#include <array>\n\n";
+
+  os << "using namespace tvm::runtime;\n";
+  os << "using namespace tvm::runtime::vm;\n";
+}
+
+void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
+  // Header guard
+  hpp_stream_ << "#ifndef TVM_RELAY_BACKEND_VM_AOT_COMPILER_H_\n";
+  hpp_stream_ << "#define TVM_RELAY_BACKEND_VM_AOT_COMPILER_H_\n";
+
+  // Add includes
+  this->EmitHeaderIncludes(hpp_stream_);
+
+  hpp_stream_ << "\n\n";
+
+  // Add MACRO definitions
+  this->EmitMacros(hpp_stream_);
+
+  // Forward declare all ADTs first
+  for (auto var : mod_->GetGlobalTypeVars()) {
+    this->DeclareADT(hpp_stream_, mod_->LookupTypeDef(var), false);
+  }
+
+  hpp_stream_ << "\n\n";
+
+  // Then add definations for all ADTs
+  for (auto var : mod_->GetGlobalTypeVars()) {
+    this->DeclareADT(hpp_stream_, mod_->LookupTypeDef(var), true);
+  }
+
+  // Declare all the functions
+  for (auto vm_func : exec_.functions) {
+    Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
+    ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
+    auto function_register_types = register_types_.at(vm_func.name);
+    auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
+    auto function_get_field_tags = get_field_tags_.at(vm_func.name);
+    VMAOTFunctionCompiler function_compiler(
+        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
+        compiled_functions_, function_get_field_tags, hpp_stream_);
+    function_compiler.GenerateCPPForFunction(false);
+  }
+
+  // Header guard
+  hpp_stream_ << "#endif\n";
+}
+
+void VMAOTCompiler::Codegen(std::string model_name) {
+  std::string header_file_name = model_name + "_src.hpp";
+  std::string cpp_file_name = model_name + "_src.cpp";
+  GenerateCppFile(header_file_name);
+  GenerateHeaderFile(header_file_name);
+
+  // std::cout << "HEADER HEADER HEADER HEADER HEADER" << std::endl;
+  // std::cout << hpp_stream_.str() << "\n\n" << std::endl;
+  // std::cout << "SOURCE SOURCE SOURCE SOURCE SOURCE" << std::endl;
+  // std::cout << cpp_stream_.str() << "\n\n" << std::endl;
+
+  std::ofstream hpp_file_stream, cpp_file_stream;
+  hpp_file_stream.open(output_directory_ + "/" + header_file_name);
+  cpp_file_stream.open(output_directory_ + "/" + cpp_file_name);
+
+  hpp_file_stream << hpp_stream_.str();
+  cpp_file_stream << cpp_stream_.str();
+
+  hpp_file_stream.close();
+  cpp_file_stream.close();
+
+  std::cout << "[AOT] Created files" << std::endl;
+  std::cout << "[AOT]  " << output_directory_ + "/" + header_file_name << std::endl;
+  std::cout << "[AOT]  " << output_directory_ + "/" + cpp_file_name << std::endl;
 }
 
 }  // namespace vm

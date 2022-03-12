@@ -19,6 +19,8 @@ batched_execution=False
 scattered_kernels=False
 concurrent_execution=False
 use_autoscheduler=False
+aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+model_name="treelstm"
 dynamic_batch_size_estimate=64
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
@@ -43,6 +45,8 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     use_autoscheduler=use_autoscheduler,
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
     batch_size=batch_size,
+    aot_output_directory=aot_output_directory,
+    model_name=model_name,
     opt_level=3)
 
 def get_ansor_log_file(model_name, parameters, pass_context, target):
@@ -95,19 +99,23 @@ def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
         with pass_context:
             executor = relay.backend.vm.VMExecutor(mod, device, target)
-            fin_executor = executor._make_executor(execution_options=execution_options)
+            executable = executor.compile()
+            executable.save_to_file(aot_output_directory + "/treelstm.ro",
+                                    aot_output_directory + "/treelstm_lib.so")
+            exit(0)
+            # fin_executor = executor._make_executor(execution_options=execution_options)
+            # params_list = []
+            # if use_autoscheduler:
+                # for tree in trees: params_list += [tree]
+            # else:
+                # for tree in trees: params_list += weights_list + [tree]
 
-            params_list = []
-            if use_autoscheduler:
-                for tree in trees: params_list += [tree]
-            else:
-                for tree in trees: params_list += weights_list + [tree]
+            # executor.vm.set_input("main", batch_size, *params_list)
 
-            executor.vm.set_input("main", batch_size, *params_list)
-
-            # fin_executor()
-            iters = 20
-            print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
+            fin_executor()
+            # iters = 20
+            # timeit.timeit(fin_executor, number=iters)
+            # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 # auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)

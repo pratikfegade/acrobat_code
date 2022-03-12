@@ -165,10 +165,11 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
   return result;
 }
 
-void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
-                            const std::vector<NDArray>& args) {
-  // std::cout << "[UMA] Executing" << std::endl;
-  size_t arity = arg_count;
+// void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
+// const std::vector<NDArray>& args) {
+void InvokePackedFnUnrolled(const PackedFunc& func, Index output_size, const NDArray* args,
+                            int num_args) {
+  size_t arity = num_args;
 
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
@@ -178,6 +179,7 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index arg_count, Index outpu
   }
 
   TVMRetValue rv;
+  // std::cout << "[UMA] Executing " << arity << std::endl;
   func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
 }
 
@@ -269,7 +271,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
 }
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
-                    const std::vector<ObjectRef>& args,
+                    const ObjectRef* args, int64_t num_args,
                     const std::vector<DBBatchedArgMode>& arg_modes, bool batched,
                     bool scattered_kernels) {
   size_t arity = 0;
@@ -313,7 +315,7 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
 
   if (!is_empty_output) {
     TVMRetValue rv;
-    // std::cout << "[VMU] Calling " << arity << std::endl;
+    std::cout << "[VMU] Calling " << arity << std::endl;
     func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
   }
 }

@@ -41,6 +41,8 @@ def create_workflow_configs(lazy_execution=False,
                             use_autoscheduler=True,
                             batch_size=1,
                             dynamic_batch_size_estimate=64,
+                            aot_output_directory="",
+                            model_name="model",
                             opt_level=3):
     config = {
         "relay.db_coarsen_granularity": coarsened_execution,
@@ -50,6 +52,8 @@ def create_workflow_configs(lazy_execution=False,
         "relay.db_concurrent_execution": concurrent_execution,
         "relay.db_dynamic_batch_size_estimate": dynamic_batch_size_estimate,
         "relay.backend.use_auto_scheduler": use_autoscheduler,
+        "relay.db_aot_output_directory": aot_output_directory,
+        "relay.db_model_name": model_name,
    }
     execution_options = tvm.runtime.vm.create_vm_execution_options(
         coarsened_execution=coarsened_execution,
@@ -382,4 +386,9 @@ class VMExecutor(Executor):
             args = self._convert_args(self.mod["main"], args, kwargs)
             return self.vm.run(*args)
 
-        return _vm_wrapper
+    def compile(self, expr=None):
+        if expr:
+            self.mod["main"] = expr
+
+        self.executable = compile(self.mod, self.target)
+        return self.executable

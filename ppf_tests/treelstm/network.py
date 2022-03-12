@@ -106,7 +106,10 @@ class Network:
             inputs = [copy_var(v) for v in self.inputs]
             body = relay.Let(self.recurse, relay.Function(inputs, self.call_from_outside(self, *inputs)), body)
         weights = [self.get_replacement_weight(weight) for weight in self.all_weights()]
-        attr_dict = {"model_parameters": [1] * len(weights) + [0] * len(self.inputs)}
+        attr_dict = {
+            "model_parameters": [1] * len(weights) + [0] * len(self.inputs),
+            # "Inline": (0 if self.use_recurse else 1)
+        }
         attrs = ir.make_node("DictAttrs", **attr_dict)
         self.mod[self.f] = relay.Function(weights + self.inputs, body, self.ret_type, attrs=attrs)
 

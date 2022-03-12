@@ -169,6 +169,12 @@ class Executable(object):
         """
         return self._save(), self._get_lib()
 
+    def save_to_file(self, code_path, lib_path):
+        code, lib = self.save()
+        lib.export_library(lib_path)
+        with open(code_path, "wb") as fo:
+            fo.write(code)
+
     @staticmethod
     def load_exec(bytecode, lib):
         """Construct an executable from saved artifacts.
@@ -201,6 +207,12 @@ class Executable(object):
             )
 
         return Executable(_ffi_api.Load_Executable(bytecode, lib))
+
+    @staticmethod
+    def load_exec_from_file(code_path, lib_path):
+        lib = tvm.runtime.load_module(lib_path)
+        code = bytearray(open(code_path, "rb").read())
+        return load_exec(code, lib)
 
     @property
     def lib(self):

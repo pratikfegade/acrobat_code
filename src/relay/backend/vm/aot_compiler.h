@@ -61,9 +61,9 @@ class SourcePrinter {
 
   inline void EndScope() { indent_ -= 2; }
 
-  inline void PrintIndent(int offset = 0) {
+  inline void PrintIndent(std::ostream& stream, int offset = 0) {
     for (int i = 0; i < indent_ + offset; ++i) {
-      this->stream_ << ' ';
+      stream << ' ';
     }
   }
 
@@ -74,36 +74,50 @@ class SourcePrinter {
   inline std::string GetTmpVarName(size_t index) { return "tmp_" + std::to_string(index); }
 
   int indent_ = 0;
-  std::stringstream stream_;
 };
 
 class VMAOTCompiler : SourcePrinter {
  public:
   VMAOTCompiler(
       const Executable& exec, const IRModule& mod,
-      std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types,
-      std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars,
-      std::unordered_map<std::string, Function> compiled_functions)
+      const std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types,
+      const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>&
+          invoke_type_vars,
+      const std::unordered_map<std::string, Function>& compiled_functions,
+      const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags,
+      const std::string& output_directory)
       : exec_(exec),
         mod_(mod),
         register_types_(register_types),
         invoke_type_vars_(invoke_type_vars),
-        compiled_functions_(compiled_functions) {}
+        compiled_functions_(compiled_functions),
+        get_field_tags_(get_field_tags),
+        output_directory_(output_directory) {}
 
-  void GenerateCPP();
+  void Codegen(std::string model_name);
 
  private:
-  void DeclareADT(const TypeData& adt);
+  void DeclareADT(std::ostream& os, const TypeData& adt, bool include_definitions);
 
-  void EmitHeader();
+  void EmitUtilFunctions(std::ostream& os);
 
-  void GenerateMainFunction();
+  void GenerateCppFile(std::string header_file_name);
+
+  void EmitMacros(std::ostream& os);
+
+  void EmitHeaderIncludes(std::ostream& os);
+
+  void GenerateHeaderFile(std::string header_file_name);
 
   const Executable& exec_;
   const IRModule& mod_;
   const std::unordered_map<std::string, std::unordered_map<size_t, Type>>& register_types_;
   const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
+  const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags_;
+  const std::string& output_directory_;
+  std::stringstream hpp_stream_;
+  std::stringstream cpp_stream_;
 };
 
 }  // namespace vm

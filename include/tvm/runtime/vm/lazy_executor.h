@@ -78,8 +78,10 @@ class OpNode {
 class LazyExecutor {
  public:
   void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
-                     const std::vector<ObjectRef> args);
+                     const ObjectRef* args, int num_args);
 
+  void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, const Index output_size,
+                             const NDArray* args, int num_args);
   void Execute();
 
   void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);

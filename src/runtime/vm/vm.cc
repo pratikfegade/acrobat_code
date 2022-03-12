@@ -392,16 +392,17 @@ ObjectRef VirtualMachine::Invoke(const std::string& name, const std::vector<Obje
 void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index output_size,
                                   const std::vector<ObjectRef>& args, bool batched) {
   if (concurrent_execution_ || lazy_execution_) {
-    shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
+    shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args.data(),
+                                                args.size());
   } else {
     if (batched) {
-      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args,
-                     shared_state_->batched_func_arg_mode_[packed_index], batched,
-                     this->scattered_kernels_);
+      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size,
+                     args.data(), args.size(), shared_state_->batched_func_arg_mode_[packed_index],
+                     batched, this->scattered_kernels_);
     } else {
       // std::cout << "[VM] Executing " << packed_index << std::endl;
-      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args, {},
-                     batched, this->scattered_kernels_);
+      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size,
+                     args.data(), args.size(), {}, batched, this->scattered_kernels_);
     }
   }
 }

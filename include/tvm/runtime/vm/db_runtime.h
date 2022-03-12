@@ -118,7 +118,7 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \param num_args number of arguments
    */
   void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
-                    const ObjectRef* args, const int64_t num_args);
+                    const tvm::runtime::NDArray* args, int64_t num_args);
 
   /*!
    * \brief Allocate a memory storage object.
@@ -185,25 +185,6 @@ class DynBatchRuntime : public runtime::ModuleNode {
   NDArray ShapeOf(const NDArray& input_array);
 
   /*!
-   * \brief Get the current instance of the runtime.
-   */
-  static ObjectPtr<DynBatchRuntime> Current();
-
- protected:
-  /*!
-   * \brief Invoke a PackedFunction
-   *
-   * \param packed_index The offset of the PackedFunction in all functions.
-   * \param arg_count The number of arguments to the PackedFunction.
-   * \param output_size The number of outputs of the PackedFunction.
-   * \param args Arguments to the PackedFunction.
-   *
-   * \note The return value will be stored in the last output_size slots of args.
-   */
-  void InvokePacked(Index packed_index, Index arg_count, Index output_size,
-                    const std::vector<ObjectRef>& args, bool batched = false);
-
-  /*!
    * \brief Initialize the virtual machine for a set of (physical) devices.
    * \param physical_devices The set of TVM devices.
    * \param alloc_types The allocator types for each device.
@@ -211,6 +192,12 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void Init(const std::vector<Device>& physical_devices,
             const std::vector<AllocatorType>& alloc_types);
 
+  /*!
+   * \brief Get the current instance of the runtime.
+   */
+  static ObjectPtr<DynBatchRuntime> Current();
+
+ protected:
   /*! \brief Get device from the device list based on a given device index. */
   Device GetDevice(Index device_index) const;
   Allocator* GetAllocator(Index device_index) const;
@@ -277,6 +264,10 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \brief Current instance of the runtime
    */
   static ObjectPtr<DynBatchRuntime> current_;
+  /*!
+   * \brief Current instance of the runtime
+   */
+  static ObjectRef current_ref_;
 };
 
 }  // namespace vm

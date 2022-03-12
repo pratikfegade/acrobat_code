@@ -45,7 +45,7 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
-                                 const Index output_size, const std::vector<ObjectRef> args) {
+                                 const Index output_size, const ObjectRef* args, int num_args) {
   std::vector<NDArray> args_copy;
   bool is_empty_output = false;
 
@@ -105,10 +105,49 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
   nodes_.push_back(node);
 }
 
+void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
+                                         const Index output_size, const NDArray* args,
+                                         int num_args) {
+  std::vector<NDArray> args_copy;
+  bool is_empty_output = false;
+
+  Index rolled_output_size = output_size;
+  Index rolled_input_size = arg_count - rolled_output_size;
+  Index unrolled_input_size = 0;
+  Index unrolled_output_size = 0;
+  for (Index i = 0; i < num_args; i++) {
+    auto nd_array = args[i];
+    // We can safely skip CallPacked if there is only one
+    // output and it is empty.
+    if (i == arg_count - 1 && output_size == 1) {
+      for (const auto& dim : nd_array.Shape()) {
+        if (!dim) {
+          is_empty_output = true;
+          break;
+        }
+      }
+    }
+    args_copy.push_back(nd_array);
+    if (i < rolled_input_size) {
+      unrolled_input_size++;
+    } else {
+      unrolled_output_size++;
+    }
+  }
+
+  if (is_empty_output) {
+    return;
+  }
+
+  OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
+              unrolled_output_size, args_copy);
+  nodes_.push_back(node);
+}
+
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
-    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
-                           node.output_size_, node.args_);
+    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
+                           node.args_.data(), node.args_.size());
   }
   nodes_.clear();
 }
@@ -129,8 +168,8 @@ void LazyExecutor::ExecuteOpNodeBatch(
     // std::cout << "[VMU]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
     if (func_nodes.size() == 1) {
       // std::cout << "[VMU] Executing " << func_idx << " " << func_nodes.size() << std::endl;
-      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->arg_count_,
-                             func_nodes[0]->output_size_, func_nodes[0]->args_);
+      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->output_size_,
+                             func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
     } else {
       auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
       // std::cout << "[VMU] Executing " << batched_func_idx << " " << func_nodes.size() <<
@@ -156,8 +195,8 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
     // vm_shared_state_->packed_funcs_[batched_func_idx], node.arg_count_, node.output_size_,
     // vm_shared_state_->batched_func_arg_mode_[batched_func_idx], {&node});
 
-    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.arg_count_,
-                           node.output_size_, node.args_);
+    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
+                           node.args_.data(), node.args_.size());
   }
   nodes_.clear();
   return;

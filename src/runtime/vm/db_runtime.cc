@@ -45,10 +45,12 @@ namespace runtime {
 namespace vm {
 
 ObjectPtr<DynBatchRuntime> DynBatchRuntime::current_;
+ObjectRef DynBatchRuntime::current_ref_;
 
 ObjectPtr<DynBatchRuntime> DynBatchRuntime::Current() {
   if (current_ == nullptr) {
     current_ = make_object<DynBatchRuntime>();
+    current_ref_ = ObjectRef(current_);
   };
   return current_;
 }
@@ -70,20 +72,13 @@ NDArray DynBatchRuntime::LoadConstant(int64_t const_index) {
 }
 
 void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
-                                   const ObjectRef* args, const int64_t num_args) {
-  // if (concurrent_execution_ || lazy_execution_) {
-  //   shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
-  // } else {
-  //   if (batched_execution_ && (shared_state_->batched_funcs_[packed_index] >= 0)) {
-  //     InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args,
-  //                    shared_state_->batched_func_arg_mode_[packed_index], batched,
-  //                    this->scattered_kernels_);
-  //   } else {
-  //     InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args,
-  //     {},
-  //                    batched, this->scattered_kernels_);
-  //   }
-  // }
+                                   const tvm::runtime::NDArray* args, int64_t num_args) {
+  if (concurrent_execution_ || lazy_execution_) {
+    shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
+                                                        num_args);
+  } else {
+    InvokePackedFnUnrolled(shared_state_->packed_funcs_[packed_index], output_size, args, num_args);
+  }
 }
 
 Storage DynBatchRuntime::AllocateStorage(int64_t size, int64_t alignment, DLDataType dtype,
@@ -287,51 +282,21 @@ inline Allocator* DynBatchRuntime::GetAllocator(Index device_index) const {
   return shared_state_->allocators_[device_index];
 }
 
-void DynBatchRuntime::InvokePacked(Index packed_index, Index arg_count, Index output_size,
-                                   const std::vector<ObjectRef>& args, bool batched) {
-  if (concurrent_execution_ || lazy_execution_) {
-    shared_state_->lazy_executor_.AddPackedCall(packed_index, arg_count, output_size, args);
-  } else {
-    if (batched) {
-      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args,
-                     shared_state_->batched_func_arg_mode_[packed_index], batched,
-                     this->scattered_kernels_);
-    } else {
-      // std::cout << "[VM] Executing " << packed_index << std::endl;
-      InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size, args, {},
-                     batched, this->scattered_kernels_);
-    }
-  }
-}
-
 void DynBatchRuntime::LoadExecutable(Executable* exec) {
-  std::cout << "HL 2.1" << std::endl;
-
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
       << "Need to load late-bound-constants before creating VM";
 
-  std::cout << "HL 2.1.1" << std::endl;
-
   shared_state_->exec_ = exec;
 
-  std::cout << "HL 2.1.2" << std::endl;
-
   runtime::Module lib = shared_state_->exec_->GetLib();
-
-  std::cout << "HL 2.1.3" << std::endl;
 
   ICHECK(exec->primitive_map.empty() || lib.operator->())
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
-  std::cout << "HL 2.1.4 " << this->shared_state_ << " " << shared_state_->exec_ << std::endl;
-
   this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
-  std::cout << "HL 2.1.5" << std::endl;
   this->shared_state_->prim_func_arg_access_mode_ = shared_state_->exec_->prim_func_arg_access_mode;
-
-  std::cout << "HL 2.2" << std::endl;
 
   for (const auto& it : shared_state_->exec_->primitive_map) {
     const auto& packed_name = it.first;
@@ -385,7 +350,6 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
   //     std::cout << "[VM] NoBody1 " << name << std::endl;
   //   }
   // }
-  std::cout << "HL 2.5" << std::endl;
 
   for (size_t i = 0; i < shared_state_->packed_funcs_.size(); ++i) {
     ICHECK(shared_state_->packed_funcs_[i] != nullptr)

@@ -67,6 +67,8 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_scattered_kernels", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_concurrent_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_dynamic_batch_size_estimate", Integer);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_aot_output_directory", String);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_model_name", String);
 
 namespace relay {
 
@@ -125,13 +127,15 @@ struct RegisterValue : MatchValue {
 // The value is a field of another runtime object
 struct AccessField : MatchValue {
   MatchValuePtr parent;
+  // Tag of the constructor the field is associated with
+  int32_t tag;
   // Field index
   size_t index;
   // Runtime register num after compiling the access field path
   RegName reg{-1};
 
-  AccessField(MatchValuePtr parent, size_t index, Type type)
-      : MatchValue(type), parent(parent), index(index) {}
+  AccessField(MatchValuePtr parent, int32_t tag, size_t index, Type type)
+      : MatchValue(type), parent(parent), tag(tag), index(index) {}
 
   ~AccessField() {}
 };
@@ -229,7 +233,7 @@ TreeObjectPtr BuildDecisionTreeFromPattern(MatchValuePtr data, Pattern pattern,
     size_t field_index = 0;
     for (auto& p : pcn->patterns) {
       auto d = std::make_shared<AccessField>(
-          data, field_index, GetFieldType(data->type, field_index, module, pcn->constructor));
+          data, tag, field_index, GetFieldType(data->type, field_index, module, pcn->constructor));
       then_branch = BuildDecisionTreeFromPattern(d, p, then_branch, else_branch, module);
       field_index++;
     }
@@ -241,7 +245,7 @@ TreeObjectPtr BuildDecisionTreeFromPattern(MatchValuePtr data, Pattern pattern,
     ICHECK(pt) << "unhandled case: " << AsText(pattern, false);
     size_t field_index = 0;
     for (auto& p : pt->patterns) {
-      auto d = std::make_shared<AccessField>(data, field_index,
+      auto d = std::make_shared<AccessField>(data, 0, field_index,
                                              GetFieldType(data->type, field_index++, module));
       then_branch = BuildDecisionTreeFromPattern(d, p, then_branch, else_branch, module);
     }
@@ -317,7 +321,15 @@ struct VMFunctionCompilerResult {
   VMFunction vm_func;
   std::unordered_map<size_t, Type> register_types;
   std::unordered_map<Index, Array<Type>> invoke_type_vars;
+  std::unordered_map<Index, int32_t> get_field_tags;
 };
+
+int64_t NDToInt64(const NDArray& nd) {
+  DLDevice cpu_ctx{kDLCPU, 0};
+  NDArray cpu_array = nd.CopyTo(cpu_ctx);
+  CHECK_EQ(DataType(cpu_array->dtype), DataType::Int(64));
+  return reinterpret_cast<int64_t*>(cpu_array->data)[0];
+}
 
 class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
  public:
@@ -383,10 +395,11 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       }
       VisitExpr(func);
     }
+    std::cout << RemoveOnDeviceCalls(compiled_function) << std::endl;
     return {compiled_function,
             VMFunction(var->name_hint, params_, instructions_, registers_num_,
                        std::move(param_device_indexes)),
-            register_types_, invoke_type_vars_};
+            register_types_, invoke_type_vars_, get_field_tags_};
   }
 
   /*! \brief Attrs objects for each op. */
@@ -496,10 +509,21 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     Index device_index = GetDeviceIndex(GetSEScope(con));
     VLOG(2) << "constant[" << const_index << "] on device[" << device_index << "]";
     context_->const_device_indexes.push_back(device_index);
-    context_->constants.push_back(const_node->data);
+    auto const_ndarr = const_node->data;
+    context_->constants.push_back(const_ndarr);
     auto new_register = NewRegister();
-    Emit(Instruction::LoadConst(const_index, new_register));
-    AddRegisterTypeInfo(new_register, const_node->checked_type_);
+
+    std::cout << "[COM] Encountered constant " << const_ndarr << std::endl;
+    std::cout << "[COM]   " << const_ndarr.Shape().size() << " " << const_ndarr.DataType()
+              << std::endl;
+    if (const_ndarr.Shape().size() == 0 && const_ndarr.DataType() == DataType::Int(64)) {
+      auto const_int = NDToInt64(const_ndarr);
+      Emit(Instruction::LoadConsti(const_int, new_register));
+      AddRegisterTypeInfo(new_register, PrimType(const_ndarr.DataType()));
+    } else {
+      Emit(Instruction::LoadConst(const_index, new_register));
+      AddRegisterTypeInfo(new_register, const_node->checked_type_);
+    }
   }
 
   void VisitExpr_(const VarNode* var_node) final {
@@ -845,13 +869,13 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       if (IsClosure(func)) {
         auto arity = func->params.size();
         Emit(Instruction::AllocClosure(it->second, arity, args_registers, new_register));
-        AddRegisterTypeInfo(new_register, func->checked_type_);
+        AddRegisterTypeInfo(new_register, call_node->checked_type_);
       } else {
         auto invoke_pc = Emit(Instruction::Invoke(it->second, args_registers, new_register));
         if (generate_aot_information_) {
           invoke_type_vars_[invoke_pc] = call_node->type_args;
         }
-        AddRegisterTypeInfo(new_register, func->ret_type);
+        AddRegisterTypeInfo(new_register, call_node->checked_type_);
       }
     } else if (const auto* constructor_node = call_node->op.as<ConstructorNode>()) {
       // In the constructor case, we simply need to find its tag
@@ -863,7 +887,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       if (generate_aot_information_) {
         invoke_type_vars_[invoke_pc] = call_node->type_args;
       }
-      AddRegisterTypeInfo(new_register, context_->module->LookupTypeDef(constructor->belong_to));
+      AddRegisterTypeInfo(new_register, call_node->checked_type_);
     } else if (const auto* var_node = call_node->op.as<VarNode>()) {
       // If we are calling a variable, it must be the case that it is a closure so we
       // emit invoke closure here.
@@ -927,7 +951,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       auto path = std::dynamic_pointer_cast<AccessField>(val);
       auto p = CompileMatchValue(path->parent);
       auto field_register = NewRegister();
-      Emit(Instruction::GetField(p, path->index, field_register));
+      auto get_field_pc = Emit(Instruction::GetField(p, path->index, field_register));
+      if (generate_aot_information_) {
+        get_field_tags_[get_field_pc] = path->tag;
+      }
       AddRegisterTypeInfo(field_register, path->type);
       path->reg = last_register_;
       return path->reg;
@@ -1013,6 +1040,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   std::unordered_map<size_t, Type> register_types_;
   /*! \brief Type var information for calls, used in AOT code generation. */
   std::unordered_map<Index, Array<Type>> invoke_type_vars_;
+  /*! \brief Tag information for GetField, used in AOT code generation. */
+  std::unordered_map<Index, int32_t> get_field_tags_;
 };
 
 PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
@@ -1090,6 +1119,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   std::unordered_map<std::string, std::unordered_map<size_t, Type>> register_types;
   std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars;
   std::unordered_map<std::string, Function> compiled_functions;
+  std::unordered_map<std::string, std::unordered_map<Index, int32_t>> get_field_tags;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -1106,17 +1136,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       register_types[vm_func.name] = func_register_types;
       invoke_type_vars[vm_func.name] = func_invoke_type_vars;
       compiled_functions[vm_func.name] = result.compiled_function;
-      // std::cout << "[REG_TYPES] " << vm_func.name << " " << func_register_types.size() <<
-      // std::endl;
-
-      // for (auto instr : vm_func.instructions) {
-      //   std::cout << "[ISNTR] " << instr << std::endl;
-      // }
-
-      // for (auto kv : func_register_types) {
-      //   std::cout << "[TYPES] " << kv.first << " " << kv.second << std::endl;
-      // }
-      // std::cout << std::endl;
+      get_field_tags[vm_func.name] = result.get_field_tags;
 
       size_t func_index = context_.global_map.at(gvar);
       ICHECK(func_index < exec_->functions.size());
@@ -1234,10 +1254,15 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     backend::UpdateAutoSchedulerOpWeights(context_.module);
   }
 
-  std::cout << exec_->GetBytecode() << std::endl;
-  VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions)
-      .GenerateCPP();
-  exit(0);
+  auto output_directory = PassContext::Current()
+                              ->GetConfig<String>("relay.db_aot_output_directory", String("./"))
+                              .value();
+  auto model_name = PassContext::Current()
+                        ->GetConfig<String>("relay.db_model_name", String("model_name"))
+                        .value();
+  VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
+                get_field_tags, output_directory)
+      .Codegen(model_name);
 }
 
 transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
@@ -1348,9 +1373,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   Array<Pass> pass_seqs = relay::backend::GetPassPrefix(
       /*is_homogenous=*/config_->optional_homogeneous_target.defined(), /*is_vm=*/true);
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Beginning", true, true));
-
-  // Always plan devices so the remaining passes don't need to distinguish homogeneous vs
+  // pass_seqs.push_back(transform::PrintCurrentIR("Beginning", true, true));// Always plan devices
+  // so the remaining passes don't need to distinguish homogeneous vs
   // hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
   // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
@@ -1393,7 +1417,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1408,6 +1431,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // pass. This is because memory allocation pass will insert `invoke_tvm_op`
   // and we use these ops to invoke the symbols in the module generated by
   // external codegen.
+  // pass_seqs.push_back(transform::PrintCurrentIR("Inline", true, false));
   pass_seqs.push_back(transform::Inline());
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
@@ -1419,7 +1443,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
   pass_seqs.push_back(transform::InferType());
 

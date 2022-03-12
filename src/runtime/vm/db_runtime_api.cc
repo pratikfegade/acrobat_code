@@ -45,76 +45,51 @@ using namespace tvm::runtime::vm;
 #ifdef __cplusplus
 extern "C" {
 #endif
-int TVMDBCallTest1() {
-  std::cout << "[DB_API] Test function 1 called" << std::endl;
-  return 0;
-}
 
-int TVMDBCallTest2() {
-  std::cout << "[DB_API] Test function 2 called" << std::endl;
-  return 1;
-}
-
-int TVMLoadConstant(int64_t const_index, NDArray* out) {
-  API_BEGIN();
+void TVMDBLoadConstant(int64_t const_index, NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->LoadConstant(const_index);
-  API_END();
 }
 
-int TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size,
-                      const ObjectRef* args, const int64_t num_args) {
-  API_BEGIN();
+void TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size,
+                       const tvm::runtime::NDArray* args, int64_t num_args) {
   auto db_runtime = DynBatchRuntime::Current();
   db_runtime->InvokePacked(packed_index, arity, output_size, args, num_args);
-  API_END();
 }
 
-int TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLDataType dtype,
-                         int64_t device_index, Storage* out) {
-  API_BEGIN();
+void TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLDataType dtype,
+                          int64_t device_index, Storage* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->AllocateStorage(allocation_size, alignment, dtype, device_index);
-  API_END();
 }
 
-int TVMDBAllocateTensor(const Storage& storage, int64_t offset, uint32_t ndim, int64_t* shape,
-                        DLDataType dtype, NDArray* out) {
-  API_BEGIN();
+void TVMDBAllocateTensor(const Storage& storage, int64_t offset, uint32_t ndim, int64_t* shape,
+                         DLDataType dtype, NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->AllocTensor(storage, offset, ndim, shape, dtype);
-  API_END();
 }
 
-int TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int64_t offset,
-                           tvm::runtime::NDArray shape, DLDataType dtype,
-                           tvm::runtime::NDArray* out) {
-  API_BEGIN();
+void TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int64_t offset,
+                            tvm::runtime::NDArray shape, DLDataType dtype,
+                            tvm::runtime::NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->AllocTensorReg(storage, offset, shape, dtype);
-  API_END();
 }
 
-int TVMDBDeviceCopy(const NDArray& src_data, const int64_t src_device_index,
-                    const int64_t dst_device_index, NDArray* out) {
-  API_BEGIN();
+void TVMDBDeviceCopy(const NDArray& src_data, const int64_t src_device_index,
+                     const int64_t dst_device_index, NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->DeviceCopy(src_data, src_device_index, dst_device_index);
-  API_END();
 }
 
-int TVMDBReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor, NDArray* out) {
-  API_BEGIN();
+void TVMDBReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor, NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->ReshapeTensor(tensor_arr, shape_tensor);
-  API_END();
 }
 
-int TVMDBShapeOf(const NDArray& input_array, NDArray* out) {
-  API_BEGIN();
+void TVMDBShapeOf(const NDArray& input_array, NDArray* out) {
   auto db_runtime = DynBatchRuntime::Current();
   *out = db_runtime->ShapeOf(input_array);
-  API_END();
 }
 
 #ifdef __cplusplus
