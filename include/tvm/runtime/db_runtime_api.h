@@ -58,7 +58,7 @@ extern "C" {
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBLoadConstant(int64_t const_index, tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBLoadConstant(int64_t const_index, tvm::runtime::NDArray* out);
 
 /*!
  * \brief Invoke a packed function.
@@ -70,8 +70,8 @@ TVM_DLL int TVMDBLoadConstant(int64_t const_index, tvm::runtime::NDArray* out);
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size,
-                              const tvm::runtime::NDArray* args, int64_t num_args);
+TVM_DLL void TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size,
+                               const tvm::runtime::NDArray* args, int64_t num_args);
 
 /*!
  * \brief Allocate a memory storage object.
@@ -83,8 +83,12 @@ TVM_DLL int TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t outpu
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLDataType dtype,
-                                 int64_t device_index, tvm::runtime::vm::Storage* out);
+/* TVM_DLL void TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLDataType dtype,
+ */
+/* int64_t device_index, tvm::runtime::vm::Storage* out); */
+
+TVM_DLL tvm::runtime::vm::Storage TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment,
+                                                       DLDataType dtype, int64_t device_index);
 
 /*!
  * \brief Allocate a tensor.
@@ -97,9 +101,9 @@ TVM_DLL int TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLD
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t offset,
-                                uint32_t ndim, int64_t* shape, DLDataType dtype,
-                                tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_t offset,
+                                 uint32_t ndim, int64_t* shape, DLDataType dtype,
+                                 tvm::runtime::NDArray* out);
 
 /*!
  * \brief Allocate a tensor.
@@ -111,9 +115,9 @@ TVM_DLL int TVMDBAllocateTensor(const tvm::runtime::vm::Storage& storage, int64_
  *
  * \return 0 when success, nonzero when failure happens
  */
-TVM_DLL int TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int64_t offset,
-                                   tvm::runtime::NDArray shape, DLDataType dtype,
-                                   tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int64_t offset,
+                                    tvm::runtime::NDArray shape, DLDataType dtype,
+                                    tvm::runtime::NDArray* out);
 
 /*!
  * \brief Copy a tensor between devices.
@@ -122,8 +126,8 @@ TVM_DLL int TVMDBAllocateTensorReg(const tvm::runtime::vm::Storage& storage, int
  * \param dst_device_index The index of the destination device
  * \param out The copied tensor object
  */
-TVM_DLL int TVMDBDeviceCopy(const tvm::runtime::NDArray& src_data, const int64_t src_device_index,
-                            const int64_t dst_device_index, tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBDeviceCopy(const tvm::runtime::NDArray& src_data, const int64_t src_device_index,
+                             const int64_t dst_device_index, tvm::runtime::NDArray* out);
 
 /*!
  * \brief Rehape a tensor.
@@ -131,16 +135,16 @@ TVM_DLL int TVMDBDeviceCopy(const tvm::runtime::NDArray& src_data, const int64_t
  * \param shape_tensor The new shape
  * \param out The reshaped tensor object
  */
-TVM_DLL int TVMDBReshapeTensor(tvm::runtime::NDArray& tensor_arr,
-                               const tvm::runtime::NDArray& shape_tensor,
-                               tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBReshapeTensor(tvm::runtime::NDArray& tensor_arr,
+                                const tvm::runtime::NDArray& shape_tensor,
+                                tvm::runtime::NDArray* out);
 
 /*!
  * \brief Obtain the shape of a tensor.
  * \param input_array The input tensor.
  * \param out The shape of the input tensor
  */
-TVM_DLL int TVMDBShapeOf(const tvm::runtime::NDArray& input_array, tvm::runtime::NDArray* out);
+TVM_DLL void TVMDBShapeOf(const tvm::runtime::NDArray& input_array, tvm::runtime::NDArray* out);
 
 #ifdef __cplusplus
 }  // TVM_EXTERN_C

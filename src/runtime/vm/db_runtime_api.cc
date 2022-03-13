@@ -57,10 +57,11 @@ void TVMDBInvokePacked(int64_t packed_index, int64_t arity, int64_t output_size,
   db_runtime->InvokePacked(packed_index, arity, output_size, args, num_args);
 }
 
-void TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment, DLDataType dtype,
-                          int64_t device_index, Storage* out) {
+tvm::runtime::vm::Storage TVMDBAllocateStorage(int64_t allocation_size, int64_t alignment,
+                                               DLDataType dtype, int64_t device_index) {
   auto db_runtime = DynBatchRuntime::Current();
-  *out = db_runtime->AllocateStorage(allocation_size, alignment, dtype, device_index);
+  // *out = db_runtime->AllocateStorage(allocation_size, alignment, dtype, device_index);
+  return db_runtime->AllocateStorage(allocation_size, alignment, dtype, device_index);
 }
 
 void TVMDBAllocateTensor(const Storage& storage, int64_t offset, uint32_t ndim, int64_t* shape,

@@ -47,14 +47,6 @@ namespace vm {
 ObjectPtr<DynBatchRuntime> DynBatchRuntime::current_;
 ObjectRef DynBatchRuntime::current_ref_;
 
-ObjectPtr<DynBatchRuntime> DynBatchRuntime::Current() {
-  if (current_ == nullptr) {
-    current_ = make_object<DynBatchRuntime>();
-    current_ref_ = ObjectRef(current_);
-  };
-  return current_;
-}
-
 NDArray DynBatchRuntime::LoadConstant(int64_t const_index) {
   auto constant_obj = shared_state_->exec_->constants[const_index];
   // We cache the allocated object in the constant pool. To measure, the
@@ -136,7 +128,6 @@ NDArray DynBatchRuntime::DeviceCopy(const NDArray& src_data, const int64_t src_d
 }
 
 NDArray DynBatchRuntime::ReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor) {
-  Device cpu_dev = GetDevice(shared_state_->exec_->host_device_index);
   // Read the shape from shape tensor
   const DLTensor* dl_tensor = shape_tensor.operator->();
   ICHECK_EQ(dl_tensor->dtype.code, 0u);

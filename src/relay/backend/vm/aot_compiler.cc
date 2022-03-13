@@ -223,6 +223,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
     for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
       auto arg_type = function_type->arg_types[i];
       RelayTypeToCppStr(stream_, arg_type);
+      if (arg_type.as<TensorTypeNode>()) {
+        stream_ << "&";
+      }
       stream_ << " " << GetVarForReg(i);
       if (i != function_type->arg_types.size() - 1) {
         stream_ << ", ";
@@ -334,7 +337,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
           ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
           this->PrintIndent(stream_);
-          stream_ << "TVMDBLoadConstant(" << instr.const_index << ", &" << dst_var << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->LoadConstant(" << instr.const_index
+                  << ");\n";
           break;
         }
         case Opcode::LoadConsti: {
@@ -395,9 +399,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
           stream_ << "};\n";
           this->PrintIndent(stream_);
-          stream_ << "TVMDBInvokePacked(" << instr.packed_index << ", " << instr.arity << ", "
-                  << instr.output_size << ", " << args_vec << ".data(), " << flattened_args.size()
-                  << ");\n";
+          stream_ << "DynBatchRuntime::Current()->InvokePacked(" << instr.packed_index << ", "
+                  << instr.arity << ", " << instr.output_size << ", " << args_vec << ".data(), "
+                  << flattened_args.size() << ");\n";
           break;
         }
         case Opcode::InvokeClosure: {
@@ -528,8 +532,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
           std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
           this->PrintIndent(stream_);
-          stream_ << "TVMDBAllocateTensorReg(" << storage_var << ", " << offset_var << ", "
-                  << shape_var << ", " << dtype_str << ", &" << dst_var << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateTensorReg(" << storage_var
+                  << ", " << offset_var << ", " << shape_var << ", " << dtype_str << ");\n";
           break;
         }
         case Opcode::AllocADT: {
@@ -587,7 +591,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           this->PrintIndent(stream_);
           stream_ << dst_var << " = [";
           for (int i = 0; i < instr.num_freevar; ++i) {
-            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+            stream_ << "&" << GetVarForReg(instr.invoke_args_registers[i]);
             if (i < instr.num_freevar - 1) {
               stream_ << ",";
             }
@@ -636,16 +640,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
           if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
             allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
           }
-          stream_ << "TVMDBAllocateStorage(" << allocation_size_str << ", "
-                  << instr.alloc_storage.alignment << ", " << dtype_str << ", "
-                  << instr.alloc_storage.device_index << ", &" << dst_var << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateStorage("
+                  << allocation_size_str << ", " << instr.alloc_storage.alignment << ", "
+                  << dtype_str << ", " << instr.alloc_storage.device_index << ");\n";
           break;
         }
         case Opcode::ShapeOf: {
           auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
           auto dst_var = GetVarForReg(instr.dst);
           this->PrintIndent(stream_);
-          stream_ << "TVMDBShapeOf(" << tensor_var << ", &" << dst_var << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->ShapeOf(" << tensor_var << ");\n";
           break;
         }
         case Opcode::Ret: {
@@ -659,8 +663,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
           auto dst_var = GetVarForReg(instr.dst);
           this->PrintIndent(stream_);
-          stream_ << "TVMDBReshapeTensor(" << tensor_var << ", " << shape_var << ", &" << dst_var
-                  << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->ReshapeTensor(" << tensor_var
+                  << ", " << shape_var << ");\n";
           break;
         }
         case Opcode::DeviceCopy: {
@@ -668,8 +672,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
 
           this->PrintIndent(stream_);
-          stream_ << "TVMDBDeviceCopy(" << src_var << ", " << instr.device_copy.src_device_index
-                  << ", " << instr.device_copy.dst_device_index << ", &" << dst_var << ");\n";
+          stream_ << dst_var << " = DynBatchRuntime::Current()->DeviceCopy(" << src_var << ", "
+                  << instr.device_copy.src_device_index << ", "
+                  << instr.device_copy.dst_device_index << ");\n";
           break;
         }
         default:
@@ -768,17 +773,7 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
       "  CHECK_EQ(DataType(cpu_array->dtype), int64_dtype);\n"
       "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
       "}";
-
-  // auto alloc_tensor_func =
-  //     "inline void AllocTensorWrapper(const Storage& storage, int64_t offset, uint32_t ndim,\n"
-  //     "                               std::vector<int64_t> shape, DLDataType dtype, NDArray* out)
-  //     "
-  //     "{\n"
-  //     "  *out = storage->AllocNDArray(offset, shape, dtype);\n"
-  //     "}";
-
   os << nd_to_int64_func << "\n" << std::endl;
-  // os << alloc_tensor_func << "\n" << std::endl;
 }
 
 void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
@@ -800,18 +795,11 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
   }
 }
 
-void VMAOTCompiler::EmitMacros(std::ostream& os) {
-  // const std::string api_call_check_macro =
-  //     "#define TVM_API_CALL(call)                               \\\n"
-  //     "  if (call != 0) {                                       \\\n"
-  //     "    throw std::runtime_error(\"API call returned error\"); \\\n"
-  //     "  }";
-  // os << api_call_check_macro << "\n\n";
-}
+void VMAOTCompiler::EmitMacros(std::ostream& os) {}
 
 void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <dlpack/dlpack.h>\n";
-  os << "#include <tvm/runtime/db_runtime_api.h>\n";
+  os << "#include <tvm/runtime/vm/db_runtime.h>\n";
   os << "#include <tvm/runtime/vm/arena.h>\n";
   os << "#include <stdexcept>\n";
   os << "#include <vector>\n";

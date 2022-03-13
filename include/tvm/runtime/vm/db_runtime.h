@@ -195,7 +195,14 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Get the current instance of the runtime.
    */
-  static ObjectPtr<DynBatchRuntime> Current();
+  static inline ObjectPtr<DynBatchRuntime> Current() { return current_; }
+
+  static inline ObjectPtr<DynBatchRuntime> CreateRuntime() {
+    ICHECK(current_ == nullptr);
+    current_ = make_object<DynBatchRuntime>();
+    current_ref_ = ObjectRef(current_);
+    return current_;
+  }
 
  protected:
   /*! \brief Get device from the device list based on a given device index. */
