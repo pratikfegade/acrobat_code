@@ -97,30 +97,55 @@ class Inliner : ExprMutator {
 
  private:
   bool CanInline(const CallGraphEntry* cg_node) {
+    // std::cout << "[INL] TryInline " << cg_node->GetGlobalVar() << std::endl;
     // The node must be a leaf node and it cannot be recursive.
-    if (!cg_node->empty() || cg_node->IsRecursive()) return false;
+    // if (!cg_node->empty() || cg_node->IsRecursive()) {
+    //   std::cout << "[INL]  1 " << !cg_node->empty() << " " << cg_node->IsRecursive() <<
+    //   std::endl; if (!cg_node->empty()) {
+    //     for (const auto& it : *cg_node) {
+    //       std::cout << "[INL]   Calle " << it.second->GetGlobalVar() << std::endl;
+    //     }
+    //   }
+    //   return false;
+    // }
+
+    if (cg_node->IsRecursive()) {
+      // std::cout << "[INL]  1 " << !cg_node->empty() << " " << cg_node->IsRecursive() <<
+      // std::endl;
+      return false;
+    }
 
     auto base_func = call_graph_->GetGlobalFunction(cg_node->GetGlobalVar());
     const auto* function_node = base_func.as<FunctionNode>();
     if (!function_node) {
       // Can't inline PrimFuncs!
+      // std::cout << "[INL]  2" << std::endl;
       return false;
     }
     // The body of a global functions must be defined.
-    if (!function_node->body.defined()) return false;
+    if (!function_node->body.defined()) {
+      // std::cout << "[INL]  3" << std::endl;
+      return false;
+    }
 
     // The function must be annotated with the inline attribute.
     // (Note that external functions do not have this attribute!)
-    if (!function_node->HasNonzeroAttr(attr::kInline)) return false;
+    if (!function_node->HasNonzeroAttr(attr::kInline)) {
+      // std::cout << "[INL]  4" << std::endl;
+      return false;
+    }
 
     // The function is not able to be inlined if any callee under the CallGraph
     // of this function cannot be inlined.
     for (const auto& it : *cg_node) {
-      if (!CanInline(it.second)) {
+      if (call_graph_->GetGlobalFunction(it.second->GetGlobalVar()).as<FunctionNode>() &&
+          !CanInline(it.second)) {
+        // std::cout << "[INL]  5 " << it.second->GetGlobalVar() << std::endl;
         return false;
       }
     }
 
+    // std::cout << "[INL]  Inlined!" << std::endl;
     return true;
   }
 
@@ -203,10 +228,12 @@ IRModule Inline(const IRModule& module) {
     if (const auto* fn = base_func.as<FunctionNode>()) {
       auto func = GetRef<Function>(fn);
       if (func->HasNonzeroAttr(attr::kInline)) {
-        ICHECK_EQ(cgn->GetRefCount(), 0U)
-            << cgn->GetNameHint() << " is marked as inline but not inlined.";
-        cgn->CleanCallGraphEntries();
-        cg->RemoveGlobalVarFromModule(cgn, /*update_call_graph*/ true);
+        // ICHECK_EQ(cgn->GetRefCount(), 0U)
+        // << cgn->GetNameHint() << " is marked as inline but not inlined.";
+        if (cgn->GetRefCount() == 0U) {
+          cgn->CleanCallGraphEntries();
+          cg->RemoveGlobalVarFromModule(cgn, /*update_call_graph*/ true);
+        }
       }
     }
   }
