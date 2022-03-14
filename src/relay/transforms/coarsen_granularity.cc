@@ -572,8 +572,10 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     }
 
     Array<tir::Var> prim_func_params;
+    Array<Type> prim_func_param_types;
     for (auto rvar : flattened_free_vars) {
       prim_func_params.push_back(CreateTIRVar(rvar));
+      prim_func_param_types.push_back(GetVarType(rvar));
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -624,6 +626,7 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
+    func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
     func = WithAttr(func, tir::attr::kDBArgAccessModes,
                     CoarsenedTensorAccessModeCalculator(func, mod_).Compute());
     // std::cout << "[CG]  Generated PrimFunc " << func << std::endl;
@@ -776,10 +779,13 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     var_to_var_mapping_.clear();
 
     Array<tir::Var> prim_func_params;
+    Array<Type> prim_func_param_types;
     Array<Integer> prim_func_arg_modes;
     prim_func_params.push_back(batch_size_var_);
+    prim_func_param_types.push_back(batch_size_var_->type_annotation);
     for (auto rvar : flattened_free_vars) {
       auto param = CreateTIRVarWithUpdatedType(rvar);
+      prim_func_param_types.push_back(GetVarType(rvar));
 
       auto iit = arg_mode_states_.find(rvar);
       auto arg_mode = (iit != arg_mode_states_.end()
@@ -837,8 +843,9 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     }
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
-    return TIRLowererResult({tir::PrimFunc(prim_func_params, prim_func_body, VoidType()),
-                             flattened_call_args, body_in_free_vars, prim_func_arg_modes});
+    auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
+    func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
+    return TIRLowererResult({func, flattened_call_args, body_in_free_vars, prim_func_arg_modes});
   }
 
  private:
@@ -955,8 +962,10 @@ class Coarsener : public ExprMutator {
       auto call_args = res.call_args;
       auto replacement = res.replacement;
       std::string name = "prim_func" + std::to_string(ctr++);
-      GlobalVar prim_func_var(name, VoidType());
-      auto call = InvokeTVMOp(prim_func_var, Tuple(call_args), Tuple(Array<Expr>()),
+      GlobalVar prim_func_var(name, prim_func->checked_type_);
+      auto input_args_tuple = Tuple(call_args);
+      auto output_args_tuple = Tuple(Array<Expr>());
+      auto call = InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple,
                               DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
                                          {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}}));
       prim_func = add_attrs_to_wrapper_func(prim_func, name, false);
@@ -967,7 +976,7 @@ class Coarsener : public ExprMutator {
                                .LowerToTIR(tmp_expr, serializer.body_, serializer.bindings_);
         auto batched_func = batched_res.func;
         std::string batched_name = runtime::vm::GetBatchedName(name);
-        GlobalVar batched_func_var(batched_name, VoidType());
+        GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
         batched_func = add_attrs_to_wrapper_func(batched_func, batched_name, true);
         // std::cout << "batched_func " << batched_func << std::endl;
         prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));

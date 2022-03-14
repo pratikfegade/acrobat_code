@@ -14,7 +14,7 @@ num_nodes = 6
 
 target = "llvm"
 lazy_execution=False
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=False
 scattered_kernels=False
 concurrent_execution=False

@@ -71,7 +71,7 @@ bool InvokeTVMOpRel(const Array<Type>& types, int num_inputs, const Attrs& attrs
                     const TypeReporter& reporter) {
   ICHECK_EQ(types.size(), 4u);
   auto func_type = types[0].as<FuncTypeNode>();
-  ICHECK(func_type != nullptr) << "input must be operator with known type";
+  ICHECK(func_type != nullptr) << "input must be operator with known type " << types;
   auto input_type = types[1].as<TupleTypeNode>();
   auto output_type = types[2].as<TupleTypeNode>();
   ICHECK(input_type != nullptr)

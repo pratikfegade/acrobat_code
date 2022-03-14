@@ -188,8 +188,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
       stream_ << " {\n";
       this->BeginScope();
 
-      this->GenerateLocalDecls();
-
       this->VisitBytecode();
 
       this->EndScope();
@@ -259,9 +257,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
   }
 
-  void GenerateLocalDecls() {
+  void GenerateLocalDecls(const std::vector<bool>& used_regs) {
     std::unordered_map<std::string, std::vector<std::string>> type2vars;
     for (int i = vm_func_.params.size(); i < vm_func_.register_file_size; ++i) {
+      if (!used_regs[i]) {
+        continue;
+      }
       auto it = register_types_.find(i);
       ICHECK(it != register_types_.end()) << i;
       Type reg_type = it->second;
@@ -293,6 +294,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   void VisitBytecode() {
+    std::vector<bool> used_regs(vm_func_.register_file_size, false);
+    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
+      auto& instr = vm_func_.instructions[i];
+      for (auto reg : Instruction::ReadRegisters(instr)) {
+        used_regs[reg] = true;
+      }
+    }
+
+    this->GenerateLocalDecls(used_regs);
+
     // std::cout << "[BT] Visiting BT" << std::endl;
     std::unordered_map<Index, std::string> targets;
     int target_count = 0;
@@ -314,9 +325,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
       auto& instr = vm_func_.instructions[i];
       // std::cout << "[BT]   " << instr << std::endl;
 
+      if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
+        continue;
+      }
+
       auto it = targets.find(i);
       if (it != targets.end()) {
-        this->PrintIndent(stream_, -1);
+        this->PrintIndent(stream_, -2);
         stream_ << it->second << ":\n";
       }
 

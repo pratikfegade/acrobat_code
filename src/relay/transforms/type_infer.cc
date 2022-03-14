@@ -200,6 +200,7 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
   }
 
   Type VisitExpr_(const GlobalVarNode* op) final {
+    // std::cout << "[TI] Visit " << op->name_hint << std::endl;
     GlobalVar var = GetRef<GlobalVar>(op);
     if (!mod_.defined()) {
       this->EmitFatal(Diagnostic::Error(op->span) << "Cannot do type inference on global variables "
@@ -213,6 +214,7 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
         return function_node->checked_type();
       } else {
         VLOG(1) << "global var '" << op->name_hint << "' bound to PrimFunc";
+        // std::cout << "[TI]  CheckedType " << op->checked_type_ << std::endl;
         return op->checked_type_;
       }
     } else {
@@ -541,6 +543,10 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
     }
 
     if (const OpNode* opnode = call->op.as<OpNode>()) {
+      // if (opnode->name == "vm.invoke_tvm_op") {
+      // std::cout << "[TI] OpCall  " << GetRef<Expr>(call) << std::endl;
+      // std::cout << "[TI]   Arg  " << call->args[0] << " " << GetType(call->args[0]) << std::endl;
+      // }
       Type rtype =
           PrimitiveCall(opnode->op_type.as<FuncTypeNode>(), arg_types, call->attrs, call->span);
 

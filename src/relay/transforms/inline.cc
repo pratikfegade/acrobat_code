@@ -97,22 +97,20 @@ class Inliner : ExprMutator {
 
  private:
   bool CanInline(const CallGraphEntry* cg_node) {
+    bool aggressive = false;
     // std::cout << "[INL] TryInline " << cg_node->GetGlobalVar() << std::endl;
-    // The node must be a leaf node and it cannot be recursive.
-    // if (!cg_node->empty() || cg_node->IsRecursive()) {
-    //   std::cout << "[INL]  1 " << !cg_node->empty() << " " << cg_node->IsRecursive() <<
-    //   std::endl; if (!cg_node->empty()) {
-    //     for (const auto& it : *cg_node) {
-    //       std::cout << "[INL]   Calle " << it.second->GetGlobalVar() << std::endl;
-    //     }
-    //   }
-    //   return false;
-    // }
 
-    if (cg_node->IsRecursive()) {
-      // std::cout << "[INL]  1 " << !cg_node->empty() << " " << cg_node->IsRecursive() <<
-      // std::endl;
-      return false;
+    // The node must be a leaf node and it cannot be recursive.
+    if (aggressive) {
+      if (cg_node->IsRecursive()) {
+        return false;
+      }
+    } else {
+      if (!cg_node->empty() || cg_node->IsRecursive()) {
+        // std::cout << "[INL]  1 " << !cg_node->empty() << " " << cg_node->IsRecursive() <<
+        // std::endl;
+        return false;
+      }
     }
 
     auto base_func = call_graph_->GetGlobalFunction(cg_node->GetGlobalVar());
@@ -138,10 +136,17 @@ class Inliner : ExprMutator {
     // The function is not able to be inlined if any callee under the CallGraph
     // of this function cannot be inlined.
     for (const auto& it : *cg_node) {
-      if (call_graph_->GetGlobalFunction(it.second->GetGlobalVar()).as<FunctionNode>() &&
-          !CanInline(it.second)) {
-        // std::cout << "[INL]  5 " << it.second->GetGlobalVar() << std::endl;
-        return false;
+      if (aggressive) {
+        if (call_graph_->GetGlobalFunction(it.second->GetGlobalVar()).as<FunctionNode>() &&
+            !CanInline(it.second)) {
+          // std::cout << "[INL]  5 " << it.second->GetGlobalVar() << std::endl;
+          return false;
+        }
+      } else {
+        if (!CanInline(it.second)) {
+          // std::cout << "[INL]  5 " << it.second->GetGlobalVar() << std::endl;
+          return false;
+        }
       }
     }
 

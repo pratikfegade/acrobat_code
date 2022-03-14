@@ -386,6 +386,22 @@ struct Instruction {
   static Instruction DeviceCopy(RegName src, Index src_device_index, Index dst_device_index,
                                 RegName dst);
 
+  /*!
+   * \brief Return if an instruction uses it's destination
+   * \param instr The instruction to be checked
+   *
+   * \return If the dst register is used.
+   */
+  static bool UsesDst(const Instruction& instr);
+
+  /*!
+   * \brief Return the registers read by an instruction
+   * \param instr The instruction to be checked
+   *
+   * \return Read registers.
+   */
+  static std::vector<RegName> ReadRegisters(const Instruction& instr);
+
   Instruction();
   Instruction(const Instruction& instr);
   Instruction& operator=(const Instruction& instr);

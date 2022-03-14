@@ -486,6 +486,94 @@ Instruction Instruction::Move(RegName src, RegName dst) {
   return instr;
 }
 
+bool Instruction::UsesDst(const Instruction& instr) {
+  switch (instr.op) {
+    case Opcode::Move:
+    case Opcode::Ret:
+    case Opcode::AllocTensor:
+    case Opcode::AllocTensorReg:
+    case Opcode::AllocADT:
+    case Opcode::AllocClosure:
+    case Opcode::Invoke:
+    case Opcode::InvokeClosure:
+    case Opcode::LoadConst:
+    case Opcode::LoadConsti:
+    case Opcode::GetField:
+    case Opcode::GetTag:
+    case Opcode::AllocStorage:
+    case Opcode::ShapeOf:
+    case Opcode::ReshapeTensor:
+    case Opcode::DeviceCopy: {
+      return true;
+      break;
+    }
+    case Opcode::Fatal:
+    case Opcode::InvokePacked:
+    case Opcode::If:
+    case Opcode::Goto: {
+      return false;
+      break;
+    }
+    default:
+      LOG(FATAL) << "should never hit this case" << static_cast<int>(instr.op);
+      break;
+  }
+}
+
+std::vector<RegName> Instruction::ReadRegisters(const Instruction& instr) {
+  switch (instr.op) {
+    case Opcode::Move:
+      return {instr.from};
+    case Opcode::Ret:
+      return {instr.result};
+    case Opcode::AllocTensor:
+      return {instr.alloc_tensor.offset, instr.alloc_tensor.storage};
+    case Opcode::AllocTensorReg:
+      return {instr.alloc_tensor_reg.offset, instr.alloc_tensor_reg.storage,
+              instr.alloc_tensor_reg.shape_register};
+    case Opcode::AllocADT:
+      return std::vector<RegName>(instr.datatype_fields, instr.datatype_fields + instr.num_fields);
+    case Opcode::AllocClosure:
+      return std::vector<RegName>(instr.free_vars, instr.free_vars + instr.num_freevar);
+    case Opcode::Invoke:
+      return std::vector<RegName>(instr.invoke_args_registers,
+                                  instr.invoke_args_registers + instr.num_args);
+    case Opcode::InvokeClosure: {
+      auto vec =
+          std::vector<RegName>(instr.closure_args, instr.closure_args + instr.num_closure_args);
+      vec.push_back(instr.clo_index);
+      return vec;
+    }
+    case Opcode::LoadConst:
+      return {};
+    case Opcode::LoadConsti:
+      return {};
+    case Opcode::GetField:
+      return {instr.object};
+    case Opcode::GetTag:
+      return {instr.get_tag.object};
+    case Opcode::AllocStorage:
+      return {instr.alloc_storage.allocation_size};
+    case Opcode::ShapeOf:
+      return {instr.shape_of.tensor};
+    case Opcode::ReshapeTensor:
+      return {instr.reshape_tensor.tensor, instr.reshape_tensor.newshape};
+    case Opcode::DeviceCopy:
+      return {instr.device_copy.src};
+    case Opcode::Fatal:
+      return {};
+    case Opcode::InvokePacked:
+      return std::vector<RegName>(instr.packed_args, instr.packed_args + instr.arity);
+    case Opcode::If:
+      return {instr.if_op.test, instr.if_op.target};
+    case Opcode::Goto:
+      return {};
+    default:
+      LOG(FATAL) << "should never hit this case" << static_cast<int>(instr.op);
+      return {};
+  }
+}
+
 void DLDatatypePrint(std::ostream& os, const DLDataType& dtype) {
   switch (dtype.code) {
     case kDLInt:

@@ -16,9 +16,9 @@ batch_size = 1
 mod, params = relay.testing.lstm.get_workload(iterations, hidden_size)
 
 lazy_execution=True
-coarsened_execution=False
-batched_execution=True
-scattered_kernels=True
+coarsened_execution=True
+batched_execution=False
+scattered_kernels=False
 concurrent_execution=False
 dynamic_batch_size_estimate=64
 use_autoscheduler=False

@@ -563,6 +563,7 @@ void TypeSolver::AddConstraint(const TypeConstraint& constraint, const Span& spa
     rnode->rel = GetRef<TypeRelation>(op);
     rel_nodes_.push_back(rnode);
     // populate the type information.
+    // std::cout << "[TYP] Args " << op->args << std::endl;
     for (size_t i = 0; i < op->args.size(); ++i) {
       // insert link to the type list
       LinkNode<TypeNode*>* tlink = arena_.make<LinkNode<TypeNode*>>();

@@ -545,6 +545,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // TODO(@jroesch): use correct tag
     auto new_register = NewRegister();
     Emit(Instruction::AllocADT(0, tuple->fields.size(), fields_registers, new_register));
+    if (!tuple_node->checked_type_.defined()) {
+      std::cout << "[TYP] " << tuple << std::endl;
+    }
     AddRegisterTypeInfo(new_register, tuple_node->checked_type_);
   }
 
@@ -1291,7 +1294,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Perform memory planning in order to coalesce/reduce allocations.
 
-  pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
   pass_seqs.push_back(transform::CPPMemoryPlan());
 
   // Compute away constant computation introduced by coalescing allocations.
@@ -1433,17 +1436,18 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // external codegen.
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", true, false));
 
+  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", true, false));
   pass_seqs.push_back(transform::InferType());
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, false));
 
+  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, true));
   pass_seqs.push_back(transform::InferType());
+  // pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, true));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
