@@ -822,6 +822,12 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   this->EndScope();
   this->PrintIndent(os);
   os << "}\n";
+  auto pass_ctx = transform::PassContext::Current();
+  bool lazy_execution = pass_ctx->GetConfig<Bool>("relay.db_lazy_execution", Bool(false)).value();
+  if (lazy_execution) {
+    this->PrintIndent(os);
+    os << "DynBatchRuntime::Current()->LazyExecute();\n";
+  }
   this->PrintIndent(os);
   os << "return res;\n";
   this->EndScope();
@@ -864,6 +870,8 @@ void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
   os << ")";
 }
 
+inline std::string Bool2Str(bool a) { return a ? "true" : "false"; }
+
 void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   for (auto d : exec_.virtual_devices) {
     std::cout << "DEVICE " << d << std::endl;
@@ -903,12 +911,24 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
         "Executable*>(exec_module.get()));\n";
   os << "  auto runtime = DynBatchRuntime::CreateRuntime();\n";
 
-  os << "  bool coarsened_execution = false;\n";
-  os << "  bool lazy_execution = false;\n";
-  os << "  bool batched_execution = false;\n";
-  os << "  bool scattered_kernels = false;\n";
-  os << "  bool concurrent_execution = false;\n";
-  os << "  size_t batch_size = 64;\n";
+  auto pass_ctx = transform::PassContext::Current();
+  bool coarsened_execution =
+      pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value();
+  bool lazy_execution = pass_ctx->GetConfig<Bool>("relay.db_lazy_execution", Bool(false)).value();
+  bool batched_execution =
+      pass_ctx->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+  bool scattered_kernels =
+      pass_ctx->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
+  bool concurrent_execution =
+      pass_ctx->GetConfig<Bool>("relay.db_concurrent_execution", Bool(false)).value();
+  size_t batch_size = pass_ctx->GetConfig<Integer>("relay.db_batch_size", Integer(1)).value();
+
+  os << "  bool coarsened_execution = " << Bool2Str(coarsened_execution) << ";\n";
+  os << "  bool lazy_execution = " << Bool2Str(lazy_execution) << ";\n";
+  os << "  bool batched_execution = " << Bool2Str(batched_execution) << ";\n";
+  os << "  bool scattered_kernels = " << Bool2Str(scattered_kernels) << ";\n";
+  os << "  bool concurrent_execution = " << Bool2Str(concurrent_execution) << ";\n";
+  os << "  size_t batch_size = " << batch_size << ";\n";
 
   os << "  VMExecutionOptions options(coarsened_execution, lazy_execution, batched_execution,\n";
   os << "                             scattered_kernels, concurrent_execution, batch_size);\n";

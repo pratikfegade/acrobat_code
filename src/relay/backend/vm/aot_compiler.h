@@ -26,6 +26,7 @@
 #define TVM_RELAY_BACKEND_VM_AOT_COMPILER_H_
 
 #include <tvm/ir/error.h>
+#include <tvm/ir/transform.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/interpreter.h>
 #include <tvm/relay/transform.h>
