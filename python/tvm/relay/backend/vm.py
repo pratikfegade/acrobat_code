@@ -374,11 +374,11 @@ class VMExecutor(Executor):
     def optimize_module(self):
         return optimize(self.mod, self.target)
 
-    def _make_executor(self, expr=None, execution_options=None):
+    def _make_executor(self, expr=None, execution_options=None, params=None):
         if expr:
             self.mod["main"] = expr
 
-        self.executable = compile(self.mod, self.target)
+        self.executable = compile(self.mod, self.target, params=params)
         self.vm = vm_rt.VirtualMachine(self.executable, self.device,
                                        execution_options=execution_options)
 
@@ -386,9 +386,9 @@ class VMExecutor(Executor):
             args = self._convert_args(self.mod["main"], args, kwargs)
             return self.vm.run(*args)
 
-    def compile(self, expr=None):
+    def compile(self, expr=None, params=None):
         if expr:
             self.mod["main"] = expr
 
-        self.executable = compile(self.mod, self.target)
+        self.executable = compile(self.mod, self.target, params=params)
         return self.executable

@@ -108,44 +108,17 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
 void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
                                          const Index output_size, const NDArray* args,
                                          int num_args) {
-  std::vector<NDArray> args_copy;
-  bool is_empty_output = false;
-
-  Index rolled_output_size = output_size;
-  Index rolled_input_size = arg_count - rolled_output_size;
-  Index unrolled_input_size = 0;
-  Index unrolled_output_size = 0;
-  for (Index i = 0; i < num_args; i++) {
-    auto nd_array = args[i];
-    // We can safely skip CallPacked if there is only one
-    // output and it is empty.
-    if (i == arg_count - 1 && output_size == 1) {
-      for (const auto& dim : nd_array.Shape()) {
-        if (!dim) {
-          is_empty_output = true;
-          break;
-        }
-      }
-    }
-    args_copy.push_back(nd_array);
-    if (i < rolled_input_size) {
-      unrolled_input_size++;
-    } else {
-      unrolled_output_size++;
-    }
-  }
-
-  if (is_empty_output) {
-    return;
-  }
-
-  OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
-              unrolled_output_size, args_copy);
-  nodes_.push_back(node);
+  std::vector<NDArray> args_copy(args, args + num_args);
+  // for (size_t i = 0; i < num_args; ++i) {
+  // args[i].MarkAsUsedForLazyExecution();
+  // }
+  // std::vector<NDArray> args_copy;
+  nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args_copy);
 }
 
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
+    // std::cout << "Executing " << node.func_idx_ << std::endl;
     InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
                            node.args_.data(), node.args_.size());
   }

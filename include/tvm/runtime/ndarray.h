@@ -178,6 +178,7 @@ class NDArray : public ObjectRef {
 
   TVM_DLL ShapeTuple Shape() const;
   TVM_DLL runtime::DataType DataType() const;
+  TVM_DLL void MarkAsUsedForLazyExecution() const;
   // internal namespace
   struct Internal;
 
@@ -489,6 +490,8 @@ inline bool NDArray::Load(dmlc::Stream* strm) {
   *this = ret;
   return true;
 }
+
+inline void NDArray::MarkAsUsedForLazyExecution() const { this->get_mutable()->IncRef(); }
 
 }  // namespace runtime
 }  // namespace tvm

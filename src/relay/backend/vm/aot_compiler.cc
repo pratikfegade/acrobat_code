@@ -352,7 +352,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
           ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->LoadConstant(" << instr.const_index
+          stream_ << dst_var << " = DynBatchRuntime::Current()->GetConstant(" << instr.const_index
                   << ");\n";
           break;
         }
@@ -791,6 +791,155 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
   os << nd_to_int64_func << "\n" << std::endl;
 }
 
+void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
+  // Emit a batched main function, first
+  auto main_relay_func = Downcast<Function>(mod_->Lookup("main"));
+  FuncType function_type = Downcast<FuncType>(main_relay_func->checked_type_);
+
+  EmitBatchedMainFunctionHeader(os);
+  os << " {\n";
+  this->BeginScope();
+  this->PrintIndent(os);
+  os << "auto batch_size = " << GetVarForReg(0) << ".size();\n";
+  this->PrintIndent(os);
+  os << "std::vector<";
+  RelayTypeToCppStr(os, function_type->ret_type);
+  os << "> res;\n";
+  this->PrintIndent(os);
+  os << "res.reserve(batch_size);\n";
+  os << "for (size_t b = 0; b < batch_size; ++b) {\n";
+  this->BeginScope();
+  this->PrintIndent(os);
+  os << "res.push_back(" << GetCppFunctionName("main") << "(";
+  for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
+    auto arg_type = function_type->arg_types[i];
+    os << " " << GetVarForReg(i) << "[b]";
+    if (i != function_type->arg_types.size() - 1) {
+      os << ", ";
+    }
+  }
+  os << "));\n";
+  this->EndScope();
+  this->PrintIndent(os);
+  os << "}\n";
+  this->PrintIndent(os);
+  os << "return res;\n";
+  this->EndScope();
+  this->PrintIndent(os);
+  os << "}\n";
+}
+
+void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
+  // Emit a batched main function, first
+  auto main_relay_func = Downcast<Function>(mod_->Lookup("main"));
+
+  FuncType function_type = Downcast<FuncType>(main_relay_func->checked_type_);
+
+  if (main_relay_func->type_params.size() > 0) {
+    os << "template<";
+    for (size_t i = 0; i < function_type->type_params.size(); ++i) {
+      auto tvar = function_type->type_params[i];
+      os << "class " << tvar->name_hint;
+      if (i != function_type->type_params.size() - 1) {
+        os << ", ";
+      }
+    }
+    os << ">\n";
+  }
+  os << "std::vector<";
+  RelayTypeToCppStr(os, function_type->ret_type);
+  os << "> batched_main(";
+  for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
+    auto arg_type = function_type->arg_types[i];
+    os << "std::vector<";
+    RelayTypeToCppStr(os, arg_type);
+    if (arg_type.as<TensorTypeNode>()) {
+      os << "&";
+    }
+    os << "> " << GetVarForReg(i);
+    if (i != function_type->arg_types.size() - 1) {
+      os << ", ";
+    }
+  }
+  os << ")";
+}
+
+void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
+  for (auto d : exec_.virtual_devices) {
+    std::cout << "DEVICE " << d << std::endl;
+  }
+  os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> "
+        "runner) {\n";
+  os << "  int w_iters = 100;\n";
+  os << "  int a_iters = 400;\n";
+  os << "  for (int i = 0; i < w_iters; ++i) {\n";
+  os << "    runner();\n";
+  os << "  }\n";
+
+  os << "  float cg_gen_time = 0.0;\n";
+  os << "  float cg_exe_time = 0.0;\n";
+  os << "  for (int i = 0; i < a_iters; ++i) {\n";
+  os << "    auto p = runner();\n";
+  os << "    cg_gen_time += p.first;\n";
+  os << "    cg_exe_time += p.second;\n";
+  os << "  }\n\n";
+
+  os << "  return std::make_pair(cg_gen_time / a_iters, cg_exe_time / a_iters);\n";
+  os << "}\n";
+
+  os << "int main(int argc, char* argv[]) {\n";
+  os << "  std::string dir = argv[1];\n";
+  os << "  std::string code_path = dir + \"/" << model_name_ << ".ro\";\n";
+  os << "  std::string lib_path = dir + \"/" << model_name_ << "_lib.so\";\n";
+
+  os << "  std::ifstream code_in(code_path);\n";
+  os << "  std::string code((std::istreambuf_iterator<char>(code_in)), "
+        "std::istreambuf_iterator<char>());\n";
+  os << "  code_in.close();\n";
+
+  os << "  auto lib = Module::LoadFromFile(lib_path, \"so\");\n";
+  os << "  auto exec_module = Executable::Load(code, lib);\n";
+  os << "  auto exec_ptr = const_cast<Executable*>(static_cast<const "
+        "Executable*>(exec_module.get()));\n";
+  os << "  auto runtime = DynBatchRuntime::CreateRuntime();\n";
+
+  os << "  bool coarsened_execution = false;\n";
+  os << "  bool lazy_execution = false;\n";
+  os << "  bool batched_execution = false;\n";
+  os << "  bool scattered_kernels = false;\n";
+  os << "  bool concurrent_execution = false;\n";
+  os << "  size_t batch_size = 64;\n";
+
+  os << "  VMExecutionOptions options(coarsened_execution, lazy_execution, batched_execution,\n";
+  os << "                             scattered_kernels, concurrent_execution, batch_size);\n";
+  os << "  runtime->SetExecutionOptions(options);\n";
+  os << "  runtime->InitSharedState();\n";
+  os << "  runtime->LoadExecutable(exec_ptr);\n";
+
+  std::stringstream device_list, alloc_list;
+  for (size_t i = 0; i < exec_.virtual_devices.size(); ++i) {
+    auto& d = exec_.virtual_devices[i];
+    device_list << "DLDevice{static_cast<DLDeviceType>(" << d.device_type << "), " << d.device_id
+                << "}";
+    alloc_list << "kPooled";
+    if (i < exec_.virtual_devices.size() - 1) {
+      device_list << ", ";
+      alloc_list << ", ";
+    }
+  }
+
+  os << "  runtime->Init({" << device_list.str() << "}, {" << alloc_list.str() << "});\n";
+
+  os << "  runtime->CacheConstants();\n";
+  os << "  invoke_model();\n";
+  os << "}\n\n";
+}
+
+void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
+  os << "void invoke_model()\n;";
+  os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner);\n";
+}
+
 void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
   cpp_stream_ << "#include \"" << header_file_name << "\"\n\n";
 
@@ -808,6 +957,9 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     function_compiler.GenerateCPPForFunction(true);
     cpp_stream_ << "\n";
   }
+
+  EmitBatchedMainFunction(cpp_stream_);
+  EmitHarnessFunctions(cpp_stream_);
 }
 
 void VMAOTCompiler::EmitMacros(std::ostream& os) {}
@@ -818,6 +970,7 @@ void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <tvm/runtime/vm/arena.h>\n";
   os << "#include <stdexcept>\n";
   os << "#include <vector>\n";
+  os << "#include <fstream>\n";
   os << "#include <functional>\n";
   os << "#include <array>\n\n";
 
@@ -863,13 +1016,19 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     function_compiler.GenerateCPPForFunction(false);
   }
 
+  hpp_stream_ << "\n";
+
+  EmitHarnessFunctionHeaders(hpp_stream_);
+
+  EmitBatchedMainFunctionHeader(hpp_stream_);
+  hpp_stream_ << ";\n";
   // Header guard
   hpp_stream_ << "#endif\n";
 }
 
-void VMAOTCompiler::Codegen(std::string model_name) {
-  std::string header_file_name = model_name + "_src.hpp";
-  std::string cpp_file_name = model_name + "_src.cpp";
+void VMAOTCompiler::Codegen() {
+  std::string header_file_name = model_name_ + "_src.hpp";
+  std::string cpp_file_name = model_name_ + "_src.cpp";
   GenerateCppFile(header_file_name);
   GenerateHeaderFile(header_file_name);
 

@@ -187,13 +187,20 @@ struct GroupFinderResult {
 typedef std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> Groups;
 class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
  public:
-  Groups FindGroups(const Expr expr) {
+  Groups FindGroups(const Expr expr, bool print) {
+    print_ = print;
     VisitExpr(expr);
-    return found_groups;
+    return found_groups_;
   }
 
  private:
-  void AddToGroup(Expr expr) { found_groups.insert(expr); }
+  void AddToGroup(Expr expr, const std::string& reason) {
+    if (print_) {
+      std::cout << "[CG] Found group " << reason << std::endl;
+      std::cout << "[GROUP]  \n " << PrettyPrint(RemoveOnDeviceCalls(expr)) << "\n\n" << std::endl;
+    }
+    found_groups_.insert(expr);
+  }
 
   GroupFinderResult VisitExpr_(const ConstantNode* op) override { return {true, false}; }
 
@@ -215,7 +222,7 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
     } else {
       for (size_t i = 0; i < op->fields.size(); ++i) {
         if (allowed_fields[i]) {
-          AddToGroup(op->fields[i]);
+          AddToGroup(op->fields[i], "tuple_field");
         }
       }
       return {false, tuple_has_call_ops};
@@ -228,7 +235,7 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
 
   GroupFinderResult VisitExpr_(const FunctionNode* op) override {
     if (VisitExpr(op->body).is_allowed()) {
-      AddToGroup(op->body);
+      AddToGroup(op->body, "function_body");
     }
     return {false, false};
   }
@@ -246,12 +253,12 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
     std::vector<bool> allowed_args;
     for (auto arg : op->args) {
       if (VisitExpr(arg).is_allowed()) {
-        AddToGroup(arg);
+        AddToGroup(arg, "call_arg");
       }
     }
 
     if (VisitExpr(op->op).is_allowed()) {
-      AddToGroup(op->op);
+      AddToGroup(op->op, "call_op");
     }
 
     return {false, false};
@@ -263,22 +270,26 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
     if (value_res.structurally_allowed && body_res.structurally_allowed) {
       return {true, value_res.has_op_calls || body_res.has_op_calls};
     } else if (value_res.is_allowed()) {
-      AddToGroup(op->value);
+      AddToGroup(op->value, "let_value");
+      std::cout << "[GROUP]  Offending body\n " << PrettyPrint(RemoveOnDeviceCalls(op->body))
+                << "\n\n"
+                << std::endl;
+
     } else if (body_res.is_allowed()) {
-      AddToGroup(op->body);
+      AddToGroup(op->body, "let_body");
     }
     return {false, false};
   }
 
   GroupFinderResult VisitExpr_(const IfNode* op) override {
     if (VisitExpr(op->cond).is_allowed()) {
-      AddToGroup(op->cond);
+      AddToGroup(op->cond, "if_cond");
     }
     if (VisitExpr(op->true_branch).is_allowed()) {
-      AddToGroup(op->true_branch);
+      AddToGroup(op->true_branch, "if_then");
     }
     if (VisitExpr(op->false_branch).is_allowed()) {
-      AddToGroup(op->false_branch);
+      AddToGroup(op->false_branch, "if_else");
     }
     return {false, false};
   }
@@ -289,24 +300,24 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
 
   GroupFinderResult VisitExpr_(const RefCreateNode* op) override {
     if (VisitExpr(op->value).is_allowed()) {
-      AddToGroup(op->value);
+      AddToGroup(op->value, "ref_crtate_value");
     }
     return {false, false};
   }
 
   GroupFinderResult VisitExpr_(const RefReadNode* op) override {
     if (VisitExpr(op->ref).is_allowed()) {
-      AddToGroup(op->ref);
+      AddToGroup(op->ref, "ref_read_value");
     }
     return {false, false};
   }
 
   GroupFinderResult VisitExpr_(const RefWriteNode* op) override {
     if (VisitExpr(op->ref).is_allowed()) {
-      AddToGroup(op->ref);
+      AddToGroup(op->ref, "ref_write_ref");
     }
     if (VisitExpr(op->value).is_allowed()) {
-      AddToGroup(op->value);
+      AddToGroup(op->value, "ref_write_value");
     }
     return {false, false};
   }
@@ -315,17 +326,18 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
 
   GroupFinderResult VisitExpr_(const MatchNode* op) override {
     if (VisitExpr(op->data).is_allowed()) {
-      AddToGroup(op->data);
+      AddToGroup(op->data, "match_data");
     }
     for (auto clause : op->clauses) {
       if (VisitExpr(clause->rhs).is_allowed()) {
-        AddToGroup(clause->rhs);
+        AddToGroup(clause->rhs, "match_clause");
       }
     }
     return {false, false};
   }
 
-  Groups found_groups;
+  Groups found_groups_;
+  bool print_{false};
 };
 
 class LetLifter : public ExprMutator {
@@ -1006,11 +1018,9 @@ class Coarsener : public ExprMutator {
 int Coarsener::ctr = 0;
 
 IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
-  // std::cout << "Coarsening now!" << std::endl;
+  std::cout << "Coarsening now!" << std::endl;
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
-
-  // std::cout << "[CG] Supernovae " << mod->batched_prim_funcs.size() << std::endl;
 
   auto funcs = mod->functions;
   for (const auto& it : funcs) {
@@ -1019,7 +1029,12 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
       Function func = GetRef<Function>(n);
 
-      auto groups = GroupFinder().FindGroups(func);
+      bool print = (it.first->name_hint == "lstm_cell");
+      auto groups = GroupFinder().FindGroups(func, print);
+      if (print) {
+        std::cout << "[CG] function " << it.first << std::endl;
+        std::cout << "[CG]  Groups " << groups.size() << std::endl;
+      }
       Coarsener coarsener(groups, mod, batched_execution, scattered_kernels);
       Function ret = Downcast<Function>(coarsener(func));
 

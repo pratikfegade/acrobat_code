@@ -52,7 +52,9 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
             // std::cout << kv.first << std::endl;
           }
         } else {
-          std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+          if (kv.first->name_hint == "lstm_cell") {
+            std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+          }
           // std::cout << kv.first << std::endl;
         }
       }

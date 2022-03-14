@@ -99,7 +99,7 @@ def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
         with pass_context:
             executor = relay.backend.vm.VMExecutor(mod, device, target)
-            executable = executor.compile()
+            executable = executor.compile(params=weights_dict)
             executable.save_to_file(aot_output_directory + "/treelstm.ro",
                                     aot_output_directory + "/treelstm_lib.so")
             exit(0)

@@ -47,19 +47,25 @@ namespace vm {
 ObjectPtr<DynBatchRuntime> DynBatchRuntime::current_;
 ObjectRef DynBatchRuntime::current_ref_;
 
-NDArray DynBatchRuntime::LoadConstant(int64_t const_index) {
-  auto constant_obj = shared_state_->exec_->constants[const_index];
-  // We cache the allocated object in the constant pool. To measure, the
-  // first iteration will set the pool up. The other iterations will
-  // directly reuse the allocated objects.
-  if (shared_state_->const_pool_.size() <= static_cast<size_t>(const_index)) {
-    shared_state_->const_pool_.resize(const_index + 1);
-  }
+void DynBatchRuntime::CacheConstants() {
+  for (int64_t const_index = 0; const_index < shared_state_->exec_->constants.size();
+       ++const_index) {
+    auto constant_obj = shared_state_->exec_->constants[const_index];
+    // We cache the allocated object in the constant pool. To measure, the
+    // first iteration will set the pool up. The other iterations will
+    // directly reuse the allocated objects.
+    if (shared_state_->const_pool_.size() <= static_cast<size_t>(const_index)) {
+      shared_state_->const_pool_.resize(const_index + 1);
+    }
 
-  if (!shared_state_->const_pool_[const_index].defined()) {
-    Device dev = GetDevice(shared_state_->exec_->const_device_indexes[const_index]);
-    shared_state_->const_pool_[const_index] = CopyTo(constant_obj, dev);
+    if (!shared_state_->const_pool_[const_index].defined()) {
+      Device dev = GetDevice(shared_state_->exec_->const_device_indexes[const_index]);
+      shared_state_->const_pool_[const_index] = CopyTo(constant_obj, dev);
+    }
   }
+}
+
+NDArray DynBatchRuntime::GetConstant(int64_t const_index) {
   return Downcast<NDArray>(shared_state_->const_pool_[const_index]);
 }
 
@@ -158,6 +164,16 @@ NDArray DynBatchRuntime::ShapeOf(const NDArray& input_array) {
     reinterpret_cast<int64_t*>(out_tensor->data)[i] = input_array->shape[i];
   }
   return out_tensor;
+}
+
+void DynBatchRuntime::LazyExecute() {
+  if (lazy_execution_ || concurrent_execution_) {
+    if (batched_execution_) {
+      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+    } else {
+      shared_state_->lazy_executor_.Execute();
+    }
+  }
 }
 
 PackedFunc DynBatchRuntime::GetFunction(const std::string& name,

@@ -21,6 +21,8 @@ batched_execution=False
 scattered_kernels=False
 concurrent_execution=False
 dynamic_batch_size_estimate=64
+aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+model_name="aot_test"
 use_autoscheduler=False
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
@@ -31,14 +33,19 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     use_autoscheduler=use_autoscheduler,
     batch_size=batch_size,
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
+    aot_output_directory=aot_output_directory,
+    model_name=model_name,
     opt_level=3)
 
 def execute():
     with pass_context:
         executor = relay.backend.vm.VMExecutor(mod, device, target)
-        fin_executor = executor._make_executor(execution_options=execution_options)
+        executable = executor.compile()
+        executable.save_to_file(aot_output_directory + "/treelstm.ro",
+                                aot_output_directory + "/treelstm_lib.so")
         exit(0)
 
+        # fin_executor = executor._make_executor(execution_options=execution_options)
         # params_list = []
         # for i in range(batch_size):
         #     datas = []

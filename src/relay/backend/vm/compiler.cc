@@ -1264,8 +1264,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
                         ->GetConfig<String>("relay.db_model_name", String("model_name"))
                         .value();
   VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                get_field_tags, output_directory)
-      .Codegen(model_name);
+                get_field_tags, output_directory, model_name)
+      .Codegen();
 }
 
 transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
@@ -1440,12 +1440,13 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", true, false));
   pass_seqs.push_back(transform::InferType());
 
+  // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, true));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("CoarsenPrimitiveFuncGranularity", true, true));
   pass_seqs.push_back(transform::InferType());
   // pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, true));
 

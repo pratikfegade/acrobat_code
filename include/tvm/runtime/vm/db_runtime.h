@@ -102,12 +102,17 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void InitSharedState();
 
   /*!
-   * \brief Load constant from the executable.
-   * \param const_index The constant index in the executable.
+   * \brief Load and cache all constants from the executable in the runtime.
+   */
+  void CacheConstants();
+
+  /*!
+   * \brief Get a cached constant.
+   * \param const_index The constant index.
    *
    * \return The result constant array
    */
-  NDArray LoadConstant(int64_t const_index);
+  NDArray GetConstant(int64_t const_index);
 
   /*!
    * \brief Invoke a packed function.
@@ -191,6 +196,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
    */
   void Init(const std::vector<Device>& physical_devices,
             const std::vector<AllocatorType>& alloc_types);
+
+  /*!
+   * \brief Execute all lazily collected packed funcs
+   */
+  void LazyExecute();
 
   /*!
    * \brief Get the current instance of the runtime.
