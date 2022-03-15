@@ -349,6 +349,20 @@ class Executable : public ModuleNode {
    */
   void LoadCodeSection(dmlc::Stream* strm);
 
+  /*!
+   * \brief Save the function meta data used for dynamic batching.
+   *
+   * \param strm The output stream.
+   */
+  void SaveDBFunctionMetadata(dmlc::Stream* strm);
+
+  /*!
+   * \brief Load the function meta data used for dynamic batching.
+   *
+   * \param strm The output stream.
+   */
+  void LoadDBFunctionMetadata(dmlc::Stream* strm);
+
   /*! \brief The serialized bytecode. */
   std::string code_;
 };

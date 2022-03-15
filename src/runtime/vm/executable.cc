@@ -320,6 +320,9 @@ TVMByteArray Executable::Save() {
   // Code section.
   SaveCodeSection(&strm);
 
+  // DB metadata.
+  SaveDBFunctionMetadata(&strm);
+
   TVMByteArray arr;
   arr.data = code_.c_str();
   arr.size = code_.length();
@@ -391,6 +394,11 @@ void Executable::LoadLateBoundConstantsFromFile(const std::string& path) {
   LoadBinaryFromFile(path, &bytes);
   dmlc::MemoryStringStream stream(&bytes);
   LoadLateBoundConstantsFromStream(&stream);
+}
+
+void Executable::SaveDBFunctionMetadata(dmlc::Stream* strm) {
+  strm->Write(batched_func_arg_mode);
+  strm->Write(prim_func_arg_access_mode);
 }
 
 void Executable::SaveGlobalSection(dmlc::Stream* strm) {
@@ -779,7 +787,15 @@ runtime::Module Executable::Load(const std::string& code, const runtime::Module 
   // Code section.
   exec->LoadCodeSection(&strm);
 
+  // DB metadata.
+  exec->LoadDBFunctionMetadata(&strm);
+
   return runtime::Module(exec);
+}
+
+void Executable::LoadDBFunctionMetadata(dmlc::Stream* strm) {
+  STREAM_CHECK(strm->Read(&batched_func_arg_mode), "batched_func_arg_mode");
+  STREAM_CHECK(strm->Read(&prim_func_arg_access_mode), "prim_func_arg_access_mode");
 }
 
 void Executable::LoadVirtualDevicesSection(dmlc::Stream* strm) {

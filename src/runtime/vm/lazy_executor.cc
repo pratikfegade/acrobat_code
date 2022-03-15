@@ -109,19 +109,19 @@ void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_c
                                          const Index output_size, const NDArray* args,
                                          int num_args) {
   std::vector<NDArray> args_copy(args, args + num_args);
-  // for (size_t i = 0; i < num_args; ++i) {
-  // args[i].MarkAsUsedForLazyExecution();
-  // }
-  // std::vector<NDArray> args_copy;
   nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args_copy);
 }
 
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
-    // std::cout << "Executing " << node.func_idx_ << std::endl;
     InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
                            node.args_.data(), node.args_.size());
   }
+  // for (OpNode& node : nodes_) {
+  //   for (size_t i = 0; i < node.args_.size(); i++) {
+  //     node.args_[i]->MarkUsedForLazyExecution();
+  //   }
+  // }
   nodes_.clear();
 }
 
