@@ -423,11 +423,7 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
       }
     };
 
-    for (size_t i = 0; i < population; ++i) {
-      iteration_body(i);
-    }
-
-    // support::parallel_for(0, population, iteration_body);
+    support::parallel_for(0, population, iteration_body);
 
     int num_temp_states = temp_states.size();
     // Filter out the states that were failed to apply initial rules

@@ -233,9 +233,9 @@ Stmt ReplaceTensor(Stmt stmt, const std::unordered_map<Tensor, Tensor>& replace)
 }
 PrimExpr ReplaceTensor(PrimExpr expr, const std::unordered_map<Tensor, Tensor>& replace) {
   TensorReplacer repl(replace);
-  std::cout << "[REPL1] " << expr << std::endl;
+  // std::cout << "[REPL1] " << expr << std::endl;
   PrimExpr ret = repl(expr);
-  std::cout << "[REPL2]   " << ret << std::endl;
+  // std::cout << "[REPL2]   " << ret << std::endl;
   return repl.found ? ret : expr;
 }
 

@@ -34,6 +34,7 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
     opt_level=3)
 
+model_name = "lstm"
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
@@ -50,7 +51,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20,  # change this to 20000 to achieve the best performance
+                num_measure_trials=20000,  # change this to 20000 to achieve the best performance
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
@@ -78,6 +79,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule(False)
+auto_schedule(True)
 print("===============================================================================", flush=True)
 execute()

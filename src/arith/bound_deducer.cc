@@ -168,33 +168,33 @@ class BoundDeducer : public ExprVisitor {
     this->VisitExpr(left ? op->a : op->b);
   }
 
-  void VisitExpr_(const FloorDivNode* op) final {
-    bool left = op->a.get() == path_[iter_];
-    if (!left) {
-      success_ = false;
-      return;
-    }
+  // void VisitExpr_(const FloorDivNode* op) final {
+  //   bool left = op->a.get() == path_[iter_];
+  //   if (!left) {
+  //     success_ = false;
+  //     return;
+  //   }
 
-    SignType sign_b;
-    if (op->b.dtype().is_uint()) {
-      sign_b = kPositive;
-    } else {
-      sign_b = expr_map_[op->b].GetSignType();
-    }
+  //   SignType sign_b;
+  //   if (op->b.dtype().is_uint()) {
+  //     sign_b = kPositive;
+  //   } else {
+  //     sign_b = expr_map_[op->b].GetSignType();
+  //   }
 
-    if (sign_b != SignType::kPositive) {
-      success_ = false;
-      return;
-    }
+  //   if (sign_b != SignType::kPositive) {
+  //     success_ = false;
+  //     return;
+  //   }
 
-    result_ = result_ * op->b;
-    if (comp_op == kEqual) {
-      success_ = false;
-      return;
-    }
+  //   result_ = result_ * op->b;
+  //   if (comp_op == kEqual) {
+  //     success_ = false;
+  //     return;
+  //   }
 
-    this->VisitExpr(op->a);
-  }
+  //   this->VisitExpr(op->a);
+  // }
 
   PrimExpr result_;
   CompareOp comp_op{kGreater};
