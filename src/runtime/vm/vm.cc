@@ -329,11 +329,6 @@ void VirtualMachine::InvokeGlobal(const VMFunction& func, const std::vector<Obje
                                   const int offset) {
   VLOG(2) << "Invoking global " << func.name << " " << args.size();
 
-  // PushFrame(func.params.size(), this->pc_ + 1, func);
-  // for (size_t i = 0; i < args.size(); ++i) {
-  //   WriteRegister(i, args[i]);
-  // }
-
   PushFrame(func.params.size(), this->pc_ + 1, func);
   for (size_t i = 0; i < func.params.size(); ++i) {
     WriteRegister(i, args[i + offset]);
@@ -352,14 +347,10 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
-  // auto start = std::chrono::high_resolution_clock::now();
-
   for (int i = 0; i < batch_size_; ++i) {
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();
   }
-
-  // auto mid = std::chrono::high_resolution_clock::now();
 
   if (lazy_execution_) {
     if (batched_execution_) {
@@ -368,13 +359,6 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
       shared_state_->lazy_executor_.Execute();
     }
   }
-
-  // auto end = std::chrono::high_resolution_clock::
-  // std::cout << "[TIME] "
-  // << std::chrono::duration_cast<std::chrono::microseconds>(mid - start).count() / 1000
-  // << " "
-  // << std::chrono::duration_cast<std::chrono::microseconds>(end - mid).count() / 1000
-  // << std::endl;
 
   return return_register_;
 }
@@ -400,7 +384,6 @@ void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index out
                      args.data(), args.size(), shared_state_->batched_func_arg_mode_[packed_index],
                      batched, this->scattered_kernels_);
     } else {
-      // std::cout << "[VM] Executing " << packed_index << std::endl;
       InvokePackedFn(shared_state_->packed_funcs_[packed_index], arg_count, output_size,
                      args.data(), args.size(), {}, batched, this->scattered_kernels_);
     }
@@ -408,33 +391,20 @@ void VirtualMachine::InvokePacked(Index packed_index, Index arg_count, Index out
 }
 
 void VirtualMachine::LoadExecutable(Executable* exec) {
-  std::cout << "HL 2.1" << std::endl;
-
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
       << "Need to load late-bound-constants before creating VM";
 
-  std::cout << "HL 2.1.1" << std::endl;
-
   shared_state_->exec_ = exec;
 
-  std::cout << "HL 2.1.2" << std::endl;
-
   runtime::Module lib = shared_state_->exec_->GetLib();
-
-  std::cout << "HL 2.1.3" << std::endl;
 
   ICHECK(exec->primitive_map.empty() || lib.operator->())
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
-  std::cout << "HL 2.1.4 " << this->shared_state_ << " " << shared_state_->exec_ << std::endl;
-
-  this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
-  std::cout << "HL 2.1.5" << std::endl;
-  this->shared_state_->prim_func_arg_access_mode_ = shared_state_->exec_->prim_func_arg_access_mode;
-
-  std::cout << "HL 2.2" << std::endl;
+  this->shared_state_->batched_func_arg_mode_ = exec->batched_func_arg_mode;
+  this->shared_state_->prim_func_arg_access_mode_ = exec->prim_func_arg_access_mode;
 
   for (const auto& it : shared_state_->exec_->primitive_map) {
     const auto& packed_name = it.first;
@@ -447,12 +417,8 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     shared_state_->packed_funcs_[packed_index] = pf;
 
-    if (batched_execution_) {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                << shared_state_->exec_->batched_func_arg_mode[packed_index].size() << std::endl;
-    } else {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
-    }
+    std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
+
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
@@ -466,29 +432,7 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
         shared_state_->batched_funcs_[packed_index] = bit->second;
       }
     }
-
-    if (coarsened_execution_) {
-      std::cout << "[VM]   ArgAccessModes: [";
-      for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
-           ++i) {
-        std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
-      }
-      std::cout << "]" << std::endl;
-    }
   }
-
-  // for (const auto& it : shared_state_->exec_->primitive_map) {
-  //   const auto& packed_name = it.first;
-  //   ICHECK(Registry::Get(packed_name)->body());
-  // }
-
-  // for (auto name : Registry::ListNames()) {
-  //   const PackedFunc* f = Registry::Get(name);
-  //   if (!f->body()) {
-  //     std::cout << "[VM] NoBody1 " << name << std::endl;
-  //   }
-  // }
-  std::cout << "HL 2.5" << std::endl;
 
   for (size_t i = 0; i < shared_state_->packed_funcs_.size(); ++i) {
     ICHECK(shared_state_->packed_funcs_[i] != nullptr)
@@ -526,7 +470,6 @@ void VirtualMachine::Init(const std::vector<Device>& physical_devices,
 }
 
 inline void VirtualMachine::WriteRegister(Index r, const ObjectRef& val) {
-  // std::cout << "[VM] Wrtiting to register " << r << " " << val.defined() << std::endl;
   frames_.back().register_file[r] = val;
 }
 

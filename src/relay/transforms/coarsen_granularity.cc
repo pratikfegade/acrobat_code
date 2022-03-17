@@ -196,8 +196,9 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
  private:
   void AddToGroup(Expr expr, const std::string& reason) {
     if (print_) {
-      std::cout << "[CG] Found group " << reason << std::endl;
-      std::cout << "[GROUP]  \n " << PrettyPrint(RemoveOnDeviceCalls(expr)) << "\n\n" << std::endl;
+      // std::cout << "[CG] Found group " << reason << std::endl;
+      // std::cout << "[GROUP]  \n " << PrettyPrint(RemoveOnDeviceCalls(expr)) << "\n\n" <<
+      // std::endl;
     }
     found_groups_.insert(expr);
   }
@@ -271,9 +272,9 @@ class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
       return {true, value_res.has_op_calls || body_res.has_op_calls};
     } else if (value_res.is_allowed()) {
       AddToGroup(op->value, "let_value");
-      std::cout << "[GROUP]  Offending body\n " << PrettyPrint(RemoveOnDeviceCalls(op->body))
-                << "\n\n"
-                << std::endl;
+      // std::cout << "[GROUP]  Offending body\n " << PrettyPrint(RemoveOnDeviceCalls(op->body))
+      //           << "\n\n"
+      //           << std::endl;
 
     } else if (body_res.is_allowed()) {
       AddToGroup(op->body, "let_body");

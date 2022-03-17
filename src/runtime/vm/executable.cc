@@ -94,7 +94,6 @@ PackedFunc Executable::GetFunction(const std::string& name, const ObjectPtr<Obje
       }
       vm->SetExecutionOptions(options);
       vm->InitSharedState();
-      std::cout << "HL 2" << std::endl;
       vm->LoadExecutable(this);
       *rv = Module(vm);
     });
@@ -1065,7 +1064,6 @@ void Executable::SaveToBinary(dmlc::Stream* stream) {
   auto code_bytes = this->Save();
   std::string code(code_bytes.data, code_bytes.size);
   stream->Write(code);
-
   ICHECK(this->imports()[0].defined()) << "the library must be imported before serialization";
 }
 
@@ -1083,6 +1081,11 @@ void Executable::SaveToFile(const std::string& path, const std::string& format) 
   dmlc::SeekStream* strm = &writer;
   SaveToBinary(strm);
   SaveBinaryToFile(path, data);
+}
+
+void Executable::SaveToFileByteArray(const std::string& path, const std::string& format) {
+  auto bytes = Save();
+  SaveBinaryToFile(path, bytes);
 }
 
 TVM_REGISTER_GLOBAL("runtime.module.loadbinary_VMExecutable").set_body_typed(ExecutableLoadBinary);

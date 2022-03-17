@@ -406,7 +406,7 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
     std::vector<State> temp_states(population);
 
     // Sample a batch of states randomly
-    support::parallel_for(0, population, [this, &temp_states, &sketches, &rand_gens](int index) {
+    auto iteration_body = [this, &temp_states, &sketches, &rand_gens](int index) {
       // Randomly choose a sketch
       State tmp_s = sketches[(rand_gens[index])() % sketches.size()];
       // Apply random annotation rules one by one
@@ -421,7 +421,13 @@ Array<State> SketchPolicyNode::SampleInitPopulation(const Array<State>& sketches
       if (valid) {
         temp_states[index] = std::move(tmp_s);
       }
-    });
+    };
+
+    for (size_t i = 0; i < population; ++i) {
+      iteration_body(i);
+    }
+
+    // support::parallel_for(0, population, iteration_body);
 
     int num_temp_states = temp_states.size();
     // Filter out the states that were failed to apply initial rules

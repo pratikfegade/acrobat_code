@@ -4,6 +4,7 @@ import tvm
 import tvm.runtime as trt
 from tvm import relay
 from tvm import auto_scheduler
+from utils import get_ansor_log_file
 
 device = tvm.runtime.device("cpu")
 target = "llvm"
@@ -14,7 +15,6 @@ batch_size = 20
 
 mod, params = relay.testing.lstm.get_workload(iterations, hidden_size)
 print(mod)
-exit()
 
 lazy_execution=True
 coarsened_execution=False
@@ -34,7 +34,7 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
     opt_level=3)
 
-log_file = "logs/maskrcnn_rtx3070.log"
+log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
         # print("extracting task")
@@ -78,6 +78,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule(False)
+auto_schedule(False)
 print("===============================================================================", flush=True)
 execute()

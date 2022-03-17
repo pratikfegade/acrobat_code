@@ -73,6 +73,7 @@ void LoadBinaryFromFile(const std::string& file_name, std::string* data);
  * \param data The binary data to be saved.
  */
 void SaveBinaryToFile(const std::string& file_name, const std::string& data);
+void SaveBinaryToFile(const std::string& file_name, const TVMByteArray& data);
 
 /*!
  * \brief Save meta data to file.

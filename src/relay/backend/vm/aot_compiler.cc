@@ -45,6 +45,11 @@ std::string ToLowerCase(std::string s) {
                  [](unsigned char c) -> unsigned char { return std::tolower(c); });
   return s;
 }
+std::string ToUpperCase(std::string s) {
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) -> unsigned char { return std::toupper(c); });
+  return s;
+}
 
 std::string DTypeToStr(const DLDataType& dtype) {
   return "{" + std::to_string(dtype.code) + ", " + std::to_string(dtype.bits) + ", " +
@@ -755,6 +760,10 @@ void VMAOTCompiler::DeclareADT(std::ostream& os, const TypeData& adt, bool inclu
   // For each constructor, create a subclass
   for (auto constructor : adt->constructors) {
     std::string constructor_name = constructor->name_hint;
+
+    os << "#define " << ToUpperCase(type_name) << "_" << ToUpperCase(constructor_name) << "_TAG "
+       << constructor->tag << "\n";
+
     if (has_type_vars) {
       os << "template<" << type_vars_decl << ">\n";
     }
@@ -878,8 +887,8 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   }
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> "
         "runner) {\n";
-  os << "  int w_iters = 100;\n";
-  os << "  int a_iters = 400;\n";
+  os << "  int w_iters = 50;\n";
+  os << "  int a_iters = 100;\n";
   os << "  for (int i = 0; i < w_iters; ++i) {\n";
   os << "    runner();\n";
   os << "  }\n";

@@ -431,7 +431,7 @@ def te_compiler_update_weights(function_weights):
     """
     env = TracingEnvironment.current
     if env is not None:
-        print("Resetting the map")
+        # print("Resetting the map")
         # Override this map with the weights in the TE compiler.
         env.wkl_key_to_weight = {}
 

@@ -75,6 +75,7 @@ void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int6
     shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
                                                         num_args);
   } else {
+    // std::cout << "Invoking " << packed_index << std::endl;
     InvokePackedFnUnrolled(shared_state_->packed_funcs_[packed_index], output_size, args, num_args);
   }
 }
@@ -336,14 +337,15 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
       }
     }
 
-    if (coarsened_execution_) {
-      std::cout << "[VM]   ArgAccessModes: [";
-      for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
-           ++i) {
-        std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
-      }
-      std::cout << "]" << std::endl;
-    }
+    // if (coarsened_execution_) {
+    //   std::cout << "[VM]   ArgAccessModes: [";
+    //   for (size_t i = 0; i <
+    //   this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
+    //        ++i) {
+    //     std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
+    //   }
+    //   std::cout << "]" << std::endl;
+    // }
   }
 
   // for (const auto& it : shared_state_->exec_->primitive_map) {

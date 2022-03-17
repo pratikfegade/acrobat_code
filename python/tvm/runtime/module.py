@@ -95,7 +95,6 @@ class BenchmarkResult:
             self.std * 1000,
         )
 
-
 class Module(object):
     """Runtime Module."""
 
@@ -461,6 +460,10 @@ class Module(object):
             kwargs.update({"options": opts})
 
         return fcompile(file_name, files, **kwargs)
+
+@tvm._ffi.register_func("relay.db.llvm_module.export_lib")
+def relay_db_llvm_module_export_lib(module, filename):
+    module.export_library(filename)
 
 
 def system_lib():

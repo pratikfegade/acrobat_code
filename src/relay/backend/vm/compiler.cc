@@ -66,6 +66,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_lazy_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_batched_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_scattered_kernels", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_concurrent_execution", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_generate_aot_code", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_dynamic_batch_size_estimate", Integer);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_aot_output_directory", String);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_model_name", String);
@@ -1257,15 +1258,17 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     backend::UpdateAutoSchedulerOpWeights(context_.module);
   }
 
-  auto output_directory = PassContext::Current()
-                              ->GetConfig<String>("relay.db_aot_output_directory", String("./"))
-                              .value();
-  auto model_name = PassContext::Current()
-                        ->GetConfig<String>("relay.db_model_name", String("model_name"))
-                        .value();
-  VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                get_field_tags, output_directory, model_name)
-      .Codegen();
+  if (PassContext::Current()->GetConfig<Bool>("relay.db_generate_aot_code", Bool(false)).value()) {
+    auto output_directory = PassContext::Current()
+                                ->GetConfig<String>("relay.db_aot_output_directory", String("./"))
+                                .value();
+    auto model_name = PassContext::Current()
+                          ->GetConfig<String>("relay.db_model_name", String("model_name"))
+                          .value();
+    VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
+                  get_field_tags, output_directory, model_name)
+        .Codegen();
+  }
 }
 
 transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
@@ -1445,10 +1448,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
   }
-  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
 
   pass_seqs.push_back(transform::InferType());
-  // pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
@@ -1515,6 +1518,26 @@ void VMCompiler::Codegen() {
   lib = codegen::CreateMetadataModule(params_, lib, ext_mods, config_->host_target,
                                       Runtime::Create("cpp"), runtime::Metadata());
   exec_->SetLib(lib);
+
+  if (PassContext::Current()->GetConfig<Bool>("relay.db_generate_aot_code", Bool(false)).value()) {
+    auto output_directory = PassContext::Current()
+                                ->GetConfig<String>("relay.db_aot_output_directory", String("./"))
+                                .value();
+    auto model_name = PassContext::Current()
+                          ->GetConfig<String>("relay.db_model_name", String("model_name"))
+                          .value();
+
+    std::string exe_file_name = model_name + ".ro";
+    exec_->SaveToFileByteArray(output_directory + "/" + exe_file_name, "ro");
+    std::string lib_file_name = model_name + "_lib.so";
+    // lib->SaveToFile(output_directory + "/" + lib_file_name, "o");
+    std::cout << "[AOT]  " << output_directory + "/" + exe_file_name << std::endl;
+    std::cout << "[AOT]  " << output_directory + "/" + lib_file_name << std::endl;
+
+    const auto* fexport_lib = runtime::Registry::Get("relay.db.llvm_module.export_lib");
+    ICHECK(fexport_lib != nullptr) << "relay.db.llvm_module.export_lib";
+    (*fexport_lib)(lib, output_directory + "/" + lib_file_name);
+  }
 }
 
 runtime::Module CreateVMCompiler() {

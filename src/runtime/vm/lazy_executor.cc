@@ -86,23 +86,11 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
     }
   }
 
-  if (is_empty_output) {
-    return;
+  if (!is_empty_output) {
+    OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
+                unrolled_output_size, args_copy);
+    nodes_.push_back(node);
   }
-
-  // std::cout << "Op " << nodes_.size() << std::endl;
-  // size_t i = 0;
-  // for (; i < unrolled_input_size; ++i) {
-  // std::cout << " I " << args_copy[i].get() << std::endl;
-  // }
-
-  // for (; i < unrolled_input_size + unrolled_output_size; ++i) {
-  // std::cout << " O " << args_copy[i].get() << std::endl;
-  // }
-
-  OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
-              unrolled_output_size, args_copy);
-  nodes_.push_back(node);
 }
 
 void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
@@ -117,11 +105,6 @@ void LazyExecutor::Execute() {
     InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
                            node.args_.data(), node.args_.size());
   }
-  // for (OpNode& node : nodes_) {
-  //   for (size_t i = 0; i < node.args_.size(); i++) {
-  //     node.args_[i]->MarkUsedForLazyExecution();
-  //   }
-  // }
   nodes_.clear();
 }
 
@@ -138,17 +121,12 @@ void LazyExecutor::ExecuteOpNodeBatch(
       ICHECK_EQ(func_nodes[0]->args_.size(), func_nodes[i]->args_.size());
     }
 
-    // std::cout << "[VMU]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
+    // std::cout << "[LE]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
     if (func_nodes.size() == 1) {
-      // std::cout << "[VMU] Executing " << func_idx << " " << func_nodes.size() << std::endl;
       InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->output_size_,
                              func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
     } else {
       auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
-      // std::cout << "[VMU] Executing " << batched_func_idx << " " << func_nodes.size() <<
-      // std::endl; for (auto i : vm_shared_state_->batched_func_arg_mode_[batched_func_idx]) {
-      // std::cout << "[VMU]   ArgMode " << i << std::endl;
-      // }
       InvokePackedFnBatchedUnrolled(vm_shared_state_->packed_funcs_[batched_func_idx],
                                     func_nodes[0]->arg_count_, func_nodes[0]->output_size_,
                                     vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
@@ -158,23 +136,6 @@ void LazyExecutor::ExecuteOpNodeBatch(
 }
 
 void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
-  // std::cout << "[VMU] BatchedExecuting " << nodes_.size() << " " << all_nodes_same_depth
-  // << std::endl;
-
-  /////////////////////////////////////////////////////////////////////////////////////////
-  for (OpNode& node : nodes_) {
-    // auto batched_func_idx = vm_shared_state_->batched_funcs_[node.func_idx_];
-    // InvokePackedFnBatchedUnrolled(
-    // vm_shared_state_->packed_funcs_[batched_func_idx], node.arg_count_, node.output_size_,
-    // vm_shared_state_->batched_func_arg_mode_[batched_func_idx], {&node});
-
-    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
-                           node.args_.data(), node.args_.size());
-  }
-  nodes_.clear();
-  return;
-  /////////////////////////////////////////////////////////////////////////////////////////
-
   if (all_nodes_same_depth) {
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;
     for (auto& node : nodes_) {
@@ -212,9 +173,6 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
         node_to_depth[i] = node_depth;
         depth_to_node[node_depth].push_back(&node);
         graph_depth = std::max(graph_depth, node_depth);
-        // std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
-        // << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
-        // << std::endl;
       }
     } else {
       for (OpNode& node : nodes_) {
@@ -238,9 +196,6 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
         node_to_depth[i] = node_depth;
         depth_to_node[node_depth].push_back(&node);
         graph_depth = std::max(graph_depth, node_depth);
-        // std::cout << "[VMU]   Node " << i << " " << node_depth << " " << node.func_idx_ << " "
-        // << node.InputStart() << " " << node.OutputStart() << " " << node.OutputEnd()
-        // << std::endl;
       }
     }
 

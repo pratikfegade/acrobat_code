@@ -87,6 +87,7 @@ class Executable : public ModuleNode {
    * \param format The format of the serialized blob.
    */
   void SaveToFile(const std::string& path, const std::string& format) final;
+  void SaveToFileByteArray(const std::string& path, const std::string& format);
 
   /*!
    * \brief Serialize the executable into global section, constant section, and

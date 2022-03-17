@@ -1,27 +1,31 @@
 import os
+import sys
 import timeit
 import numpy as np
 import tvm
 from tvm import relay
 from tvm import auto_scheduler
 from converter import initialize_tlstm, generate_random_trees, get_random_tensor
+sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
+from utils import get_ansor_log_file
 
 device = tvm.runtime.device("cpu")
 
-hidden_size = 1
-batch_size = 8
+hidden_size = 256
+batch_size = 32
 num_nodes = 6
 
 target = "llvm"
-lazy_execution=False
+lazy_execution=True
 coarsened_execution=True
-batched_execution=False
-scattered_kernels=False
+batched_execution=True
+scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=False
+use_autoscheduler=True
 aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
 model_name="treelstm"
-dynamic_batch_size_estimate=64
+generate_aot_code=True
+dynamic_batch_size_estimate=256
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
@@ -47,19 +51,8 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     batch_size=batch_size,
     aot_output_directory=aot_output_directory,
     model_name=model_name,
+    generate_aot_code=generate_aot_code,
     opt_level=3)
-
-def get_ansor_log_file(model_name, parameters, pass_context, target):
-    batched_execution = pass_context.config["relay.db_batched_execution"]
-    dynamic_batch_size_estimate = pass_context.config["relay.db_dynamic_batch_size_estimate"]
-    config_str = ("%d_%d_%s") % (batched_execution, dynamic_batch_size_estimate, target)
-    model_str = model_name + "_" + "_".join([str(i) for i in parameters])
-    file_name = model_str + "_" + config_str + ".log"
-    print(file_name)
-    log_dir = "ansor_logs/"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    return log_dir + file_name
 
 def print_time(time):
     print(
@@ -74,49 +67,46 @@ def print_time(time):
         time
     )
 
-log_file = get_ansor_log_file("treelstm", [hidden_size], pass_context, target)
+log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
         tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                            include_simple_tasks=True)
 
-        # for idx, task in enumerate(tasks):
-            # print("========== Task %d  (workload key: %s, weight: %s) ==========" %
-                  # (idx, task.workload_key, task_weights[idx]))
-            # print(task.compute_dag)
         if tune:
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=1000,  # change this to 20000 to achieve the best performance
+                num_measure_trials=20000,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
             )
             tuner.tune(tune_option)
+
+        # for task in tasks:
+        #     try:
+        #         print("YOLO", task.print_best(log_file), flush=True)
+        #     except Exception:
+        #         pass
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
         with pass_context:
             executor = relay.backend.vm.VMExecutor(mod, device, target)
-            executable = executor.compile(params=weights_dict)
-            executable.save_to_file(aot_output_directory + "/treelstm.ro",
-                                    aot_output_directory + "/treelstm_lib.so")
-            exit(0)
-            # fin_executor = executor._make_executor(execution_options=execution_options)
-            # params_list = []
-            # if use_autoscheduler:
-                # for tree in trees: params_list += [tree]
-            # else:
-                # for tree in trees: params_list += weights_list + [tree]
+            if generate_aot_code:
+                executable = executor.compile(params=weights_dict)
+            else:
+                fin_executor = executor._make_executor(execution_options=execution_options, params=weights_dict)
+                params_list = []
+                for tree in trees: params_list += [tree]
 
-            # executor.vm.set_input("main", batch_size, *params_list)
+                executor.vm.set_input("main", batch_size, *params_list)
 
-            fin_executor()
-            # iters = 20
-            # timeit.timeit(fin_executor, number=iters)
-            # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
+                # fin_executor()
+                iters = 100
+                timeit.timeit(fin_executor, number=50)
+                print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule((not os.path.exists(log_file)))
+auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

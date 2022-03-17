@@ -103,6 +103,7 @@ struct NDArray::Internal {
     if (ptr->manager_ctx != nullptr) {
       static_cast<NDArray::Container*>(ptr->manager_ctx)->DecRef();
     } else if (ptr->dl_tensor.data != nullptr) {
+      // std::cout << "[ND] Freeing " << ptr->dl_tensor.data << std::endl;
       tvm::runtime::DeviceAPI::Get(ptr->dl_tensor.device)
           ->FreeDataSpace(ptr->dl_tensor.device, ptr->dl_tensor.data);
     }

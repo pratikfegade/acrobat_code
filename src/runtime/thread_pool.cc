@@ -398,6 +398,13 @@ int TVMBackendParallelLaunch(FTVMParallelLambda flambda, void* cdata, int num_ta
     return res;
 #else
     if (num_task == 0) num_task = num_workers;
+
+    // for (size_t i = 0; i < num_task; ++i) {
+    // TVMParallelGroupEnv env;
+    // env.num_task = num_task;
+    // (*flambda)(i, &env, cdata);
+    // }
+
     omp_set_num_threads(num_task);
 #pragma omp parallel num_threads(num_task)
     {

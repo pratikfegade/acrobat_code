@@ -34,6 +34,7 @@
 
 #include "../../arith/interval_set.h"
 #include "../../runtime/thread_storage_scope.h"
+#include "../../support/utils.h"
 #include "ir_utils.h"
 
 namespace tvm {
@@ -276,6 +277,8 @@ class PartitionFinder : public StmtExprVisitor {
     if (UsesVar(cond, [this](const VarNode* var) { return var == current_var_.get(); })) {
       IntSet interval = DeduceBound(current_var_, cond, hint_map_, relax_map_);
       if (!interval.IsNothing()) {
+        std::cout << "[LP]  Partition for " << cond << " " << current_var_ << std::endl;
+        std::cout << "[LP]     " << interval << std::endl;
         // cond is true within interval
         partitions[{cond, true}] = interval;
       }
@@ -283,6 +286,8 @@ class PartitionFinder : public StmtExprVisitor {
       if (inverse_cond.defined()) {
         IntSet interval = DeduceBound(current_var_, inverse_cond, hint_map_, relax_map_);
         if (!interval.IsNothing()) {
+          std::cout << "[LP]  Partition for " << inverse_cond << " " << current_var_ << std::endl;
+          std::cout << "[LP]     " << interval << std::endl;
           // cond is false within interval
           partitions[{cond, false}] = interval;
         }
@@ -379,6 +384,7 @@ class LoopPartitioner : public StmtMutator {
 
   Stmt VisitAndMutate(Stmt stmt) {
     selector(stmt);
+    // std::cout << "[LP] Selector candidates: " << selector.candidates.size() << std::endl;
     return operator()(std::move(stmt));
   }
 
@@ -514,6 +520,7 @@ std::pair<IntSet, ExpressionSet> LoopPartitioner::GetIntervalAndCondset(
  */
 Stmt LoopPartitioner::TryPartition(const Stmt& stmt, Var var, PrimExpr min, PrimExpr max, Stmt body,
                                    bool partition_thread_scope) {
+  // std::cout << "[LP] Try Partition: " << var << std::endl;
   using namespace arith;
   // include hint of var.
   hint_map_.insert({var.get(), IntSet::Interval(min, max)});
@@ -521,6 +528,8 @@ Stmt LoopPartitioner::TryPartition(const Stmt& stmt, Var var, PrimExpr min, Prim
   bool has_partition_hint_ = selector.partition_hint_vars.count(var.get());
   PartitionFinder finder(var, hint_map_, relax_map_, has_partition_hint_);
   finder(body);
+
+  // std::cout << "[LP]  Partitions: " << finder.partitions.size() << std::endl;
 
   hint_map_.erase(var.get());
   if (finder.partitions.empty()) return Stmt();
@@ -683,6 +692,11 @@ Pass LoopPartition() {
     if (!cfg.defined()) {
       cfg = AttrsWithDefaultValues<LoopPartitionConfig>();
     }
+    auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol).value();
+    // if (support::StartsWith(global_symbol, "vm_mod")) {
+    // std::cout << "[LP] Partition for " << global_symbol << std::endl;
+    // }
+
     n->body = LoopPartition(std::move(n->body), cfg.value()->partition_const_loop,
                             cfg.value()->no_unroll_loop_with_extent_one);
     return f;

@@ -68,7 +68,8 @@ class OpNode {
   const Index func_idx_;
   const Index arg_count_;
   const Index output_size_;
-  const std::vector<NDArray> args_;
+  // const std::vector<NDArray> args_;
+  std::vector<NDArray> args_;
 };
 
 /*!

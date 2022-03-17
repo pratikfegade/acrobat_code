@@ -133,6 +133,10 @@ void SaveBinaryToFile(const std::string& file_name, const std::string& data) {
   fs.write(&data[0], data.length());
 }
 
+void SaveBinaryToFile(const std::string& file_name, const TVMByteArray& data) {
+  std::ofstream(file_name, std::ios::binary).write(data.data, data.size);
+}
+
 void SaveMetaDataToFile(const std::string& file_name,
                         const std::unordered_map<std::string, FunctionInfo>& fmap) {
   std::string version = "0.1.0";
