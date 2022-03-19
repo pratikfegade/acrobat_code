@@ -822,9 +822,9 @@ class BetterCoarsener : public ExprMutator {
       if (!in_group) {
         start = i;
         in_group = true;
-        // if (print_) {
-        //   std::cout << "\n\n[CG] GROUPSTART" << std::endl;
-        // }
+        if (print_) {
+          std::cout << "\n\n[CG] GROUPSTART" << std::endl;
+        }
       }
       if (op_call) {
         last_call_id = i;
@@ -832,35 +832,33 @@ class BetterCoarsener : public ExprMutator {
       }
       ICHECK_GE(start, 0);
 
-      // if (print_) {
-      //   auto& p = flattened[i];
-      //   std::cout << "[CG] - " << p.first->name_hint() << " = "
-      //             << PrettyPrint(RemoveOnDeviceCalls(p.second)) << " " << op_calls_in_group << "
-      //             "
-      //             << op_call << " " << static_cast<int>(op_call) << std::endl;
-      // }
+      if (print_) {
+        auto& p = flattened[i];
+        std::cout << "[CG] - " << p.first->name_hint() << " = "
+                  << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
+      }
     };
 
     auto end_group = [&](size_t i) {
       if (in_group) {
         ICHECK_GE(start, 0);
-        if (op_calls_in_group > 1) {
+        if (op_calls_in_group > 0) {
           ICHECK_GE(last_call_id, 0);
           groups[last_call_id] = start;
+        }
+        if (print_) {
+          std::cout << "[CG] GROUPEND " << (op_calls_in_group > 0) << std::endl;
         }
         start = -1;
         op_calls_in_group = 0;
         in_group = false;
-        // if (print_) {
-        //   std::cout << "[CG] GROUPEND" << std::endl;
-        // }
       }
       ICHECK_EQ(start, -1);
-      // if (print_) {
-      //   auto& p = flattened[i];
-      //   std::cout << "[CG] x " << p.first->name_hint() << " = "
-      //             << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
-      // }
+      if (print_) {
+        auto& p = flattened[i];
+        std::cout << "[CG] x " << p.first->name_hint() << " = "
+                  << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
+      }
     };
 
     for (size_t i = 0; i < flattened.size(); ++i) {
@@ -913,15 +911,21 @@ class BetterCoarsener : public ExprMutator {
         end_group(i);
       }
     }
+    if (in_group) {
+      end_group(flattened.size() - 1);
+    }
 
     if (print_) {
       std::cout << "[CG] Found groups: " << groups.size() << std::endl;
     }
+
+    body = this->VisitExpr(body);
+
     for (int i = static_cast<int>(flattened.size()) - 1; i >= 0;) {
       auto it = groups.find(i);
       if (it == groups.end()) {
         auto& p = flattened[i];
-        body = Let(p.first, p.second, body);
+        body = Let(p.first, this->VisitExpr(p.second), body);
         --i;
       } else {
         auto start = it->second;
@@ -956,10 +960,11 @@ class BetterCoarsener : public ExprMutator {
         prim_func = AddAttrsToWrapperFunc(prim_func, name, false);
         prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
-        if (groups.size() > 0) {
-          std::cout << "[CG] Body before adding bindings " << PrettyPrint(RemoveOnDeviceCalls(body))
-                    << std::endl;
-        }
+        // if (groups.size() > 0) {
+        //   std::cout << "[CG] Body before adding bindings " <<
+        //   PrettyPrint(RemoveOnDeviceCalls(body))
+        //             << std::endl;
+        // }
 
         for (int j = static_cast<int>(bindings.size()) - 1; j >= 0; --j) {
           auto& p = bindings[j];
@@ -975,9 +980,9 @@ class BetterCoarsener : public ExprMutator {
       }
     }
 
-    if (groups.size() > 0) {
-      std::cout << "[CG] Body " << PrettyPrint(RemoveOnDeviceCalls(body)) << std::endl;
-    }
+    // if (groups.size() > 0) {
+    // std::cout << "[CG] Body " << PrettyPrint(RemoveOnDeviceCalls(body)) << std::endl;
+    // }
 
     return body;
   }

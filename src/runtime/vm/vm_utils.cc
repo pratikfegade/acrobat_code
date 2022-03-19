@@ -199,6 +199,8 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   for (size_t i = 0; i < arity; i++) {
+    std::cout << "  ARG " << ShapeToString(args[i].Shape()) << std::endl;
+    TestNDArray(args[i]);
     setter(i, args[i]);
   }
 
