@@ -131,16 +131,16 @@ NDArray CreatePointerNDArray(const std::vector<OpNode*>& nodes, int arg_num) {
   constexpr size_t unroll_factor = 16;
   size_t preloop_bound = size / unroll_factor;
 
-#pragma omp parallel for
-  for (size_t jo = 0; jo < preloop_bound; ++jo) {
-#pragma GCC unroll unroll_factor
-    for (size_t ji = 0; ji < unroll_factor; ++ji) {
-      size_t j = jo * unroll_factor + ji;
-      raw_data[j] = nodes[j]->args_[arg_num]->data;
-    }
-  }
+  // #pragma omp parallel for
+  //   for (size_t jo = 0; jo < preloop_bound; ++jo) {
+  // #pragma GCC unroll unroll_factor
+  //     for (size_t ji = 0; ji < unroll_factor; ++ji) {
+  //       size_t j = jo * unroll_factor + ji;
+  //       raw_data[j] = nodes[j]->args_[arg_num]->data;
+  //     }
+  //   }
 
-  for (size_t j = preloop_bound; j < size; ++j) {
+  for (size_t j = 0; j < size; ++j) {
     raw_data[j] = nodes[j]->args_[arg_num]->data;
   }
 
@@ -189,18 +189,15 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
 }
 
 void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
-                            const NDArray* args, int num_args) {
+                            const NDArray* args, int arity) {
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("arg_prep_unbatched");
   }
-  size_t arity = num_args;
 
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   for (size_t i = 0; i < arity; i++) {
-    std::cout << "  ARG " << ShapeToString(args[i].Shape()) << std::endl;
-    TestNDArray(args[i]);
     setter(i, args[i]);
   }
 
@@ -255,11 +252,10 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
         break;
       }
       case kScatter: {
-        auto ptr_array = CreatePointerNDArray(nodes, i);
-        arg_holder[i] = ptr_array;
-        setter(ctr, ptr_array);
+        arg_holder[i] = CreatePointerNDArray(nodes, i);
+        setter(ctr, arg_holder[i]);
         if (print) {
-          std::cout << "[VMU]    ArgScatter " << ctr << " " << ShapeToString(ptr_array.Shape())
+          std::cout << "[VMU]    ArgScatter " << ctr << " " << ShapeToString(arg_holder[i].Shape())
                     << std::endl;
         }
         ctr += 1;

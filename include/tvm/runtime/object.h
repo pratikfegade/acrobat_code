@@ -37,7 +37,7 @@
  *  We can, however, move an object across threads
  */
 #ifndef TVM_OBJECT_ATOMIC_REF_COUNTER
-#define TVM_OBJECT_ATOMIC_REF_COUNTER 1
+#define TVM_OBJECT_ATOMIC_REF_COUNTER 0
 #endif
 
 #if TVM_OBJECT_ATOMIC_REF_COUNTER

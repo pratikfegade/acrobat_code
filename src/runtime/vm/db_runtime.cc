@@ -75,7 +75,7 @@ void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int6
     shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
                                                         num_args);
   } else {
-    std::cout << "Invoking " << packed_index << std::endl;
+    // std::cout << "Invoking " << packed_index << std::endl;
     InvokePackedFnUnrolled(packed_index, shared_state_->packed_funcs_[packed_index], output_size,
                            args, num_args);
   }

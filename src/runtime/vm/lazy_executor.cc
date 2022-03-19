@@ -99,8 +99,7 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
 void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
                                          const Index output_size, const NDArray* args,
                                          int num_args) {
-  std::vector<NDArray> args_copy(args, args + num_args);
-  nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args_copy);
+  nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args, num_args);
 }
 
 void LazyExecutor::Execute() {

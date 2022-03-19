@@ -1451,7 +1451,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
 
   pass_seqs.push_back(transform::InferType());
-  // pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("InferType2", true, false));
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

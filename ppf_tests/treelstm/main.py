@@ -11,15 +11,15 @@ from utils import get_ansor_log_file
 
 device = tvm.runtime.device("cpu")
 
-hidden_size = 256
+hidden_size = 1
 batch_size = 8
 num_nodes = 6
 
 target = "llvm -mcpu=core-avx2"
-lazy_execution=False
+lazy_execution=True
 coarsened_execution=True
-batched_execution=False
-scattered_kernels=False
+batched_execution=True
+scattered_kernels=True
 concurrent_execution=False
 use_autoscheduler=False
 aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"

@@ -936,14 +936,6 @@ class BetterCoarsener : public ExprMutator {
         }
         auto free_vars = GetFreeVarsInGroup(bindings);
 
-        // if (print_) {
-        //   std::cout << "[CG]   GROUP " << std::endl;
-        //   for (auto p : bindings) {
-        //     std::cout << "[CG]   " << p.first->name_hint() << " = "
-        //               << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
-        //   }
-        // }
-
         auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
                        .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
 
@@ -960,11 +952,19 @@ class BetterCoarsener : public ExprMutator {
         prim_func = AddAttrsToWrapperFunc(prim_func, name, false);
         prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
-        // if (groups.size() > 0) {
-        //   std::cout << "[CG] Body before adding bindings " <<
-        //   PrettyPrint(RemoveOnDeviceCalls(body))
-        //             << std::endl;
-        // }
+        if (batched_execution_) {
+          auto batched_res =
+              TIRLowererBatched(mod_, scattered_kernels_)
+                  .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
+          auto batched_func = batched_res.func;
+          std::string batched_name = runtime::vm::GetBatchedName(name);
+          GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
+          batched_func = AddAttrsToWrapperFunc(batched_func, batched_name, true);
+          // std::cout << "batched_func " << batched_func << std::endl;
+          prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
+          batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
+          batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
+        }
 
         for (int j = static_cast<int>(bindings.size()) - 1; j >= 0; --j) {
           auto& p = bindings[j];

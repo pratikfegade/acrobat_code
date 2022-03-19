@@ -57,6 +57,14 @@ class OpNode {
         output_size_(output_size),
         args_(args) {}
 
+  OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
+         const NDArray* args, int num_args)
+      : id_(id),
+        func_idx_(func_idx),
+        arg_count_(arg_count),
+        output_size_(output_size),
+        args_(args, args + num_args) {}
+
   inline Index InputStart() { return 0; }
 
   inline Index InputEnd() { return arg_count_ - output_size_; }
