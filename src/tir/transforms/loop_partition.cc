@@ -458,10 +458,14 @@ std::pair<IntSet, ExpressionSet> LoopPartitioner::GetIntervalAndCondset(
   Array<IntSet> sets;
   ExpressionSet cond_set;
 
+  // std::cout << "[LP] Intersecting sets " << cond_value << " " << for_interval << std::endl;
+
   for (const auto& kv : partitions) {
     if (kv.first.second == cond_value) {
       arith::IntervalSet interval = Downcast<arith::IntervalSet>(kv.second);
       arith::IntervalSet intersection = arith::Intersect(&analyzer_, interval, for_interval);
+      // std::cout << "[LP]  Interval " << interval << std::endl;
+      // std::cout << "[LP]   Intersection " << intersection << std::endl;
       if (!intersection->IsEmpty()) {
         sets.push_back(kv.second);
         cond_set.insert(kv.first.first);
@@ -538,6 +542,7 @@ Stmt LoopPartitioner::TryPartition(const Stmt& stmt, Var var, PrimExpr min, Prim
   bool cond_value;
   IntSet middle_interval;
   ExpressionSet cond_set;
+
   // find an interval in which all conditions on var are true
   std::tie(middle_interval, cond_set) =
       GetIntervalAndCondset(finder.partitions, for_interval, true);
@@ -594,6 +599,7 @@ Stmt LoopPartitioner::TryPartition(const Stmt& stmt, Var var, PrimExpr min, Prim
     post_doubt_begin = analyzer_.Simplify(middle_interval.max() + 1);
     if (!analyzer_.CanProve(middle_interval.max() == max)) {
       // require the extent to be non-negative
+      // std::cout << "[LP]    Post doubt extent " << max << " " << post_doubt_begin << std::endl;
       PrimExpr cond = (max - post_doubt_begin + 1 >= 0);
       if (!analyzer_.CanProve(cond)) {
         LOG(WARNING) << "Cannot prove: " << cond << ", when generating the post doubt loop";

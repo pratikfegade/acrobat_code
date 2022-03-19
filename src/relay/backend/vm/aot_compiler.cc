@@ -816,6 +816,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   os << "> res;\n";
   this->PrintIndent(os);
   os << "res.reserve(batch_size);\n";
+  this->PrintIndent(os);
   os << "for (size_t b = 0; b < batch_size; ++b) {\n";
   this->BeginScope();
   this->PrintIndent(os);
@@ -886,11 +887,15 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
     std::cout << "DEVICE " << d << std::endl;
   }
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> "
-        "runner) {\n";
+        "runner, bool profiling) {\n";
   os << "  int w_iters = 50;\n";
   os << "  int a_iters = 100;\n";
   os << "  for (int i = 0; i < w_iters; ++i) {\n";
   os << "    runner();\n";
+  os << "  }\n";
+
+  os << "  if (profiling) {\n";
+  os << "    VMDBProfiler::ProfileStart();\n";
   os << "  }\n";
 
   os << "  float cg_gen_time = 0.0;\n";
@@ -900,6 +905,10 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "    cg_gen_time += p.first;\n";
   os << "    cg_exe_time += p.second;\n";
   os << "  }\n\n";
+
+  os << "  if (profiling) {\n";
+  os << "    VMDBProfiler::ProfileStop();\n";
+  os << "  }\n";
 
   os << "  return std::make_pair(cg_gen_time / a_iters, cg_exe_time / a_iters);\n";
   os << "}\n";
@@ -957,16 +966,19 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
     }
   }
 
-  os << "  runtime->Init({" << device_list.str() << "}, {" << alloc_list.str() << "});\n";
+  os << "  std::vector<Device> devices = {" << device_list.str() << "};\n";
+
+  os << "  runtime->Init({devices}, {" << alloc_list.str() << "});\n";
 
   os << "  runtime->CacheConstants();\n";
-  os << "  invoke_model();\n";
+  os << "  invoke_model(devices);\n";
   os << "}\n\n";
 }
 
 void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
-  os << "void invoke_model()\n;";
-  os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner);\n";
+  os << "void invoke_model(std::vector<Device> devices)\n;";
+  os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner, "
+        "bool profiling = false);\n";
 }
 
 void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
@@ -995,6 +1007,7 @@ void VMAOTCompiler::EmitMacros(std::ostream& os) {}
 
 void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <dlpack/dlpack.h>\n";
+  os << "#include <tvm/runtime/vm/vm_profiling.h>\n";
   os << "#include <tvm/runtime/vm/db_runtime.h>\n";
   os << "#include <tvm/runtime/vm/arena.h>\n";
   os << "#include <stdexcept>\n";
@@ -1003,6 +1016,7 @@ void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <functional>\n";
   os << "#include <array>\n\n";
 
+  os << "using namespace tvm;\n";
   os << "using namespace tvm::runtime;\n";
   os << "using namespace tvm::runtime::vm;\n";
 }

@@ -1,6 +1,7 @@
 import os
 
 def get_ansor_log_file(model_name, parameters, pass_context, target):
+    target = target.split(' ')[0]
     batched_execution = pass_context.config["relay.db_batched_execution"]
     dynamic_batch_size_estimate = pass_context.config["relay.db_dynamic_batch_size_estimate"]
     config_str = ("%d_%d_%s") % (batched_execution, dynamic_batch_size_estimate, target)

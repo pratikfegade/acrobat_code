@@ -12,20 +12,20 @@ from utils import get_ansor_log_file
 device = tvm.runtime.device("cpu")
 
 hidden_size = 256
-batch_size = 32
+batch_size = 8
 num_nodes = 6
 
-target = "llvm"
-lazy_execution=True
+target = "llvm -mcpu=core-avx2"
+lazy_execution=False
 coarsened_execution=True
-batched_execution=True
-scattered_kernels=True
+batched_execution=False
+scattered_kernels=False
 concurrent_execution=False
-use_autoscheduler=True
+use_autoscheduler=False
 aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
-dynamic_batch_size_estimate=256
+dynamic_batch_size_estimate=64
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
@@ -83,11 +83,11 @@ def auto_schedule(tune):
             )
             tuner.tune(tune_option)
 
-        # for task in tasks:
-        #     try:
-        #         print("YOLO", task.print_best(log_file), flush=True)
-        #     except Exception:
-        #         pass
+        for task in tasks:
+            try:
+                print("YOLO", task.print_best(log_file))
+            except Exception:
+                pass
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
@@ -101,12 +101,11 @@ def execute():
                 for tree in trees: params_list += [tree]
 
                 executor.vm.set_input("main", batch_size, *params_list)
-
-                # fin_executor()
+                exit()
                 iters = 100
                 timeit.timeit(fin_executor, number=50)
                 print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule((not os.path.exists(log_file)))
+# auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

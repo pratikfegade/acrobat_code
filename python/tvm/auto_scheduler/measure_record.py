@@ -243,7 +243,6 @@ def load_best_record(filename, workload_key=None, target=None, include_compatibl
     best_res = None
 
     for inp, res in log_reader:
-        print(inp, res, (res.error_no != MeasureErrorNo.NO_ERROR))
         if res.error_no != MeasureErrorNo.NO_ERROR:
             continue
         if target and inp.task.target.kind.name != target.kind.name:

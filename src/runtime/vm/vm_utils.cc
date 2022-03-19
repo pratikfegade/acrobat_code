@@ -28,6 +28,7 @@
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/vm/vm.h>
+#include <tvm/runtime/vm/vm_profiling.h>
 
 #include <algorithm>
 #include <chrono>
@@ -120,14 +121,27 @@ void TestNDArray(const NDArray& array) {
   }
 }
 
-NDArray CreatePointerNDArray(std::vector<NDArray>& arrays) {
-  size_t size = arrays.size();
-  NDArray result =
-      NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
-                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, arrays[0]->device);
+NDArray CreatePointerNDArray(const std::vector<OpNode*>& nodes, int arg_num) {
+  size_t size = nodes.size();
+  NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
+                                  DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
+                                  nodes[0]->args_[arg_num]->device);
   void** raw_data = static_cast<void**>(result->data);
-  for (size_t i = 0; i < size; ++i) {
-    raw_data[i] = arrays[i]->data;
+
+  constexpr size_t unroll_factor = 16;
+  size_t preloop_bound = size / unroll_factor;
+
+#pragma omp parallel for
+  for (size_t jo = 0; jo < preloop_bound; ++jo) {
+#pragma GCC unroll unroll_factor
+    for (size_t ji = 0; ji < unroll_factor; ++ji) {
+      size_t j = jo * unroll_factor + ji;
+      raw_data[j] = nodes[j]->args_[arg_num]->data;
+    }
+  }
+
+  for (size_t j = preloop_bound; j < size; ++j) {
+    raw_data[j] = nodes[j]->args_[arg_num]->data;
   }
 
   // {
@@ -174,8 +188,11 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
   return result;
 }
 
-void InvokePackedFnUnrolled(const PackedFunc& func, Index output_size, const NDArray* args,
-                            int num_args) {
+void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
+                            const NDArray* args, int num_args) {
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("arg_prep_unbatched");
+  }
   size_t arity = num_args;
 
   std::vector<TVMValue> values(arity);
@@ -185,13 +202,24 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index output_size, const NDA
     setter(i, args[i]);
   }
 
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+    VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
+  }
   TVMRetValue rv;
   func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileDeviceStopCall();
+  }
 }
 
-void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index output_size,
+void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arity,
+                                   Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode*>& nodes) {
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
+  }
   // std::cout << "[UMA] Executing" << std::endl;
   bool print = false;
   ICHECK_EQ(arity, arg_modes.size());
@@ -215,7 +243,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         break;
       }
       case kReuse: {
-        arg_holder[i] = nodes[0]->args_[i];
+        // arg_holder[i] = nodes[0]->args_[i];
         setter(ctr, nodes[0]->args_[i]);
         if (print) {
           std::cout << "[VMU]    ArgReuse " << ctr << " "
@@ -225,12 +253,7 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
         break;
       }
       case kScatter: {
-        std::vector<NDArray> to_scatter(batch_size);
-        for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
-          to_scatter[j] = nodes[j]->args_[i];
-          nodes[j]->args_[i].MarkToBeUsedForLazyExecution();
-        }
-        auto ptr_array = CreatePointerNDArray(to_scatter);
+        auto ptr_array = CreatePointerNDArray(nodes, i);
         arg_holder[i] = ptr_array;
         setter(ctr, ptr_array);
         if (print) {
@@ -250,7 +273,6 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
           std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
         }
         NDArray concat_array = CreateConcatenatedNDArray(to_concat);
-        // nodes[0]->args_[i] = concat_array;
         arg_holder[i] = concat_array;
         setter(ctr, concat_array);
         if (print) {
@@ -266,8 +288,15 @@ void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arity, Index ou
   }
 
   // std::cout << "[VMU]    Calling " << ctr << " " << arity << std::endl;
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+    VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
+  }
   TVMRetValue rv;
   func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileDeviceStopCall();
+  }
 }
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,

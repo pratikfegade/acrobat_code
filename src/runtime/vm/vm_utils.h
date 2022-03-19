@@ -79,8 +79,8 @@ ObjectRef CopyTo(ObjectRef src, const DLDevice& dev);
  *
  * \note The return value will be stored in the last output_size slots of args.
  */
-void InvokePackedFnUnrolled(const PackedFunc& func, Index output_size, const NDArray* args,
-                            int num_args);
+void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
+                            const NDArray* args, int num_args);
 
 /*!
  * \brief Invoke a batch PackedFunction (refactored out to avoid code
@@ -96,7 +96,8 @@ void InvokePackedFnUnrolled(const PackedFunc& func, Index output_size, const NDA
  *
  * \note The return value will be stored in the last output_size slots of args.
  */
-void InvokePackedFnBatchedUnrolled(const PackedFunc& func, Index arg_count, Index output_size,
+void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arg_count,
+                                   Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode*>& nodes);
 

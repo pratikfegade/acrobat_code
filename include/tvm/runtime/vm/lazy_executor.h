@@ -28,6 +28,7 @@
 #include <tvm/runtime/module.h>
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/packed_func.h>
+#include <tvm/runtime/profiling.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/vm/bytecode.h>
 #include <tvm/runtime/vm/executable.h>
@@ -99,10 +100,8 @@ class LazyExecutor {
   const VMSharedState* vm_shared_state_;
   /*! \brief list of nodes to execute */
   std::vector<OpNode> nodes_;
-  //   /*! \brief Profiling data storage */
-  // #ifdef PROFILE_VM
-  //   std::unordered_map<Index, float> profiling_data_;
-  // #endif
+  /*! \brief Profiling */
+  runtime::profiling::Profiler* profiler_{nullptr};
 };
 
 }  // namespace vm

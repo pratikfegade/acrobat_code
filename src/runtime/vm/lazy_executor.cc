@@ -29,6 +29,7 @@
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/vm.h>
+#include <tvm/runtime/vm/vm_profiling.h>
 
 #include <algorithm>
 #include <chrono>
@@ -44,6 +45,8 @@ using namespace tvm::runtime;
 namespace tvm {
 namespace runtime {
 namespace vm {
+VMDBProfiler* VMDBProfiler::instance_{nullptr};
+
 void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
                                  const Index output_size, const ObjectRef* args, int num_args) {
   std::vector<NDArray> args_copy;
@@ -102,8 +105,8 @@ void LazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_c
 
 void LazyExecutor::Execute() {
   for (OpNode& node : nodes_) {
-    InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[node.func_idx_], node.output_size_,
-                           node.args_.data(), node.args_.size());
+    InvokePackedFnUnrolled(node.func_idx_, vm_shared_state_->packed_funcs_[node.func_idx_],
+                           node.output_size_, node.args_.data(), node.args_.size());
   }
   nodes_.clear();
 }
@@ -114,28 +117,38 @@ void LazyExecutor::ExecuteOpNodeBatch(
     auto& func_idx = pair.first;
     auto& func_nodes = pair.second;
 
-    for (size_t i = 0; i < func_nodes.size(); ++i) {
-      ICHECK_EQ(func_idx, func_nodes[i]->func_idx_);
-      ICHECK_EQ(func_nodes[0]->arg_count_, func_nodes[i]->arg_count_);
-      ICHECK_EQ(func_nodes[0]->output_size_, func_nodes[i]->output_size_);
-      ICHECK_EQ(func_nodes[0]->args_.size(), func_nodes[i]->args_.size());
-    }
+    // for (size_t i = 0; i < func_nodes.size(); ++i) {
+    //   ICHECK_EQ(func_idx, func_nodes[i]->func_idx_);
+    //   ICHECK_EQ(func_nodes[0]->arg_count_, func_nodes[i]->arg_count_);
+    //   ICHECK_EQ(func_nodes[0]->output_size_, func_nodes[i]->output_size_);
+    //   ICHECK_EQ(func_nodes[0]->args_.size(), func_nodes[i]->args_.size());
+    // }
 
+    if (VMDBProfiler::DoProfile()) {
+      VMDBProfiler::ProfileHostStopCall();
+    }
     // std::cout << "[LE]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
     if (func_nodes.size() == 1) {
-      InvokePackedFnUnrolled(vm_shared_state_->packed_funcs_[func_idx], func_nodes[0]->output_size_,
-                             func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
+      InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
+                             func_nodes[0]->output_size_, func_nodes[0]->args_.data(),
+                             func_nodes[0]->args_.size());
     } else {
       auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
-      InvokePackedFnBatchedUnrolled(vm_shared_state_->packed_funcs_[batched_func_idx],
-                                    func_nodes[0]->arg_count_, func_nodes[0]->output_size_,
-                                    vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
-                                    func_nodes);
+      InvokePackedFnBatchedUnrolled(
+          batched_func_idx, vm_shared_state_->packed_funcs_[batched_func_idx],
+          func_nodes[0]->arg_count_, func_nodes[0]->output_size_,
+          vm_shared_state_->batched_func_arg_mode_[batched_func_idx], func_nodes);
+    }
+    if (VMDBProfiler::DoProfile()) {
+      VMDBProfiler::ProfileHostStartCall("batched_execution");
     }
   }
 }
 
 void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("batched_execution");
+  }
   if (all_nodes_same_depth) {
     std::unordered_map<int, std::vector<OpNode*>> func_to_node;
     for (auto& node : nodes_) {
@@ -143,9 +156,10 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
     }
     ExecuteOpNodeBatch(func_to_node);
   } else {
-    std::unordered_map<NDArray, int, ObjectPtrHash, ObjectPtrEqual> output_tensor_to_node;
-    int graph_depth = -1;
+    std::unordered_map<const Object*, int> output_tensor_to_node;
     size_t num_nodes = nodes_.size();
+    output_tensor_to_node.reserve(num_nodes * 2);
+    int graph_depth = -1;
     std::vector<std::vector<OpNode*>> depth_to_node(num_nodes);
     std::vector<int> node_to_depth(num_nodes, -1);
 
@@ -157,7 +171,7 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
 
         for (size_t i = 0; i < node.args_.size(); ++i) {
           if (access_modes[i] == kInput || access_modes[i] == kInputOutput) {
-            auto it = output_tensor_to_node.find(node.args_[i]);
+            auto it = output_tensor_to_node.find(node.args_[i].get());
             if (it != output_tensor_to_node.end()) {
               auto input_node_id = it->second;
               ICHECK(node_to_depth[input_node_id] >= 0);
@@ -165,7 +179,7 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
             }
           }
           if (access_modes[i] == kOutput || access_modes[i] == kInputOutput) {
-            output_tensor_to_node[node.args_[i]] = node.id_;
+            output_tensor_to_node[node.args_[i].get()] = node.id_;
           }
         }
 
@@ -177,7 +191,7 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
     } else {
       for (OpNode& node : nodes_) {
         for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
-          output_tensor_to_node[node.args_[i]] = node.id_;
+          output_tensor_to_node[node.args_[i].get()] = node.id_;
         }
       }
 
@@ -185,10 +199,10 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
         OpNode& node = nodes_[i];
         int max_depth = 0;
         for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
-          auto it = output_tensor_to_node.find(node.args_[j]);
+          auto it = output_tensor_to_node.find(node.args_[j].get());
           if (it != output_tensor_to_node.end()) {
             auto input_node_id = it->second;
-            ICHECK(node_to_depth[input_node_id] >= 0);
+            // ICHECK(node_to_depth[input_node_id] >= 0);
             max_depth = std::max(max_depth, node_to_depth[input_node_id]);
           }
         }
@@ -210,6 +224,9 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
     }
   }
   nodes_.clear();
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+  }
 }
 
 }  // namespace vm

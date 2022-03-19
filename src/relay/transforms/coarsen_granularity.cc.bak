@@ -208,6 +208,170 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
   const IRModule mod_;
 };
 
+struct GroupFinderResult {
+  const bool structurally_allowed;
+  const bool has_op_calls;
+
+  bool is_allowed() const { return structurally_allowed && has_op_calls; }
+};
+
+typedef std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> Groups;
+class GroupFinder : public ExprFunctor<GroupFinderResult(const Expr& n)> {
+ public:
+  Groups FindGroups(const Expr expr, bool print) {
+    print_ = print;
+    VisitExpr(expr);
+    return found_groups_;
+  }
+
+ private:
+  void AddToGroup(Expr expr, const std::string& reason) {
+    if (print_) {
+      // std::cout << "[CG] Found group " << reason << std::endl;
+      // std::cout << "[GROUP]  \n " << PrettyPrint(RemoveOnDeviceCalls(expr)) << "\n\n" <<
+      // std::endl;
+    }
+    found_groups_.insert(expr);
+  }
+
+  GroupFinderResult VisitExpr_(const ConstantNode* op) override { return {true, false}; }
+
+  GroupFinderResult VisitExpr_(const TupleNode* op) override {
+    // std::cout << "Visiting tuple " << GetRef<Expr>(op) << std::endl;
+    std::vector<bool> allowed_fields;
+    bool structurally_allowed_tuple = true;
+    bool tuple_has_call_ops = false;
+    allowed_fields.reserve(op->fields.size());
+    for (auto field : op->fields) {
+      auto res = VisitExpr(field);
+      structurally_allowed_tuple &= res.structurally_allowed;
+      tuple_has_call_ops |= res.has_op_calls;
+      allowed_fields.push_back(res.structurally_allowed && res.has_op_calls);
+    }
+
+    if (structurally_allowed_tuple) {
+      return {true, tuple_has_call_ops};
+    } else {
+      for (size_t i = 0; i < op->fields.size(); ++i) {
+        if (allowed_fields[i]) {
+          AddToGroup(op->fields[i], "tuple_field");
+        }
+      }
+      return {false, tuple_has_call_ops};
+    }
+  }
+
+  GroupFinderResult VisitExpr_(const VarNode* op) override { return {true, false}; }
+
+  GroupFinderResult VisitExpr_(const GlobalVarNode* op) override { return {false, false}; }
+
+  GroupFinderResult VisitExpr_(const FunctionNode* op) override {
+    if (VisitExpr(op->body).is_allowed()) {
+      AddToGroup(op->body, "function_body");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const CallNode* op) override {
+    auto on_device_props = GetOnDeviceProps(op);
+    if (on_device_props.body.defined()) {
+      return VisitExpr(on_device_props.body);
+    } else if (op->op == GetInvokeTVMOp()) {
+      if (VisitExpr(op->args[1]).structurally_allowed &&
+          VisitExpr(op->args[2]).structurally_allowed) {
+        return {true, true};
+      }
+    }
+    std::vector<bool> allowed_args;
+    for (auto arg : op->args) {
+      if (VisitExpr(arg).is_allowed()) {
+        AddToGroup(arg, "call_arg");
+      }
+    }
+
+    if (VisitExpr(op->op).is_allowed()) {
+      AddToGroup(op->op, "call_op");
+    }
+
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const LetNode* op) override {
+    auto value_res = VisitExpr(op->value);
+    auto body_res = VisitExpr(op->body);
+    if (value_res.structurally_allowed && body_res.structurally_allowed) {
+      return {true, value_res.has_op_calls || body_res.has_op_calls};
+    } else if (value_res.is_allowed()) {
+      AddToGroup(op->value, "let_value");
+      // std::cout << "[GROUP]  Offending body\n " << PrettyPrint(RemoveOnDeviceCalls(op->body))
+      //           << "\n\n"
+      //           << std::endl;
+
+    } else if (body_res.is_allowed()) {
+      AddToGroup(op->body, "let_body");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const IfNode* op) override {
+    if (VisitExpr(op->cond).is_allowed()) {
+      AddToGroup(op->cond, "if_cond");
+    }
+    if (VisitExpr(op->true_branch).is_allowed()) {
+      AddToGroup(op->true_branch, "if_then");
+    }
+    if (VisitExpr(op->false_branch).is_allowed()) {
+      AddToGroup(op->false_branch, "if_else");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const OpNode* op) override { return {false, false}; }
+
+  GroupFinderResult VisitExpr_(const TupleGetItemNode* op) override { return VisitExpr(op->tuple); }
+
+  GroupFinderResult VisitExpr_(const RefCreateNode* op) override {
+    if (VisitExpr(op->value).is_allowed()) {
+      AddToGroup(op->value, "ref_crtate_value");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const RefReadNode* op) override {
+    if (VisitExpr(op->ref).is_allowed()) {
+      AddToGroup(op->ref, "ref_read_value");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const RefWriteNode* op) override {
+    if (VisitExpr(op->ref).is_allowed()) {
+      AddToGroup(op->ref, "ref_write_ref");
+    }
+    if (VisitExpr(op->value).is_allowed()) {
+      AddToGroup(op->value, "ref_write_value");
+    }
+    return {false, false};
+  }
+
+  GroupFinderResult VisitExpr_(const ConstructorNode* op) override { return {false, false}; }
+
+  GroupFinderResult VisitExpr_(const MatchNode* op) override {
+    if (VisitExpr(op->data).is_allowed()) {
+      AddToGroup(op->data, "match_data");
+    }
+    for (auto clause : op->clauses) {
+      if (VisitExpr(clause->rhs).is_allowed()) {
+        AddToGroup(clause->rhs, "match_clause");
+      }
+    }
+    return {false, false};
+  }
+
+  Groups found_groups_;
+  bool print_{false};
+};
+
 class Serializer : public ExprVisitor {
  public:
   void Serialize(const Expr& expr) {
@@ -435,7 +599,7 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 
       // std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
-        ICHECK(call->op == GetInvokeTVMOp()) << rvalue;
+        ICHECK(call->op == GetInvokeTVMOp());
         tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
       } else if (auto tuple = rvalue.as<TupleNode>()) {
         tuple_var_values_.Set(rvar, tuple->fields);
@@ -761,13 +925,12 @@ class BetterCoarsener : public ExprMutator {
   BetterCoarsener(const IRModule& mod, bool batched_execution, bool scattered_kernels)
       : mod_(mod), batched_execution_(batched_execution), scattered_kernels_(scattered_kernels) {}
 
-  Function Coarsen(const Function& func, bool print) {
+  void Coarsen(const Function& func, bool print) {
     print_ = print;
     auto expr = func->body;
-    // expr = transform::ToANormalForm(expr);
+    expr = transform::ToANormalForm(expr);
     expr = LetLifter()(expr);
-    expr = this->VisitExpr(expr);
-    return Function(func->params, expr, func->ret_type, func->type_params, func->attrs, func->span);
+    this->VisitExpr(expr);
   }
 
  private:
@@ -789,32 +952,13 @@ class BetterCoarsener : public ExprMutator {
     return FreeVarsDedup(body);
   }
 
-  tir::PrimFunc AddAttrsToWrapperFunc(const tir::PrimFunc& func, const std::string& name,
-                                      bool batched) {
-    // format hash as fixed length hex string so it is easier to read
-    size_t hash = StructuralHash()(func);
-    std::stringstream s;
-    s << std::setfill('0') << std::setw(sizeof(size_t) * 2) << std::hex << hash;
-    Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
-    Map<String, ObjectRef> attrs;
-    attrs.Set("global_symbol", runtime::String(name));
-    attrs.Set("hash", String(s.str()));
-    attrs.Set(tvm::attr::kTarget, target);
-    attrs.Set(tir::attr::kDBCoarseWrapperPrimFunc, Integer(1));
-    if (batched) {
-      attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));
-    }
-    return WithAttrs(std::move(func), attrs);
-  }
-
   Expr VisitExpr_(const LetNode* op) final {
     std::vector<std::pair<Var, Expr>> flattened;
     auto body = FlattenLets(GetRef<Expr>(op), &flattened);
 
     size_t start = -1;
     bool in_group = false;
-    int op_calls_in_group = 0;
-    int last_call_id = -1;
+    bool group_has_op_calls = false;
     // end --> begin index mapping for groups
     std::unordered_map<size_t, size_t> groups;
 
@@ -822,40 +966,35 @@ class BetterCoarsener : public ExprMutator {
       if (!in_group) {
         start = i;
         in_group = true;
+        group_has_op_calls |= op_call;
         // if (print_) {
-        //   std::cout << "\n\n[CG] GROUPSTART" << std::endl;
+        // std::cout << "\n\n[CG] GROUPSTART" << std::endl;
         // }
-      }
-      if (op_call) {
-        last_call_id = i;
-        op_calls_in_group++;
       }
       ICHECK_GE(start, 0);
 
       // if (print_) {
       //   auto& p = flattened[i];
       //   std::cout << "[CG] - " << p.first->name_hint() << " = "
-      //             << PrettyPrint(RemoveOnDeviceCalls(p.second)) << " " << op_calls_in_group << "
-      //             "
-      //             << op_call << " " << static_cast<int>(op_call) << std::endl;
+      //             << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
       // }
     };
 
     auto end_group = [&](size_t i) {
       if (in_group) {
         ICHECK_GE(start, 0);
-        if (op_calls_in_group > 1) {
-          ICHECK_GE(last_call_id, 0);
-          groups[last_call_id] = start;
+        if (group_has_op_calls) {
+          groups[i] = start;
         }
         start = -1;
-        op_calls_in_group = 0;
+        group_has_op_calls = false;
         in_group = false;
         // if (print_) {
         //   std::cout << "[CG] GROUPEND" << std::endl;
         // }
       }
       ICHECK_EQ(start, -1);
+
       // if (print_) {
       //   auto& p = flattened[i];
       //   std::cout << "[CG] x " << p.first->name_hint() << " = "
@@ -875,15 +1014,15 @@ class BetterCoarsener : public ExprMutator {
         }
       }
 
-      if (cleaned_value.as<ConstantNode>()) {
+      if (auto vn = cleaned_value.as<ConstantNode>()) {
         start_or_continue_group(i);
-      } else if (cleaned_value.as<TupleNode>()) {
+      } else if (auto vn = cleaned_value.as<TupleNode>()) {
         start_or_continue_group(i);
-      } else if (cleaned_value.as<VarNode>()) {
+      } else if (auto vn = cleaned_value.as<VarNode>()) {
         start_or_continue_group(i);
-      } else if (cleaned_value.as<GlobalVarNode>()) {
+      } else if (auto vn = cleaned_value.as<GlobalVarNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<FunctionNode>()) {
+      } else if (auto vn = cleaned_value.as<FunctionNode>()) {
         end_group(i);
       } else if (auto vn = cleaned_value.as<CallNode>()) {
         if (vn->op == GetInvokeTVMOp()) {
@@ -891,23 +1030,23 @@ class BetterCoarsener : public ExprMutator {
         } else {
           end_group(i);
         }
-      } else if (cleaned_value.as<LetNode>()) {
+      } else if (auto vn = cleaned_value.as<LetNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<IfNode>()) {
+      } else if (auto vn = cleaned_value.as<IfNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<OpNode>()) {
+      } else if (auto vn = cleaned_value.as<OpNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<TupleGetItemNode>()) {
+      } else if (auto vn = cleaned_value.as<TupleGetItemNode>()) {
         start_or_continue_group(i);
-      } else if (cleaned_value.as<RefCreateNode>()) {
+      } else if (auto vn = cleaned_value.as<RefCreateNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<RefReadNode>()) {
+      } else if (auto vn = cleaned_value.as<RefReadNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<RefWriteNode>()) {
+      } else if (auto vn = cleaned_value.as<RefWriteNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<ConstructorNode>()) {
+      } else if (auto vn = cleaned_value.as<ConstructorNode>()) {
         end_group(i);
-      } else if (cleaned_value.as<MatchNode>()) {
+      } else if (auto vn = cleaned_value.as<MatchNode>()) {
         end_group(i);
       } else {
         end_group(i);
@@ -917,84 +1056,139 @@ class BetterCoarsener : public ExprMutator {
     if (print_) {
       std::cout << "[CG] Found groups: " << groups.size() << std::endl;
     }
-    for (int i = static_cast<int>(flattened.size()) - 1; i >= 0;) {
+    for (int i = static_cast<int>(flattened.size()) - 1; i >= 0; --i) {
       auto it = groups.find(i);
       if (it == groups.end()) {
         auto& p = flattened[i];
         body = Let(p.first, p.second, body);
-        --i;
       } else {
         auto start = it->second;
-        std::vector<std::pair<Var, Expr>> bindings;
-        for (size_t j = start; j <= i; ++j) {
-          bindings.push_back(
-              std::make_pair(flattened[j].first, RemoveOnDeviceCalls(flattened[j].second)));
-        }
+        std::vector<std::pair<Var, Expr>> bindings(flattened.begin() + start,
+                                                   flattened.begin() + i);
         auto free_vars = GetFreeVarsInGroup(bindings);
 
-        // if (print_) {
-        //   std::cout << "[CG]   GROUP " << std::endl;
-        //   for (auto p : bindings) {
-        //     std::cout << "[CG]   " << p.first->name_hint() << " = "
-        //               << PrettyPrint(RemoveOnDeviceCalls(p.second)) << std::endl;
-        //   }
-        // }
-
-        auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
-                       .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
-
-        auto prim_func = res.func;
-        auto call_args = res.call_args;
-        auto replacement = res.replacement;
-        std::string name = "prim_func" + std::to_string(ctr++);
-        GlobalVar prim_func_var(name, prim_func->checked_type_);
-        auto input_args_tuple = Tuple(call_args);
-        auto output_args_tuple = Tuple(Array<Expr>());
-        auto call = InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple,
-                                DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
-                                           {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}}));
-        prim_func = AddAttrsToWrapperFunc(prim_func, name, false);
-        prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
-
-        if (groups.size() > 0) {
-          std::cout << "[CG] Body before adding bindings " << PrettyPrint(RemoveOnDeviceCalls(body))
-                    << std::endl;
-        }
-
-        for (int j = static_cast<int>(bindings.size()) - 1; j >= 0; --j) {
-          auto& p = bindings[j];
-          if (p.second.as<TupleNode>() || p.second.as<VarNode>() ||
-              p.second.as<TupleGetItemNode>()) {
-            body = Let(p.first, p.second, body);
+        if (print_) {
+          std::cout << "[CG]   GROUP " << std::endl;
+          for (auto p : bindings) {
+            std::cout << "[CG]   " << p.first->name_hint() << " = "
+                      << PrettyPrint(RemoveOnDeviceCalls(p.second)) << "\n"
+                      << std::endl;
+          }
+          for (auto v : free_vars) {
+            std::cout << "[CG]   FreeVar: " << v << std::endl;
           }
         }
 
-        body = Let(Var("dummy", VoidType()), call, body);
-
-        i = start - 1;
+        auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
+                       .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
       }
     }
 
-    if (groups.size() > 0) {
-      std::cout << "[CG] Body " << PrettyPrint(RemoveOnDeviceCalls(body)) << std::endl;
-    }
-
-    return body;
+    return ExprMutator::VisitExpr_(op);
   }
 
   bool print_;
   const IRModule& mod_;
   const bool batched_execution_;
   const bool scattered_kernels_;
-  static int ctr;
+};
+
+class Coarsener : public ExprMutator {
+ public:
+  Coarsener(const Groups& groups, const IRModule& mod, bool batched_execution,
+            bool scattered_kernels)
+      : groups_(groups),
+        mod_(mod),
+        batched_execution_(batched_execution),
+        scattered_kernels_(scattered_kernels) {}
+
+ private:
+  Expr VisitExpr(const Expr& expr) override {
+    auto it = this->memo_.find(expr);
+    if (it != this->memo_.end()) {
+      return it->second;
+    } else {
+      Expr new_expr = HandleExpr(expr);
+      memo_[expr] = new_expr;
+      return new_expr;
+    }
+  }
+
+  Expr HandleExpr(const Expr& expr) {
+    if (groups_.count(expr)) {
+      // std::cout << "[CG] Group: " << PrettyPrint(RemoveOnDeviceCalls(expr)) << std::endl;
+      auto add_attrs_to_wrapper_func = [](const tir::PrimFunc& func, const std::string& name,
+                                          bool batched) {
+        // format hash as fixed length hex string so it is easier to read
+        size_t hash = StructuralHash()(func);
+        std::stringstream s;
+        s << std::setfill('0') << std::setw(sizeof(size_t) * 2) << std::hex << hash;
+        Target target({{String("kind"), String("llvm")}, {String("mcpu"), String("core-avx2")}});
+        Map<String, ObjectRef> attrs;
+        attrs.Set("global_symbol", runtime::String(name));
+        attrs.Set("hash", String(s.str()));
+        attrs.Set(tvm::attr::kTarget, target);
+        attrs.Set(tir::attr::kDBCoarseWrapperPrimFunc, Integer(1));
+        if (batched) {
+          attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));
+        }
+        return WithAttrs(std::move(func), attrs);
+      };
+
+      auto tmp_expr = transform::ToANormalForm(expr);
+      tmp_expr = RemoveOnDeviceCalls(expr);
+      tmp_expr = LetLifter()(tmp_expr);
+      Serializer serializer;
+      serializer.Serialize(tmp_expr);
+      auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
+                     .LowerToTIR(FreeVarsDedup(tmp_expr), serializer.body_, serializer.bindings_);
+      auto prim_func = res.func;
+      auto call_args = res.call_args;
+      auto replacement = res.replacement;
+      std::string name = "prim_func" + std::to_string(ctr++);
+      GlobalVar prim_func_var(name, prim_func->checked_type_);
+      auto input_args_tuple = Tuple(call_args);
+      auto output_args_tuple = Tuple(Array<Expr>());
+      auto call = InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple,
+                              DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
+                                         {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}}));
+      prim_func = add_attrs_to_wrapper_func(prim_func, name, false);
+      prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
+
+      if (batched_execution_) {
+        auto batched_res =
+            TIRLowererBatched(mod_, scattered_kernels_)
+                .LowerToTIR(FreeVarsDedup(tmp_expr), serializer.body_, serializer.bindings_);
+        auto batched_func = batched_res.func;
+        std::string batched_name = runtime::vm::GetBatchedName(name);
+        GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
+        batched_func = add_attrs_to_wrapper_func(batched_func, batched_name, true);
+        // std::cout << "batched_func " << batched_func << std::endl;
+        prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
+        batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
+        batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
+      }
+
+      return Let(Var("dummy", VoidType()), call, replacement);
+    } else {
+      return ExprMutator::VisitExpr(expr);
+    }
+  }
 
  public:
   std::vector<std::pair<GlobalVar, tir::PrimFunc>> prim_funcs_;
   std::vector<std::pair<GlobalVar, GlobalVar>> batched_func_pairs_;
   std::vector<std::pair<GlobalVar, Array<Integer>>> batched_arg_modes_;
+
+ private:
+  const Groups& groups_;
+  const IRModule& mod_;
+  const bool batched_execution_;
+  const bool scattered_kernels_;
+  static int ctr;
 };
 
-int BetterCoarsener::ctr = 0;
+int Coarsener::ctr = 0;
 
 IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
   std::cout << "Coarsening now!" << std::endl;
@@ -1009,23 +1203,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       Function func = GetRef<Function>(n);
 
       bool print = (it.first->name_hint == "lstm_cell");
-      BetterCoarsener coarsener(mod, batched_execution, scattered_kernels);
-      Function ret = coarsener.Coarsen(func, print);
-
-      updates.Set(it.first, ret);
-
-      for (auto it : coarsener.prim_funcs_) {
-        new_prim_funcs.Set(it.first, it.second);
-      }
-
-      if (batched_execution) {
-        for (auto it : coarsener.batched_func_pairs_) {
-          mod->UpdateBatchedPrimFunc(it.first, it.second);
-        }
-        for (auto it : coarsener.batched_arg_modes_) {
-          mod->UpdateArgMode(it.first, it.second);
-        }
-      }
+      BetterCoarsener(mod, batched_execution, scattered_kernels).Coarsen(func, print);
 
       // auto groups = GroupFinder().FindGroups(func, print);
       // if (print) {
@@ -1034,6 +1212,21 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       // }
       // Coarsener coarsener(groups, mod, batched_execution, scattered_kernels);
       // Function ret = Downcast<Function>(coarsener(func));
+
+      // updates.Set(it.first, ret);
+
+      // for (auto it : coarsener.prim_funcs_) {
+      //   new_prim_funcs.Set(it.first, it.second);
+      // }
+
+      // if (batched_execution) {
+      //   for (auto it : coarsener.batched_func_pairs_) {
+      //     mod->UpdateBatchedPrimFunc(it.first, it.second);
+      //   }
+      //   for (auto it : coarsener.batched_arg_modes_) {
+      //     mod->UpdateArgMode(it.first, it.second);
+      //   }
+      // }
     }
   }
 

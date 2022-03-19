@@ -168,33 +168,56 @@ class BoundDeducer : public ExprVisitor {
     this->VisitExpr(left ? op->a : op->b);
   }
 
-  // void VisitExpr_(const FloorDivNode* op) final {
-  //   bool left = op->a.get() == path_[iter_];
-  //   if (!left) {
-  //     success_ = false;
-  //     return;
-  //   }
+  PrimExpr SignOf(const PrimExpr& expr) {
+    SignType sign;
+    if (expr.dtype().is_uint()) {
+      sign = kPositive;
+    } else {
+      sign = expr_map_[expr].GetSignType();
+    }
 
-  //   SignType sign_b;
-  //   if (op->b.dtype().is_uint()) {
-  //     sign_b = kPositive;
-  //   } else {
-  //     sign_b = expr_map_[op->b].GetSignType();
-  //   }
+    if (sign == SignType::kPositive) {
+      return 1;
+    } else if (sign == kNegative) {
+      return -1;
+    } else if (sign == kUnknown) {
+      return Cast(expr.dtype(), expr >= 0);
+    } else {
+      success_ = false;
+      return NullValue<PrimExpr>();
+    }
+  }
 
-  //   if (sign_b != SignType::kPositive) {
-  //     success_ = false;
-  //     return;
-  //   }
+  void VisitExpr_(const FloorDivNode* op) final {
+    bool left = op->a.get() == path_[iter_];
+    if (!left) {
+      success_ = false;
+      return;
+    }
 
-  //   result_ = result_ * op->b;
-  //   if (comp_op == kEqual) {
-  //     success_ = false;
-  //     return;
-  //   }
+    SignType sign_b;
+    if (op->b.dtype().is_uint()) {
+      sign_b = kPositive;
+    } else {
+      sign_b = expr_map_[op->b].GetSignType();
+    }
 
-  //   this->VisitExpr(op->a);
-  // }
+    if (sign_b != SignType::kPositive) {
+      success_ = false;
+      return;
+    }
+
+    if (comp_op == kGreater) {
+      result_ = result_ * op->b;
+    } else if (comp_op == kLess) {
+      result_ = op->b * (result_ + 1) - 1;
+    } else {
+      success_ = false;
+      return;
+    }
+
+    this->VisitExpr(op->a);
+  }
 
   PrimExpr result_;
   CompareOp comp_op{kGreater};
@@ -320,25 +343,25 @@ void BoundDeducer::Transform() {
 void BoundDeducer::Deduce() {
   Init();
   if (!success_) {
-    // std::cout << "[BD]   Failuire after init" << std::endl;
+    std::cout << "[BD]   Failuire after init" << std::endl;
     return;
   }
 
   Relax();
   if (!success_) {
-    // std::cout << "[BD]   Failuire after relaxation" << std::endl;
+    std::cout << "[BD]   Failuire after relaxation" << std::endl;
     return;
   }
   // get the path
   path_ = GetPath(target_, expr_);
   if (!path_.size()) {
-    // std::cout << "[BD]   Failuire becasue path length" << std::endl;
+    std::cout << "[BD]   Failuire becasue path length" << std::endl;
     success_ = false;
     return;
   }
   expr_map_ = EvalSetForEachSubExpr(expr_, hint_map_);
 
-  // std::cout << "[BD]   Visiting " << expr_ << " " << result_ << std::endl;
+  std::cout << "[BD]   Visiting " << expr_ << " " << result_ << std::endl;
   this->VisitExpr(expr_);
 }
 
@@ -364,7 +387,7 @@ void BoundDeducer::Relax() {
 IntSet DeduceBound(PrimExpr v, PrimExpr e,
                    const std::unordered_map<const VarNode*, IntSet>& hint_map,
                    const std::unordered_map<const VarNode*, IntSet>& relax_map) {
-  // std::cout << "[BD]  Deducing bounds: " << v << " " << e << std::endl;
+  std::cout << "[BD]  Deducing bounds: " << v << " " << e << std::endl;
   BoundDeducer d(v, e, hint_map, relax_map);
   d.Deduce();
   if (!d.success_) return IntSet::Nothing();

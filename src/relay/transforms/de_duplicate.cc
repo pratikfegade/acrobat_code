@@ -29,6 +29,8 @@
 
 #include <stack>
 
+#include "./pass_utils.h"
+
 namespace tvm {
 namespace relay {
 
@@ -108,7 +110,7 @@ Expr DeDup(const Expr& e) {
     std::unordered_map<Var, Var, ObjectPtrHash, ObjectPtrEqual> rename_;
     std::unordered_map<TypeVar, TypeVar, ObjectPtrHash, ObjectPtrEqual> type_rename_;
   };
-  ICHECK(WellFormed(e)) << AsText(e, false);
+  ICHECK(WellFormed(e)) << AsText(RemoveOnDeviceCalls(e), false);
   Expr ret = DeDupMutator().VisitExpr(e);
   ICHECK(WellFormed(ret));
   ICHECK_EQ(FreeVars(e).size(), FreeVars(ret).size());
