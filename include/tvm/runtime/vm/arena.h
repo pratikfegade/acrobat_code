@@ -124,11 +124,14 @@ class GenericArena {
     return ptr;
   }
 
-  static std::unique_ptr<GenericArena<PageAllocator>> Current() {
+  static inline std::unique_ptr<GenericArena<PageAllocator>> Current() {
+    return std::move(singleton_);
+  }
+
+  static inline void Init() {
     if (singleton_ == nullptr) {
       singleton_ = std::make_unique<GenericArena<PageAllocator>>();
     }
-    return std::move(singleton_);
   }
 
  private:
@@ -190,6 +193,9 @@ class GenericArena {
     }
   }
 };
+
+template <typename PageAllocator>
+std::unique_ptr<GenericArena<PageAllocator>> GenericArena<PageAllocator>::singleton_;
 
 /*!
  * \brief Simple page allocator that uses new and delete.

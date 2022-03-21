@@ -27,6 +27,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
+#include <tvm/runtime/vm/arena.h>
 #include <tvm/runtime/vm/db_runtime.h>
 
 #include <algorithm>
@@ -169,66 +170,16 @@ NDArray DynBatchRuntime::ShapeOf(const NDArray& input_array) {
 }
 
 void DynBatchRuntime::LazyExecute() {
-  if (lazy_execution_ || concurrent_execution_) {
-    if (batched_execution_) {
-      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
-    } else {
-      shared_state_->lazy_executor_.Execute();
-    }
+  if (batched_execution_) {
+    shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+  } else {
+    shared_state_->lazy_executor_.Execute();
   }
 }
 
 PackedFunc DynBatchRuntime::GetFunction(const std::string& name,
                                         const ObjectPtr<Object>& sptr_to_self) {
   return {};
-}
-
-void DynBatchRuntime::SetInput(std::string func_name, TVMArgs args, int offset, int batch_size,
-                               int num_args) {
-  if (concurrent_execution_) {
-    ICHECK(!concurrent_vm_);
-    ICHECK_EQ(batch_size, 1);
-  }
-
-  ICHECK_EQ(num_args % batch_size, 0);
-  int num_args_per_instance = num_args / batch_size;
-  ICHECK(shared_state_->exec_) << "The executable is not created yet.";
-  auto gvit = shared_state_->exec_->global_map.find(func_name);
-  ICHECK(gvit != shared_state_->exec_->global_map.end()) << "Cannot find function " << func_name;
-  auto func_index = gvit->second;
-  const auto& vm_func = shared_state_->exec_->functions[func_index];
-  const auto& param_names = vm_func.params;
-  ICHECK_EQ(num_args_per_instance, param_names.size())
-      << "The number of provided parameters doesn't match the number of arguments "
-      << num_args_per_instance << " " << offset << " " << param_names.size();
-  ICHECK_EQ(param_names.size(), vm_func.param_device_indexes.size())
-      << "The number of provided parameters doesn't match the number of assigned devices";
-
-  std::vector<ObjectRef> batch_func_args(batch_size * num_args_per_instance);
-  for (int j = 0; j < batch_size; ++j) {
-    // std::cout << "[VM] Setting inputs for " << func_name << std::endl;
-    for (int i = offset; i < num_args_per_instance + offset; ++i) {
-      Device dev = GetDevice(vm_func.param_device_indexes[i - offset]);
-
-      if (args[i].type_code() == kTVMDLTensorHandle) {
-        // Automatically convert input DLTensors to NDArray
-        DLTensor* tensor = args[i];
-        std::vector<int64_t> shape;
-        for (int64_t i = 0; i < tensor->ndim; i++) {
-          shape.push_back(tensor->shape[i]);
-        }
-        NDArray ary = NDArray::Empty(shape, tensor->dtype, dev);
-        ary.CopyFrom(tensor);
-        batch_func_args[j * num_args_per_instance + i - offset] = ary;
-      } else {
-        ObjectRef obj = CopyTo(args[i], dev);
-        batch_func_args[j * num_args_per_instance + i - offset] = obj;
-      }
-    }
-    offset += num_args_per_instance;
-  }
-  inputs_.erase(func_name);
-  inputs_.emplace(func_name, batch_func_args);
 }
 
 void DynBatchRuntime::InitSharedState() {

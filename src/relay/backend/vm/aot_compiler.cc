@@ -76,6 +76,7 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
       os << type_name;
       if (!no_shared_ptr) {
         os << ">";
+        // os << "*";
       }
     }
   } else if (auto ft = type.as<FuncTypeNode>()) {
@@ -103,10 +104,11 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
         os << ",";
       }
     }
+    os << ">";
     if (!no_shared_ptr) {
       os << ">";
+      // os << "*";
     }
-    os << ">";
   } else if (auto tc = type.as<TypeCallNode>()) {
     auto type_func_gv = tc->func.as<GlobalTypeVarNode>();
     ICHECK(type_func_gv) << type;
@@ -131,6 +133,7 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     }
     if (type_func_gv->name_hint != "Storage" && !no_shared_ptr) {
       os << ">";
+      // os << "*";
     }
   } else {
     std::cout << "DEFAULT " << type << std::endl;
@@ -429,18 +432,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto callee_var = GetVarForReg(instr.closure);
           this->PrintIndent(stream_);
           stream_ << dst_var << " = " << callee_var;
-          // auto it = invoke_type_vars_.find(i);
-          // if (it != invoke_type_vars_.end() && it->second.size() > 0) {
-          //   auto types = it->second;
-          //   stream_ << "<";
-          //   for (size_t j = 0; j < types.size(); ++j) {
-          //     RelayTypeToCppStr(stream_, types[j]);
-          //     if (j < types.size() - 1) {
-          //       stream_ << ",";
-          //     }
-          //   }
-          //   stream_ << ">";
-          // }
           stream_ << "(";
           for (int i = 0; i < instr.num_closure_args; ++i) {
             stream_ << GetVarForReg(instr.closure_args[i]);
@@ -573,11 +564,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
               }
             }
 
-            // stream_ << dst_var << " = Arena::Current()->make<std::tuple<";
-            // stream_ << dst_var << " = std::make_shared<std::tuple<" << types_str.str() << ">, "
-            // << types_str.str() << ">(" << args_str.str() << ");\n";
             stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
                     << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str() << "));\n";
+            // stream_ << dst_var << " = new std::tuple<" << types_str.str() << ">(" <<
+            // args_str.str()
+            // << ");\n";
           } else {
             auto constructor = mod_->LookupTag(instr.constructor_tag);
             auto concrete_type_without_shptr =
@@ -587,6 +578,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
             stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
                     << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
+
+            // stream_ << dst_var << " = new " << concrete_constructor_without_shptr << "();\n";
 
             this->PrintIndent(stream_);
             stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";

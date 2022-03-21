@@ -77,8 +77,6 @@ inline size_t GetDataAlignment(const DLTensor& arr) {
 }
 
 NDArray StorageObj::AllocNDArray(size_t offset, std::vector<int64_t> shape, DLDataType dtype) {
-  // VerifyDataType(dtype);
-
   // crtical zone: allocate header, cannot throw
   NDArray::Container* container = new NDArray::Container(
       static_cast<uint8_t*>(this->buffer.data) + offset, shape, dtype, this->buffer.device);
@@ -98,34 +96,7 @@ NDArray StorageObj::AllocNDArray(size_t offset, std::vector<int64_t> shape, DLDa
   NDArray ret(GetObjectPtr<Object>(container));
   // RAII in effect, now run the check.
 
-  // ICHECK(offset + needed_size <= this->buffer.size)
-  // << "storage allocation failure, attempted to allocate " << needed_size << " at offset "
-  // << offset << " in region that is " << this->buffer.size << "bytes";
-
   return ret;
-}
-
-std::shared_ptr<DLTensor> StorageObj::AllocNDArrayRaw(size_t offset, std::vector<int64_t> shape,
-                                                      DLDataType dtype) {
-  VerifyDataType(dtype);
-
-  DLTensor* dl_tensor = new DLTensor();
-
-  type_index_ = Container::RuntimeTypeIndex();
-  dl_tensor.data = static_cast<uint8_t*>(this->buffer.data) + offset;
-  shape_ = std::move(shape);
-  dl_tensor.ndim = static_cast<int>(shape.size());
-  dl_tensor.shape = const_cast<ShapeTuple::index_type*>(shape.data());
-  dl_tensor.dtype = dtype;
-  dl_tensor.strides = nullptr;
-  dl_tensor.byte_offset = 0;
-  dl_tensor.device = this->buffer.device;
-  this->IncRef();
-
-  return std::shared_ptr(dl_tensor, [&this](DLTensor* ptr) {
-    this->DecRef();
-    delete ptr;
-  });
 }
 
 MemoryManager* MemoryManager::Global() {

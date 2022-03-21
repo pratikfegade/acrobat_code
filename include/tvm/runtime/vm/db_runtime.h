@@ -214,39 +214,17 @@ class DynBatchRuntime : public runtime::ModuleNode {
     return current_;
   }
 
- protected:
   /*! \brief Get device from the device list based on a given device index. */
   Device GetDevice(Index device_index) const;
   Allocator* GetAllocator(Index device_index) const;
-
-  /*!
-   * \brief Invoke a global setting up the VM state to execute.
-   *
-   * This does not begin execution of the VM.
-   */
-  void InvokeGlobal(const VMFunction& func, const std::vector<ObjectRef>& args, const int offset);
-
-  /*!
-   * \brief Set inputs to a function.
-   * \param name The function name
-   * \param args args[offset:] are arguments to the
-   * function. If the arguments are not of the correct device for the function,
-   * they will be copied to the device.
-   * \param offset Starting offset of the arguments in `args`.
-   * \param batch_size Batch size.
-   * \param num_args Number of args to consume from args.
-   */
-  void SetInput(std::string name, TVMArgs args, int offset, int batch_size, int num_args);
-
- protected:
-  friend class LazyExecutor;
 
   /*! \brief The global state excluding all runtime state. Aggregated
       in a struct for easier shared across multiple vm instances when
       executing multiple concurrent batch elements */
   VMSharedState* shared_state_;
-  /*! \brief The function name to inputs mapping. */
-  std::unordered_map<std::string, std::vector<ObjectRef>> inputs_;
+
+ protected:
+  friend class LazyExecutor;
   /*!
    * \brief Whether the generated prim funcs are coarsened.
    */

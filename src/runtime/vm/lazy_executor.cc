@@ -90,9 +90,8 @@ void LazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
   }
 
   if (!is_empty_output) {
-    OpNode node(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
-                unrolled_output_size, args_copy);
-    nodes_.push_back(node);
+    nodes_.emplace_back(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
+                        unrolled_output_size, args_copy);
   }
 }
 
@@ -145,6 +144,8 @@ void LazyExecutor::ExecuteOpNodeBatch(
 }
 
 void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
+  // nodes_.clear();
+  return;
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("batched_execution");
   }
@@ -168,17 +169,20 @@ void LazyExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_
         auto& access_modes = vm_shared_state_->prim_func_arg_access_mode_[node.func_idx_];
         int max_depth = 0;
 
-        for (size_t i = 0; i < node.args_.size(); ++i) {
-          if (access_modes[i] == kInput || access_modes[i] == kInputOutput) {
-            auto it = output_tensor_to_node.find(node.args_[i].get());
+        for (size_t j = 0; j < node.args_.size(); ++j) {
+          auto& access_mode = access_modes[j];
+          auto arg_ptr = node.args_[j].get();
+          if (access_mode == kInput || access_mode == kInputOutput) {
+            auto it = output_tensor_to_node.find(arg_ptr);
             if (it != output_tensor_to_node.end()) {
               auto input_node_id = it->second;
-              ICHECK(node_to_depth[input_node_id] >= 0);
-              max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+              // ICHECK(node_to_depth[input_node_id] >= 0);
+              auto input_node_depth = node_to_depth[input_node_id];
+              max_depth = max_depth < input_node_depth ? input_node_depth : max_depth;
             }
           }
-          if (access_modes[i] == kOutput || access_modes[i] == kInputOutput) {
-            output_tensor_to_node[node.args_[i].get()] = node.id_;
+          if (access_mode == kOutput || access_mode == kInputOutput) {
+            output_tensor_to_node[arg_ptr] = node.id_;
           }
         }
 
