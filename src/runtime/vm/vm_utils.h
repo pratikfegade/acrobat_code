@@ -65,6 +65,25 @@ std::vector<int64_t> ToShape(NDArray shape_tensor);
  */
 ObjectRef CopyTo(ObjectRef src, const DLDevice& dev);
 
+/*!
+ * \brief A simple procedure to write to all locations of an
+ * NDArray/DLTensor to check for invalid accesses.
+ *
+ * \param array The array to be tested.
+ */
+void TestNDArray(const NDArray& array);
+void TestNDArray(DLTensor* array);
+
+/*!
+ * \brief A simple procedure to write to all locations of an gathered
+ * NDArray/DLTensor to check for invalid accesses.
+ *
+ * \param ptr_array The array to be tested.
+ * \param sample A sample scattered array to compute size .
+ * \param batch_size The number of gathered tensors.
+ */
+void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t batch_size);
+
 /* Invoking packed functions */
 
 /*!

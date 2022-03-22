@@ -125,6 +125,9 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
                     const tvm::runtime::NDArray* args, int64_t num_args);
 
+  void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size, DLTensor** args,
+                    int64_t num_args);
+
   /*!
    * \brief Allocate a memory storage object.
    * \param allocation_size The size of the storage to be allocated.
@@ -160,6 +163,9 @@ class DynBatchRuntime : public runtime::ModuleNode {
    */
   NDArray AllocTensorReg(const Storage& storage, int64_t offset, const NDArray shape_tensor,
                          DLDataType dtype);
+
+  DLTensor* AllocArrayWrapper(int64_t* shape_data, int64_t ndim, DLDataType dtype,
+                              int64_t device_index);
 
   /*!
    * \brief Copy a tensor between devices.

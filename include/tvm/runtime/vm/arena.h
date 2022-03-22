@@ -34,6 +34,7 @@
 
 #include <stddef.h>
 
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -124,13 +125,12 @@ class GenericArena {
     return ptr;
   }
 
-  static inline std::unique_ptr<GenericArena<PageAllocator>> Current() {
-    return std::move(singleton_);
-  }
+  static inline GenericArena<PageAllocator>* Current() { return singleton_; }
 
   static inline void Init() {
     if (singleton_ == nullptr) {
-      singleton_ = std::make_unique<GenericArena<PageAllocator>>();
+      singleton_ = new GenericArena<PageAllocator>();
+      std::cout << "[ARE] Initializing arena " << singleton_ << std::endl;
     }
   }
 
@@ -146,7 +146,7 @@ class GenericArena {
   /*!
    * \brief Singleton instance of the class.
    */
-  static std::unique_ptr<GenericArena<PageAllocator>> singleton_;
+  static GenericArena<PageAllocator>* singleton_;
   /*!
    * \brief Align ptr by upper bound.
    * \param offset The offset value.
@@ -195,7 +195,7 @@ class GenericArena {
 };
 
 template <typename PageAllocator>
-std::unique_ptr<GenericArena<PageAllocator>> GenericArena<PageAllocator>::singleton_;
+GenericArena<PageAllocator>* GenericArena<PageAllocator>::singleton_{nullptr};
 
 /*!
  * \brief Simple page allocator that uses new and delete.

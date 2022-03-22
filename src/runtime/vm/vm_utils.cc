@@ -108,16 +108,28 @@ ObjectRef CopyTo(ObjectRef src, const DLDevice& dev) {
 }
 
 /* Invoking packed functions */
-void TestNDArray(const NDArray& array) {
+void TestNDArray(DLTensor* array) {
   size_t total_nums = 1;
-  ICHECK(array.defined());
-  ICHECK(array.Shape().defined());
-  for (auto d : array.Shape()) {
-    total_nums *= d;
+  for (size_t i = 0; i < array->ndim; ++i) {
+    total_nums *= array->shape[i];
   }
 
   for (size_t j = 0; j < total_nums; ++j) {
     static_cast<float*>(array->data)[j] = 1.0;
+  }
+}
+
+void TestNDArray(const NDArray& array) { TestNDArray(const_cast<DLTensor*>(array.operator->())); }
+
+void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t batch_size) {
+  size_t total_nums = 1;
+  for (auto d : sample.Shape()) {
+    total_nums *= d;
+  }
+  for (size_t i = 0; i < batch_size; ++i) {
+    for (size_t j = 0; j < total_nums; ++j) {
+      static_cast<float**>(ptr_array->data)[i][j] = 1.0;
+    }
   }
 }
 
@@ -144,20 +156,7 @@ NDArray CreatePointerNDArray(const std::vector<OpNode*>& nodes, int arg_num) {
     raw_data[j] = nodes[j]->args_[arg_num]->data;
   }
 
-  // {
-  //   size_t total_nums = 1;
-  //   for (auto d : arrays[0].Shape()) {
-  //     total_nums *= d;
-  //   }
-
-  //   std::cout << "[VMU] Array size " << total_nums << std::endl;
-
-  //   for (size_t i = 0; i < size; ++i) {
-  //     for (size_t j = 0; j < total_nums; ++j) {
-  //       static_cast<float**>(result->data)[i][j] = 1.0;
-  //     }
-  //   }
-  // }
+  // TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
 
   return result;
 }
@@ -216,85 +215,86 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
                                    Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode*>& nodes) {
-  if (VMDBProfiler::DoProfile()) {
-    VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
-  }
-  // std::cout << "[UMA] Executing" << std::endl;
-  bool print = false;
-  ICHECK_EQ(arity, arg_modes.size());
-  int32_t batch_size = nodes.size();
+  // if (VMDBProfiler::DoProfile()) {
+  //   VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
+  // }
+  // // std::cout << "[UMA] Executing" << std::endl;
+  // bool print = false;
+  // ICHECK_EQ(arity, arg_modes.size());
+  // int32_t batch_size = nodes.size();
 
-  std::vector<TVMValue> values(arity + 1);
-  std::vector<int> codes(arity + 1);
-  std::vector<NDArray> arg_holder(arity);
-  runtime::TVMArgsSetter setter(values.data(), codes.data());
-  setter(0, batch_size);
-  if (print) {
-    std::cout << "[VMU]    BatchSize 0 " << batch_size << std::endl;
-  }
-  int ctr = 1;
-  for (Index i = 0; i < arity; ++i) {
-    switch (arg_modes[i]) {
-      case kIgnore: {
-        if (print) {
-          std::cout << "[VMU]    Ignoring " << i << std::endl;
-        }
-        break;
-      }
-      case kReuse: {
-        // arg_holder[i] = nodes[0]->args_[i];
-        setter(ctr, nodes[0]->args_[i]);
-        if (print) {
-          std::cout << "[VMU]    ArgReuse " << ctr << " "
-                    << ShapeToString(nodes[0]->args_[i].Shape()) << std::endl;
-        }
-        ctr += 1;
-        break;
-      }
-      case kScatter: {
-        arg_holder[i] = CreatePointerNDArray(nodes, i);
-        setter(ctr, arg_holder[i]);
-        if (print) {
-          std::cout << "[VMU]    ArgScatter " << ctr << " " << ShapeToString(arg_holder[i].Shape())
-                    << std::endl;
-        }
-        ctr += 1;
-        break;
-      }
-      case kConcat: {
-        std::vector<NDArray> to_concat(batch_size);
-        for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
-          to_concat[j] = nodes[j]->args_[i];
-        }
+  // std::vector<TVMValue> values(arity + 1);
+  // std::vector<int> codes(arity + 1);
+  // std::vector<NDArray> arg_holder(arity);
+  // runtime::TVMArgsSetter setter(values.data(), codes.data());
+  // setter(0, batch_size);
+  // if (print) {
+  //   std::cout << "[VMU]    BatchSize 0 " << batch_size << std::endl;
+  // }
+  // int ctr = 1;
+  // for (Index i = 0; i < arity; ++i) {
+  //   switch (arg_modes[i]) {
+  //     case kIgnore: {
+  //       if (print) {
+  //         std::cout << "[VMU]    Ignoring " << i << std::endl;
+  //       }
+  //       break;
+  //     }
+  //     case kReuse: {
+  //       // arg_holder[i] = nodes[0]->args_[i];
+  //       setter(ctr, nodes[0]->args_[i]);
+  //       if (print) {
+  //         std::cout << "[VMU]    ArgReuse " << ctr << " "
+  //                   << ShapeToString(nodes[0]->args_[i].Shape()) << std::endl;
+  //       }
+  //       ctr += 1;
+  //       break;
+  //     }
+  //     case kScatter: {
+  //       arg_holder[i] = CreatePointerNDArray(nodes, i);
+  //       setter(ctr, arg_holder[i]);
+  //       if (print) {
+  //         std::cout << "[VMU]    ArgScatter " << ctr << " " <<
+  //         ShapeToString(arg_holder[i].Shape())
+  //                   << std::endl;
+  //       }
+  //       ctr += 1;
+  //       break;
+  //     }
+  //     case kConcat: {
+  //       std::vector<NDArray> to_concat(batch_size);
+  //       for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
+  //         to_concat[j] = nodes[j]->args_[i];
+  //       }
 
-        if (print) {
-          std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
-        }
-        NDArray concat_array = CreateConcatenatedNDArray(to_concat);
-        arg_holder[i] = concat_array;
-        setter(ctr, concat_array);
-        if (print) {
-          std::cout << "[VMU]    ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
-                    << std::endl;
-        }
-        ctr += 1;
+  //       if (print) {
+  //         std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
+  //       }
+  //       NDArray concat_array = CreateConcatenatedNDArray(to_concat);
+  //       arg_holder[i] = concat_array;
+  //       setter(ctr, concat_array);
+  //       if (print) {
+  //         std::cout << "[VMU]    ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
+  //                   << std::endl;
+  //       }
+  //       ctr += 1;
 
-        // ICHECK(false) << "Concat not implemented yet!";
-        // break;
-      }
-    }
-  }
+  //       // ICHECK(false) << "Concat not implemented yet!";
+  //       // break;
+  //     }
+  //   }
+  // }
 
-  // std::cout << "[VMU]    Calling " << ctr << " " << arity << std::endl;
-  if (VMDBProfiler::DoProfile()) {
-    VMDBProfiler::ProfileHostStopCall();
-    VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
-  }
-  TVMRetValue rv;
-  func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
-  if (VMDBProfiler::DoProfile()) {
-    VMDBProfiler::ProfileDeviceStopCall();
-  }
+  // // std::cout << "[VMU]    Calling " << ctr << " " << arity << std::endl;
+  // if (VMDBProfiler::DoProfile()) {
+  //   VMDBProfiler::ProfileHostStopCall();
+  //   VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
+  // }
+  // TVMRetValue rv;
+  // func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
+  // if (VMDBProfiler::DoProfile()) {
+  //   VMDBProfiler::ProfileDeviceStopCall();
+  // }
 }
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,

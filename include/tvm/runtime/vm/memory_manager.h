@@ -47,6 +47,17 @@ struct Buffer {
   Device device;
 };
 
+#define MAX_TENSOR_DIM 4
+struct Dim {
+  int ndim;
+  int shape[MAX_TENSOR_DIM];
+};
+
+struct TensorPlaceholder {
+  Dim shape;
+  Device device;
+};
+
 enum AllocatorType {
   kNaive = 1,
   kPooled,

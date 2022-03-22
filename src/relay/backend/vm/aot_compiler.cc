@@ -56,10 +56,25 @@ std::string DTypeToStr(const DLDataType& dtype) {
          std::to_string(dtype.lanes) + "}";
 }
 
+bool lazy_execution() {
+  static bool lazy_execution_ = tvm::transform::PassContext::Current()
+                                    ->GetConfig<Bool>("relay.db_lazy_execution", Bool(false))
+                                    .value();
+  return lazy_execution_;
+}
+
+inline std::string GetTensorType() {
+  if (lazy_execution()) {
+    return "DLTensor*";
+  } else {
+    return "NDArray";
+  }
+}
+
 void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = false,
                        const std::string& replacement = "") {
   if (type.as<TensorTypeNode>()) {
-    os << "NDArray";
+    os << GetTensorType();
   } else if (auto pt = type.as<PrimTypeNode>()) {
     os << pt->dtype << "_t";
   } else if (auto td = type.as<TypeDataNode>()) {
@@ -229,7 +244,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
       auto arg_type = function_type->arg_types[i];
       RelayTypeToCppStr(stream_, arg_type);
-      if (arg_type.as<TensorTypeNode>()) {
+      if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
         stream_ << "&";
       }
       stream_ << " " << GetVarForReg(i);
@@ -291,7 +306,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
       stream_ << kv.first << " ";
       auto vars = kv.second;
       for (size_t i = 0; i < vars.size(); ++i) {
-        stream_ << vars[i];
+        auto var_str = vars[i];
+        if (kv.first == "DLTensor*" && i > 0) {
+          var_str = "*" + var_str;
+        }
+        stream_ << var_str;
         if (i < vars.size() - 1) {
           stream_ << ", ";
         }
@@ -328,6 +347,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
 
     // std::cout << "[BT]  Visiting code" << std::endl;
+    std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
@@ -360,8 +380,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
           ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->GetConstant(" << instr.const_index
-                  << ");\n";
+          stream_ << dst_var << " = const_cast<DLTensor*>(DynBatchRuntime::Current()->GetConstant("
+                  << instr.const_index << ").operator->());\n";
           break;
         }
         case Opcode::LoadConsti: {
@@ -411,7 +431,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
               flattened_args.push_back(GetVarForReg(instr.packed_args[j]));
             }
           }
-          stream_ << "std::vector<NDArray> " << args_vec << " = {";
+          stream_ << "std::vector<" << GetTensorType() << "> " << args_vec << " = {";
 
           for (size_t j = 0; j < flattened_args.size(); ++j) {
             stream_ << flattened_args[j];
@@ -515,6 +535,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
           std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
 
+          std::string offset_var_str = offset_var;
+          if (register_types_.at(instr.alloc_tensor.offset).as<TensorTypeNode>()) {
+            this->PrintIndent(stream_);
+            offset_var_str = "NDToInt64(" + offset_var_str + ")";
+          }
+
           std::stringstream shape_arr;
           shape_arr << "{";
           for (size_t j = 0; j < instr.alloc_tensor.ndim; ++j) {
@@ -525,17 +551,33 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           shape_arr << "}";
 
-          this->PrintIndent(stream_);
-          std::string offset_var_str = offset_var;
-          if (register_types_.at(instr.alloc_tensor.offset).as<TensorTypeNode>()) {
-            offset_var_str = "NDToInt64(" + offset_var_str + ")";
-          }
-          stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str << ", "
-                  << shape_arr.str() << ", " << dtype_str << ");\n";
+          if (lazy_execution()) {
+            auto it = storage_device_indices.find(instr.alloc_tensor.storage);
+            ICHECK(it != storage_device_indices.end());
+            auto device_index = it->second;
 
+            auto tmp_var = "shape_data" + std::to_string(tmp_var_counter++);
+
+            this->PrintIndent(stream_);
+            stream_ << "auto " << tmp_var << " = Arena::Current()->allocate_<int64_t>("
+                    << instr.alloc_tensor.ndim << ");\n";
+            this->PrintIndent(stream_);
+            stream_ << tmp_var << " = new(" << tmp_var << ") int64_t[" << instr.alloc_tensor.ndim
+                    << "]" << shape_arr.str() << ";\n";
+
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = DynBatchRuntime::Current()->AllocArrayWrapper(" << tmp_var
+                    << ", " << instr.alloc_tensor.ndim << ", " << dtype_str << ", " << device_index
+                    << ");\n";
+          } else {
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str
+                    << ", " << shape_arr.str() << ", " << dtype_str << ");\n";
+          }
           break;
         }
         case Opcode::AllocTensorReg: {
+          ICHECK(!lazy_execution());
           auto dst_var = GetVarForReg(instr.dst);
           auto storage_var = GetVarForReg(instr.alloc_tensor_reg.storage);
           auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
@@ -642,20 +684,24 @@ class VMAOTFunctionCompiler : SourcePrinter {
           break;
         }
         case Opcode::AllocStorage: {
-          auto dst_var = GetVarForReg(instr.dst);
-          auto allocation_size_var = GetVarForReg(instr.alloc_storage.allocation_size);
-          auto dtype = instr.alloc_storage.dtype_hint;
-          std::string dtype_str = "{" + std::to_string(dtype.code) + ", " +
-                                  std::to_string(dtype.bits) + ", " + std::to_string(dtype.lanes) +
-                                  "}";
-          this->PrintIndent(stream_);
-          std::string allocation_size_str = allocation_size_var;
-          if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
-            allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
+          if (lazy_execution()) {
+            storage_device_indices[instr.dst] = instr.alloc_storage.device_index;
+          } else {
+            auto dst_var = GetVarForReg(instr.dst);
+            auto allocation_size_var = GetVarForReg(instr.alloc_storage.allocation_size);
+            auto dtype = instr.alloc_storage.dtype_hint;
+            std::string dtype_str = "{" + std::to_string(dtype.code) + ", " +
+                                    std::to_string(dtype.bits) + ", " +
+                                    std::to_string(dtype.lanes) + "}";
+            this->PrintIndent(stream_);
+            std::string allocation_size_str = allocation_size_var;
+            if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
+              allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
+            }
+            stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateStorage("
+                    << allocation_size_str << ", " << instr.alloc_storage.alignment << ", "
+                    << dtype_str << ", " << instr.alloc_storage.device_index << ");\n";
           }
-          stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateStorage("
-                  << allocation_size_str << ", " << instr.alloc_storage.alignment << ", "
-                  << dtype_str << ", " << instr.alloc_storage.device_index << ");\n";
           break;
         }
         case Opcode::ShapeOf: {
@@ -826,8 +872,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   this->PrintIndent(os);
   os << "}\n";
   auto pass_ctx = transform::PassContext::Current();
-  bool lazy_execution = pass_ctx->GetConfig<Bool>("relay.db_lazy_execution", Bool(false)).value();
-  if (lazy_execution) {
+  if (lazy_execution()) {
     this->PrintIndent(os);
     os << "DynBatchRuntime::Current()->LazyExecute();\n";
   }
@@ -939,6 +984,7 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  bool batched_execution = " << Bool2Str(batched_execution) << ";\n";
   os << "  bool scattered_kernels = " << Bool2Str(scattered_kernels) << ";\n";
   os << "  bool concurrent_execution = " << Bool2Str(concurrent_execution) << ";\n";
+  os << "  Arena::Init();\n";
   os << "  size_t batch_size = " << batch_size << ";\n";
 
   os << "  VMExecutionOptions options(coarsened_execution, lazy_execution, batched_execution,\n";
@@ -965,6 +1011,7 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
 
   os << "  runtime->CacheConstants();\n";
   os << "  invoke_model(devices);\n";
+  os << "  Arena::FreeAll();\n";
   os << "}\n\n";
 }
 

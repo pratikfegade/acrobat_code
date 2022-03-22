@@ -82,6 +82,18 @@ void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int6
   }
 }
 
+void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
+                                   DLTensor** args, int64_t num_args) {
+  if (concurrent_execution_ || lazy_execution_) {
+    shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
+                                                        num_args);
+  } else {
+    // std::cout << "Invoking " << packed_index << std::endl;
+    // InvokePackedFnUnrolled(packed_index, shared_state_->packed_funcs_[packed_index], output_size,
+    // args, num_args);
+  }
+}
+
 Storage DynBatchRuntime::AllocateStorage(int64_t size, int64_t alignment, DLDataType dtype,
                                          int64_t device_index) {
   auto storage_obj = SimpleObjAllocator().make_object<StorageObj>();
@@ -124,6 +136,18 @@ NDArray DynBatchRuntime::AllocTensorReg(const Storage& storage, int64_t offset,
   auto shape_tensor = Downcast<NDArray>(CopyTo(shape_tensor_dev, cpu_dev));
   auto shape = ToShape(shape_tensor);
   return storage->AllocNDArray(offset, shape, dtype);
+}
+
+DLTensor* DynBatchRuntime::AllocArrayWrapper(int64_t* shape_data, int64_t ndim, DLDataType dtype,
+                                             int64_t device_index) {
+  DLTensor* wrapper = Arena::Current()->allocate_<DLTensor>();
+  wrapper->device = shared_state_->devices_[device_index];
+  wrapper->data = nullptr;
+  wrapper->strides = nullptr;
+  wrapper->ndim = ndim;
+  wrapper->dtype = std::move(dtype);
+  wrapper->shape = shape_data;
+  return wrapper;
 }
 
 NDArray DynBatchRuntime::DeviceCopy(const NDArray& src_data, const int64_t src_device_index,
@@ -271,10 +295,27 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
 
     if (batched_execution_) {
       std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                << shared_state_->exec_->batched_func_arg_mode[packed_index].size() << std::endl;
+                << shared_state_->exec_->batched_func_arg_mode[packed_index].size();
     } else {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
+      std::cout << "[VM] Fun " << packed_index << " " << packed_name;
     }
+
+    if (coarsened_execution_) {
+      std::cout << "  ScMode: [";
+      for (size_t i = 0; i < this->shared_state_->batched_func_arg_mode_[packed_index].size();
+           ++i) {
+        std::cout << this->shared_state_->batched_func_arg_mode_[packed_index][i] << " ";
+      }
+      std::cout << "]   AccMode: [";
+      for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
+           ++i) {
+        std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
+      }
+      std::cout << "]" << std::endl;
+    } else {
+      std::cout << std::endl;
+    }
+
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
@@ -288,16 +329,6 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
         shared_state_->batched_funcs_[packed_index] = bit->second;
       }
     }
-
-    // if (coarsened_execution_) {
-    //   std::cout << "[VM]   ArgAccessModes: [";
-    //   for (size_t i = 0; i <
-    //   this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
-    //        ++i) {
-    //     std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
-    //   }
-    //   std::cout << "]" << std::endl;
-    // }
   }
 
   // for (const auto& it : shared_state_->exec_->primitive_map) {

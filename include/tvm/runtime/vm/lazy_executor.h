@@ -47,10 +47,11 @@ namespace vm {
 class VirtualMachine;
 class VMSharedState;
 
+template <typename TensorType>
 class OpNode {
  public:
   OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
-         const std::vector<NDArray> args)
+         const std::vector<TensorType> args)
       : id_(id),
         func_idx_(func_idx),
         arg_count_(arg_count),
@@ -58,12 +59,13 @@ class OpNode {
         args_(args) {}
 
   OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
-         const NDArray* args, int num_args)
-      : id_(id),
-        func_idx_(func_idx),
-        arg_count_(arg_count),
-        output_size_(output_size),
-        args_(args, args + num_args) {}
+         TensorType* args, int num_args)
+      : id_(id), func_idx_(func_idx), arg_count_(arg_count), output_size_(output_size) {
+    args_.reserve(num_args);
+    for (size_t i = 0; i < num_args; ++i) {
+      args_.push_back(args[i]);
+    }
+  }
 
   inline Index InputStart() { return 0; }
 
@@ -77,27 +79,31 @@ class OpNode {
   const Index func_idx_;
   const Index arg_count_;
   const Index output_size_;
-  // const std::vector<NDArray> args_;
-  std::vector<NDArray> args_;
+  std::vector<TensorType> args_;
 };
+
+typedef OpNode<NDArray> EagerOpNode;
+typedef OpNode<DLTensor*> LazyOpNode;
 
 /*!
  * \brief A lazy tensor executor for the virtual machine.
  *
  */
+template <typename TensorType>
 class LazyExecutor {
  public:
   void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
                      const ObjectRef* args, int num_args);
 
   void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, const Index output_size,
-                             const NDArray* args, int num_args);
+                             TensorType* args, int num_args);
   void Execute();
 
   void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
 
  private:
-  void ExecuteOpNodeBatch(const std::unordered_map<int, std::vector<OpNode*>>& func_to_node);
+  void ExecuteOpNodeBatch(
+      const std::unordered_map<int, std::vector<OpNode<TensorType>*>>& func_to_node);
 
   friend class VirtualMachine;
   friend class ConcurrentVirtualMachine;
@@ -107,10 +113,23 @@ class LazyExecutor {
       associated with */
   const VMSharedState* vm_shared_state_;
   /*! \brief list of nodes to execute */
-  std::vector<OpNode> nodes_;
+  std::vector<OpNode<TensorType>> nodes_;
   /*! \brief Profiling */
   runtime::profiling::Profiler* profiler_{nullptr};
 };
+
+typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;
+typedef LazyExecutor<DLTensor*> LazyAllocationLazyExecutor;
+
+template <>
+EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
+                                                   const Index output_size, NDArray args,
+                                                   int num_args);
+
+template <>
+LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
+                                                  const Index output_size, DLTensor** args,
+                                                  int num_args);
 
 }  // namespace vm
 }  // namespace runtime
