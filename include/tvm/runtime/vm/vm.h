@@ -34,6 +34,7 @@
 #include <tvm/runtime/vm/executable.h>
 #include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/memory_manager.h>
+#include <tvm/runtime/vm/vm_shared_state.h>
 
 #include <memory>
 #include <string>
@@ -44,51 +45,6 @@
 namespace tvm {
 namespace runtime {
 namespace vm {
-
-/*! \brief range over one dimension */
-class VMExecutionOptionsNode : public Object {
- public:
-  /*! \brief whether the prim funcs are coarsened */
-  bool coarsened_execution;
-  /*! \brief whether to execute tensor operations lazily */
-  bool lazy_execution;
-  /*! \brief whether to execute tensor operations in a batched manner */
-  bool batched_execution;
-  /*! \brief whether the batched kernels operate on scattered tensors */
-  bool scattered_kernels;
-  /*! \brief whether to launch multiple concurrent VMs, each
-   * corresponding to one batch element instance */
-  bool concurrent_execution;
-  /*! \brief the batch size to be used for execution */
-  size_t batch_size;
-
-  VMExecutionOptionsNode() {}
-  VMExecutionOptionsNode(bool coarsened_execution_, bool lazy_execution_, bool batched_execution_,
-                         bool scattered_kernels_, bool concurrent_execution_, size_t batch_size_)
-      : coarsened_execution(coarsened_execution_),
-        lazy_execution(lazy_execution_),
-        batched_execution(batched_execution_),
-        scattered_kernels(scattered_kernels_),
-        concurrent_execution(concurrent_execution_),
-        batch_size(batch_size_) {}
-
-  static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
-  static constexpr const char* _type_key = "VMExecutionOptions";
-  TVM_DECLARE_FINAL_OBJECT_INFO(VMExecutionOptionsNode, Object);
-};
-
-/*! \brief VMExecutionOptions constainer  */
-class VMExecutionOptions : public ObjectRef {
- public:
-  /*!
-   * \brief constructor
-   * \param lazy_execution whether to execute tensor operations lazily.
-   */
-  TVM_DLL VMExecutionOptions(bool coarsened_execution, bool lazy_execution, bool batched_execution,
-                             bool scattered_kernels, bool concurrent_execution, size_t batch_size);
-  // declare VMExecutionOptions.
-  TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
-};
 
 /*!
  * \brief An object representing a vm closure.
@@ -187,49 +143,6 @@ enum DBVMExecutionState {
   kRunning = 0,
   kStageEnd = 1,
   kExecutionEnd = 2,
-};
-
-/*!
- * \brief A srtuct that aggregates all global state of the vm
- * i.e. everything except the current runtime state (the pc, stacks,
- * etc).
- */
-struct VMSharedState {
-  /*! \brief The executable the VM will operate on. */
-  Executable* exec_ = nullptr;
-  /*! \brief The virtual machine's packed function table. */
-  std::vector<PackedFunc> packed_funcs_;
-  /*!
-   * \brief The "physical" devices the VM can execute primitives on. All "device indexes"
-   * are w.r.t. this vector. Each entry in this vector must match the corresponding entry
-   * in the executable's "virtual" devices vector.
-   */
-  std::vector<Device> devices_;
-  /*! \brief The cached memory allocators, one per device. */
-  std::vector<Allocator*> allocators_;
-  /*!
-   * \brief The constant pool for runtime. It caches the device dependent
-   * object to avoid rellocation of constants during inference.
-   */
-  std::vector<ObjectRef> const_pool_;
-  /*!
-   * \brief A lazy executor which maintains a computational graph of
-   * all the packed funcs executed.
-   */
-  LazyExecutor lazy_executor_;
-  /*!
-   * \brief A mapping from packed_funcs to their batched counterparts.
-   */
-  std::vector<Index> batched_funcs_;
-  /*!
-   * \brief A mapping from packed_funcs to their batched arg modes.
-   */
-  std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode_;
-  /*!
-   * \brief A mapping from packed_funcs to their arg access modes
-   * counterparts.
-   */
-  std::vector<std::vector<DBArgAccessMode>> prim_func_arg_access_mode_;
 };
 
 class ConcurrentVirtualMachine;
@@ -412,13 +325,13 @@ class VirtualMachine : public runtime::ModuleNode {
   virtual void OpStopHook();
 
  protected:
-  friend class LazyExecutor;
+  friend class LazyExecutor<NDArray>;
   friend class ConcurrentVirtualMachine;
 
   /*! \brief The global state excluding all runtime state. Aggregated
       in a struct for easier shared across multiple vm instances when
       executing multiple concurrent batch elements */
-  VMSharedState* shared_state_{nullptr};
+  VMSharedState<NDArray>* shared_state_{nullptr};
   /*! \brief The current stack of call frames. */
   std::vector<VMFrame> frames_;
   /*! \brief The fuction table index of the current function. */
@@ -543,7 +456,7 @@ class ConcurrentVirtualMachine : public VirtualMachine {
   void SetInput(std::string name, TVMArgs args, int offset, int batch_size, int num_args) override;
 
  protected:
-  friend class LazyExecutor;
+  friend class LazyExecutor<NDArray>;
 
   /*! \brief The vms representing multiple concurrent executions. */
   std::vector<runtime::Module> vms_;

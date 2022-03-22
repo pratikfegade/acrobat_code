@@ -172,6 +172,8 @@ std::string GetCppFunctionName(const std::string& name) {
   return name;
 }
 
+inline std::string GetRuntimeType() { return "DynBatchRuntime<" + GetTensorType() + ">"; }
+
 Function GetCompiledRelayFunction(
     const std::unordered_map<std::string, Function>& compiled_functions, const IRModule& mod,
     const std::string& name) {
@@ -380,8 +382,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
           ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = const_cast<DLTensor*>(DynBatchRuntime::Current()->GetConstant("
-                  << instr.const_index << ").operator->());\n";
+          stream_ << dst_var << " = const_cast<DLTensor*>(" << GetRuntimeType()
+                  << "::Current()->GetConstant(" << instr.const_index << ").operator->());\n";
           break;
         }
         case Opcode::LoadConsti: {
@@ -442,7 +444,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
           stream_ << "};\n";
           this->PrintIndent(stream_);
-          stream_ << "DynBatchRuntime::Current()->InvokePacked(" << instr.packed_index << ", "
+          stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index << ", "
                   << instr.arity << ", " << instr.output_size << ", " << args_vec << ".data(), "
                   << flattened_args.size() << ");\n";
           break;
@@ -566,9 +568,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
                     << "]" << shape_arr.str() << ";\n";
 
             this->PrintIndent(stream_);
-            stream_ << dst_var << " = DynBatchRuntime::Current()->AllocArrayWrapper(" << tmp_var
-                    << ", " << instr.alloc_tensor.ndim << ", " << dtype_str << ", " << device_index
-                    << ");\n";
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->AllocArrayWrapper(" << tmp_var << ", " << instr.alloc_tensor.ndim << ", "
+                    << dtype_str << ", " << device_index << ");\n";
           } else {
             this->PrintIndent(stream_);
             stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str
@@ -585,8 +587,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
           std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateTensorReg(" << storage_var
-                  << ", " << offset_var << ", " << shape_var << ", " << dtype_str << ");\n";
+          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                  << "->AllocateTensorReg(" << storage_var << ", " << offset_var << ", "
+                  << shape_var << ", " << dtype_str << ");\n";
           break;
         }
         case Opcode::AllocADT: {
@@ -698,9 +701,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
             if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
               allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
             }
-            stream_ << dst_var << " = DynBatchRuntime::Current()->AllocateStorage("
-                    << allocation_size_str << ", " << instr.alloc_storage.alignment << ", "
-                    << dtype_str << ", " << instr.alloc_storage.device_index << ");\n";
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->AllocateStorage(" << allocation_size_str << ", "
+                    << instr.alloc_storage.alignment << ", " << dtype_str << ", "
+                    << instr.alloc_storage.device_index << ");\n";
           }
           break;
         }
@@ -708,7 +712,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
           auto dst_var = GetVarForReg(instr.dst);
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->ShapeOf(" << tensor_var << ");\n";
+          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                  << "->ShapeOf(" << tensor_var << ");\n";
           break;
         }
         case Opcode::Ret: {
@@ -722,8 +727,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
           auto dst_var = GetVarForReg(instr.dst);
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->ReshapeTensor(" << tensor_var
-                  << ", " << shape_var << ");\n";
+          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                  << "->ReshapeTensor(" << tensor_var << ", " << shape_var << ");\n";
           break;
         }
         case Opcode::DeviceCopy: {
@@ -731,9 +736,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
 
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = DynBatchRuntime::Current()->DeviceCopy(" << src_var << ", "
-                  << instr.device_copy.src_device_index << ", "
-                  << instr.device_copy.dst_device_index << ");\n";
+          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                  << "->DeviceCopy(" << src_var << ", " << instr.device_copy.src_device_index
+                  << ", " << instr.device_copy.dst_device_index << ");\n";
           break;
         }
         default:
@@ -874,7 +879,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   auto pass_ctx = transform::PassContext::Current();
   if (lazy_execution()) {
     this->PrintIndent(os);
-    os << "DynBatchRuntime::Current()->LazyExecute();\n";
+    os << GetRuntimeType() << "::Current()->LazyExecute();\n";
   }
   this->PrintIndent(os);
   os << "return res;\n";
@@ -965,7 +970,7 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  auto exec_module = Executable::Load(code, lib);\n";
   os << "  auto exec_ptr = const_cast<Executable*>(static_cast<const "
         "Executable*>(exec_module.get()));\n";
-  os << "  auto runtime = DynBatchRuntime::CreateRuntime();\n";
+  os << "  auto runtime = " << GetRuntimeType() << "::CreateRuntime();\n";
 
   auto pass_ctx = transform::PassContext::Current();
   bool coarsened_execution =
@@ -1010,12 +1015,12 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  runtime->Init({devices}, {" << alloc_list.str() << "});\n";
 
   os << "  runtime->CacheConstants();\n";
-  os << "  invoke_model(devices);\n";
-  os << "  Arena::FreeAll();\n";
+  os << "  invoke_model<" << GetTensorType() << ">(devices);\n";
   os << "}\n\n";
 }
 
 void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
+  os << "template <typename TensorType>\n;";
   os << "void invoke_model(std::vector<Device> devices)\n;";
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner, "
         "bool profiling = false);\n";

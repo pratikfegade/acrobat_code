@@ -35,6 +35,7 @@
 #include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/memory_manager.h>
 #include <tvm/runtime/vm/vm.h>
+#include <tvm/runtime/vm/vm_shared_state.h>
 
 #include <memory>
 #include <string>
@@ -57,6 +58,7 @@ namespace vm {
  * multiple threads, or serialize them to disk or over the
  * wire.
  */
+template <typename TensorType>
 class DynBatchRuntime : public runtime::ModuleNode {
  public:
   /*!
@@ -122,10 +124,7 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \param args Pointer to args
    * \param num_args number of arguments
    */
-  void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
-                    const tvm::runtime::NDArray* args, int64_t num_args);
-
-  void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size, DLTensor** args,
+  void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size, TensorType* args,
                     int64_t num_args);
 
   /*!
@@ -211,11 +210,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Get the current instance of the runtime.
    */
-  static inline ObjectPtr<DynBatchRuntime> Current() { return current_; }
+  static inline ObjectPtr<DynBatchRuntime<TensorType>> Current() { return current_; }
 
-  static inline ObjectPtr<DynBatchRuntime> CreateRuntime() {
+  static inline ObjectPtr<DynBatchRuntime<TensorType>> CreateRuntime() {
     ICHECK(current_ == nullptr);
-    current_ = make_object<DynBatchRuntime>();
+    current_ = make_object<DynBatchRuntime<TensorType>>();
     current_ref_ = ObjectRef(current_);
     return current_;
   }
@@ -227,10 +226,10 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*! \brief The global state excluding all runtime state. Aggregated
       in a struct for easier shared across multiple vm instances when
       executing multiple concurrent batch elements */
-  VMSharedState* shared_state_;
+  VMSharedState<TensorType> shared_state_;
 
  protected:
-  friend class LazyExecutor;
+  friend class LazyExecutor<TensorType>;
   /*!
    * \brief Whether the generated prim funcs are coarsened.
    */
@@ -264,12 +263,17 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Current instance of the runtime
    */
-  static ObjectPtr<DynBatchRuntime> current_;
+  static ObjectPtr<DynBatchRuntime<TensorType>> current_;
   /*!
    * \brief Current instance of the runtime
    */
   static ObjectRef current_ref_;
 };
+
+template <typename TensorType>
+ObjectPtr<DynBatchRuntime<TensorType>> DynBatchRuntime<TensorType>::current_;
+template <typename TensorType>
+ObjectRef DynBatchRuntime<TensorType>::current_ref_;
 
 }  // namespace vm
 }  // namespace runtime

@@ -45,57 +45,36 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
-ObjectPtr<DynBatchRuntime> DynBatchRuntime::current_;
-ObjectRef DynBatchRuntime::current_ref_;
+template class DynBatchRuntime<NDArray>;
+template class DynBatchRuntime<DLTensor*>;
 
-void DynBatchRuntime::CacheConstants() {
-  for (int64_t const_index = 0; const_index < shared_state_->exec_->constants.size();
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::CacheConstants() {
+  for (int64_t const_index = 0; const_index < shared_state_.exec_->constants.size();
        ++const_index) {
-    auto constant_obj = shared_state_->exec_->constants[const_index];
+    auto constant_obj = shared_state_.exec_->constants[const_index];
     // We cache the allocated object in the constant pool. To measure, the
     // first iteration will set the pool up. The other iterations will
     // directly reuse the allocated objects.
-    if (shared_state_->const_pool_.size() <= static_cast<size_t>(const_index)) {
-      shared_state_->const_pool_.resize(const_index + 1);
+    if (shared_state_.const_pool_.size() <= static_cast<size_t>(const_index)) {
+      shared_state_.const_pool_.resize(const_index + 1);
     }
 
-    if (!shared_state_->const_pool_[const_index].defined()) {
-      Device dev = GetDevice(shared_state_->exec_->const_device_indexes[const_index]);
-      shared_state_->const_pool_[const_index] = CopyTo(constant_obj, dev);
+    if (!shared_state_.const_pool_[const_index].defined()) {
+      Device dev = GetDevice(shared_state_.exec_->const_device_indexes[const_index]);
+      shared_state_.const_pool_[const_index] = CopyTo(constant_obj, dev);
     }
   }
 }
 
-NDArray DynBatchRuntime::GetConstant(int64_t const_index) {
-  return Downcast<NDArray>(shared_state_->const_pool_[const_index]);
+template <typename TensorType>
+NDArray DynBatchRuntime<TensorType>::GetConstant(int64_t const_index) {
+  return Downcast<NDArray>(shared_state_.const_pool_[const_index]);
 }
 
-void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
-                                   const tvm::runtime::NDArray* args, int64_t num_args) {
-  if (concurrent_execution_ || lazy_execution_) {
-    shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
-                                                        num_args);
-  } else {
-    // std::cout << "Invoking " << packed_index << std::endl;
-    InvokePackedFnUnrolled(packed_index, shared_state_->packed_funcs_[packed_index], output_size,
-                           args, num_args);
-  }
-}
-
-void DynBatchRuntime::InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size,
-                                   DLTensor** args, int64_t num_args) {
-  if (concurrent_execution_ || lazy_execution_) {
-    shared_state_->lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
-                                                        num_args);
-  } else {
-    // std::cout << "Invoking " << packed_index << std::endl;
-    // InvokePackedFnUnrolled(packed_index, shared_state_->packed_funcs_[packed_index], output_size,
-    // args, num_args);
-  }
-}
-
-Storage DynBatchRuntime::AllocateStorage(int64_t size, int64_t alignment, DLDataType dtype,
-                                         int64_t device_index) {
+template <typename TensorType>
+Storage DynBatchRuntime<TensorType>::AllocateStorage(int64_t size, int64_t alignment,
+                                                     DLDataType dtype, int64_t device_index) {
   auto storage_obj = SimpleObjAllocator().make_object<StorageObj>();
   Allocator* allocator = GetAllocator(device_index);
   ICHECK(allocator) << "Did you forget to init the VirtualMachine with devices?";
@@ -106,9 +85,11 @@ Storage DynBatchRuntime::AllocateStorage(int64_t size, int64_t alignment, DLData
   Storage storage(storage_obj);
   return storage;
 }
+template <typename TensorType>
 
-NDArray DynBatchRuntime::AllocTensor(const Storage& storage, int64_t offset, uint32_t ndim,
-                                     int64_t* shape_array, DLDataType dtype) {
+NDArray DynBatchRuntime<TensorType>::AllocTensor(const Storage& storage, int64_t offset,
+                                                 uint32_t ndim, int64_t* shape_array,
+                                                 DLDataType dtype) {
   auto shape = std::vector<int64_t>(ndim);
   for (uint32_t i = 0; i < ndim; ++i) {
     shape[i] = shape_array[i];
@@ -130,18 +111,21 @@ NDArray DynBatchRuntime::AllocTensor(const Storage& storage, int64_t offset, uin
   return obj;
 }
 
-NDArray DynBatchRuntime::AllocTensorReg(const Storage& storage, int64_t offset,
-                                        const NDArray shape_tensor_dev, DLDataType dtype) {
-  Device cpu_dev = GetDevice(shared_state_->exec_->host_device_index);
+template <typename TensorType>
+NDArray DynBatchRuntime<TensorType>::AllocTensorReg(const Storage& storage, int64_t offset,
+                                                    const NDArray shape_tensor_dev,
+                                                    DLDataType dtype) {
+  Device cpu_dev = GetDevice(shared_state_.exec_->host_device_index);
   auto shape_tensor = Downcast<NDArray>(CopyTo(shape_tensor_dev, cpu_dev));
   auto shape = ToShape(shape_tensor);
   return storage->AllocNDArray(offset, shape, dtype);
 }
 
-DLTensor* DynBatchRuntime::AllocArrayWrapper(int64_t* shape_data, int64_t ndim, DLDataType dtype,
-                                             int64_t device_index) {
+template <typename TensorType>
+DLTensor* DynBatchRuntime<TensorType>::AllocArrayWrapper(int64_t* shape_data, int64_t ndim,
+                                                         DLDataType dtype, int64_t device_index) {
   DLTensor* wrapper = Arena::Current()->allocate_<DLTensor>();
-  wrapper->device = shared_state_->devices_[device_index];
+  wrapper->device = shared_state_.devices_[device_index];
   wrapper->data = nullptr;
   wrapper->strides = nullptr;
   wrapper->ndim = ndim;
@@ -150,8 +134,24 @@ DLTensor* DynBatchRuntime::AllocArrayWrapper(int64_t* shape_data, int64_t ndim, 
   return wrapper;
 }
 
-NDArray DynBatchRuntime::DeviceCopy(const NDArray& src_data, const int64_t src_device_index,
-                                    const int64_t dst_device_index) {
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::InvokePacked(int64_t packed_index, int64_t arg_count,
+                                               int64_t output_size, TensorType* args,
+                                               int64_t num_args) {
+  if (concurrent_execution_ || lazy_execution_) {
+    shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
+                                                       num_args);
+  } else {
+    // std::cout << "Invoking " << packed_index << std::endl;
+    InvokePackedFnUnrolled(packed_index, shared_state_.packed_funcs_[packed_index], output_size,
+                           args, num_args);
+  }
+}
+
+template <typename TensorType>
+NDArray DynBatchRuntime<TensorType>::DeviceCopy(const NDArray& src_data,
+                                                const int64_t src_device_index,
+                                                const int64_t dst_device_index) {
   Device actual_src_dev = src_data->device;
   Device inst_src_dev = GetDevice(src_device_index);
   ICHECK_EQ(actual_src_dev.device_type, inst_src_dev.device_type);
@@ -160,7 +160,9 @@ NDArray DynBatchRuntime::DeviceCopy(const NDArray& src_data, const int64_t src_d
   return src_data.CopyTo(dst_dev);
 }
 
-NDArray DynBatchRuntime::ReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor) {
+template <typename TensorType>
+NDArray DynBatchRuntime<TensorType>::ReshapeTensor(NDArray& tensor_arr,
+                                                   const NDArray& shape_tensor) {
   // Read the shape from shape tensor
   const DLTensor* dl_tensor = shape_tensor.operator->();
   ICHECK_EQ(dl_tensor->dtype.code, 0u);
@@ -183,37 +185,39 @@ NDArray DynBatchRuntime::ReshapeTensor(NDArray& tensor_arr, const NDArray& shape
   return tensor_arr.CreateView(shape, tensor_arr->dtype);
 }
 
-NDArray DynBatchRuntime::ShapeOf(const NDArray& input_array) {
+template <typename TensorType>
+NDArray DynBatchRuntime<TensorType>::ShapeOf(const NDArray& input_array) {
   int ndim = input_array->ndim;
   auto out_tensor =
-      NDArray::Empty({ndim}, {kDLInt, 64, 1}, GetDevice(shared_state_->exec_->host_device_index));
+      NDArray::Empty({ndim}, {kDLInt, 64, 1}, GetDevice(shared_state_.exec_->host_device_index));
   for (int i = 0; i < ndim; ++i) {
     reinterpret_cast<int64_t*>(out_tensor->data)[i] = input_array->shape[i];
   }
   return out_tensor;
 }
 
-void DynBatchRuntime::LazyExecute() {
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::LazyExecute() {
   if (batched_execution_) {
-    shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+    shared_state_.lazy_executor_.BatchedExecute(coarsened_execution_);
   } else {
-    shared_state_->lazy_executor_.Execute();
+    shared_state_.lazy_executor_.Execute();
   }
 }
 
-PackedFunc DynBatchRuntime::GetFunction(const std::string& name,
-                                        const ObjectPtr<Object>& sptr_to_self) {
+template <typename TensorType>
+PackedFunc DynBatchRuntime<TensorType>::GetFunction(const std::string& name,
+                                                    const ObjectPtr<Object>& sptr_to_self) {
   return {};
 }
 
-void DynBatchRuntime::InitSharedState() {
-  if (!shared_state_) {
-    shared_state_ = new VMSharedState();
-  }
-  this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::InitSharedState() {
+  this->shared_state_.lazy_executor_.vm_shared_state_ = &this->shared_state_;
 }
 
-void DynBatchRuntime::SetExecutionOptions(VMExecutionOptions options) {
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::SetExecutionOptions(VMExecutionOptions options) {
   this->coarsened_execution_ = options->coarsened_execution;
   this->lazy_execution_ = options->lazy_execution;
   this->scattered_kernels_ = options->scattered_kernels;
@@ -254,62 +258,64 @@ void DynBatchRuntime::SetExecutionOptions(VMExecutionOptions options) {
   }
 }
 
-inline Device DynBatchRuntime::GetDevice(Index device_index) const {
-  ICHECK_GE(shared_state_->devices_.size(), device_index)
+template <typename TensorType>
+inline Device DynBatchRuntime<TensorType>::GetDevice(Index device_index) const {
+  ICHECK_GE(shared_state_.devices_.size(), device_index)
       << "invalid device index: " << device_index;
-  return shared_state_->devices_[device_index];
+  return shared_state_.devices_[device_index];
 }
 
-inline Allocator* DynBatchRuntime::GetAllocator(Index device_index) const {
-  ICHECK_GE(shared_state_->allocators_.size(), device_index)
+template <typename TensorType>
+inline Allocator* DynBatchRuntime<TensorType>::GetAllocator(Index device_index) const {
+  ICHECK_GE(shared_state_.allocators_.size(), device_index)
       << "invalid device index: " << device_index;
-  return shared_state_->allocators_[device_index];
+  return shared_state_.allocators_[device_index];
 }
 
-void DynBatchRuntime::LoadExecutable(Executable* exec) {
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
       << "Need to load late-bound-constants before creating VM";
 
-  shared_state_->exec_ = exec;
+  shared_state_.exec_ = exec;
 
-  runtime::Module lib = shared_state_->exec_->GetLib();
+  runtime::Module lib = shared_state_.exec_->GetLib();
 
   ICHECK(exec->primitive_map.empty() || lib.operator->())
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
-  this->shared_state_->batched_func_arg_mode_ = shared_state_->exec_->batched_func_arg_mode;
-  this->shared_state_->prim_func_arg_access_mode_ = shared_state_->exec_->prim_func_arg_access_mode;
+  this->shared_state_.batched_func_arg_mode_ = shared_state_.exec_->batched_func_arg_mode;
+  this->shared_state_.prim_func_arg_access_mode_ = shared_state_.exec_->prim_func_arg_access_mode;
 
-  for (const auto& it : shared_state_->exec_->primitive_map) {
+  for (const auto& it : shared_state_.exec_->primitive_map) {
     const auto& packed_name = it.first;
     auto packed_index = static_cast<size_t>(it.second);
-    if (shared_state_->packed_funcs_.size() <= packed_index) {
-      shared_state_->packed_funcs_.resize(packed_index + 1);
+    if (shared_state_.packed_funcs_.size() <= packed_index) {
+      shared_state_.packed_funcs_.resize(packed_index + 1);
     }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
 
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
-    shared_state_->packed_funcs_[packed_index] = pf;
+    shared_state_.packed_funcs_[packed_index] = pf;
 
     if (batched_execution_) {
       std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                << shared_state_->exec_->batched_func_arg_mode[packed_index].size();
+                << shared_state_.exec_->batched_func_arg_mode[packed_index].size();
     } else {
       std::cout << "[VM] Fun " << packed_index << " " << packed_name;
     }
 
     if (coarsened_execution_) {
       std::cout << "  ScMode: [";
-      for (size_t i = 0; i < this->shared_state_->batched_func_arg_mode_[packed_index].size();
-           ++i) {
-        std::cout << this->shared_state_->batched_func_arg_mode_[packed_index][i] << " ";
+      for (size_t i = 0; i < this->shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
+        std::cout << this->shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
       }
       std::cout << "]   AccMode: [";
-      for (size_t i = 0; i < this->shared_state_->prim_func_arg_access_mode_[packed_index].size();
+      for (size_t i = 0; i < this->shared_state_.prim_func_arg_access_mode_[packed_index].size();
            ++i) {
-        std::cout << this->shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
+        std::cout << this->shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";
       }
       std::cout << "]" << std::endl;
     } else {
@@ -321,17 +327,17 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
     registry.set_body(pf);
 
     if (batched_execution_) {
-      auto bit = shared_state_->exec_->primitive_map.find(GetBatchedName(packed_name));
-      if (bit != shared_state_->exec_->primitive_map.end()) {
-        if (shared_state_->batched_funcs_.size() <= packed_index) {
-          shared_state_->batched_funcs_.resize(packed_index + 1, -1);
+      auto bit = shared_state_.exec_->primitive_map.find(GetBatchedName(packed_name));
+      if (bit != shared_state_.exec_->primitive_map.end()) {
+        if (shared_state_.batched_funcs_.size() <= packed_index) {
+          shared_state_.batched_funcs_.resize(packed_index + 1, -1);
         }
-        shared_state_->batched_funcs_[packed_index] = bit->second;
+        shared_state_.batched_funcs_[packed_index] = bit->second;
       }
     }
   }
 
-  // for (const auto& it : shared_state_->exec_->primitive_map) {
+  // for (const auto& it : shared_state_.exec_->primitive_map) {
   //   const auto& packed_name = it.first;
   //   ICHECK(Registry::Get(packed_name)->body());
   // }
@@ -343,28 +349,29 @@ void DynBatchRuntime::LoadExecutable(Executable* exec) {
   //   }
   // }
 
-  for (size_t i = 0; i < shared_state_->packed_funcs_.size(); ++i) {
-    ICHECK(shared_state_->packed_funcs_[i] != nullptr)
+  for (size_t i = 0; i < shared_state_.packed_funcs_.size(); ++i) {
+    ICHECK(shared_state_.packed_funcs_[i] != nullptr)
         << "Packed function " << i << " is not initialized";
   }
 }
 
-void DynBatchRuntime::Init(const std::vector<Device>& physical_devices,
-                           const std::vector<AllocatorType>& alloc_types) {
+template <typename TensorType>
+void DynBatchRuntime<TensorType>::Init(const std::vector<Device>& physical_devices,
+                                       const std::vector<AllocatorType>& alloc_types) {
   ICHECK_EQ(physical_devices.size(), alloc_types.size());
 
   // Find a physical device to represent each virtual device the VM code requires.
   // (Recall the VM instructions refer to devices by "device index" into this vector of
   // virtual devices.)
-  const size_t num_virtual_devices = shared_state_->exec_->virtual_devices.size();
-  shared_state_->devices_.reserve(num_virtual_devices);
-  shared_state_->allocators_.reserve(num_virtual_devices);
+  const size_t num_virtual_devices = shared_state_.exec_->virtual_devices.size();
+  shared_state_.devices_.reserve(num_virtual_devices);
+  shared_state_.allocators_.reserve(num_virtual_devices);
 
   for (size_t device_index = 0; device_index < num_virtual_devices; ++device_index) {
     // We'll retain the legacy behaviour and just match by device type.
     // TODO(mbs): Generalize.
     DLDeviceType virtual_device_type =
-        shared_state_->exec_->virtual_devices[device_index].device_type;
+        shared_state_.exec_->virtual_devices[device_index].device_type;
     auto itr = std::find_if(physical_devices.begin(), physical_devices.end(),
                             [virtual_device_type](const Device& physical_device) {
                               return physical_device.device_type == virtual_device_type;
@@ -373,13 +380,19 @@ void DynBatchRuntime::Init(const std::vector<Device>& physical_devices,
         << "Unable to find a physical device (from among the " << physical_devices.size()
         << " given) to match the virtual device with device type " << virtual_device_type;
     const size_t i = std::distance(physical_devices.begin(), itr);
-    shared_state_->devices_.push_back(*itr);
-    shared_state_->allocators_.push_back(MemoryManager::GetOrCreateAllocator(*itr, alloc_types[i]));
+    shared_state_.devices_.push_back(*itr);
+    shared_state_.allocators_.push_back(MemoryManager::GetOrCreateAllocator(*itr, alloc_types[i]));
   }
 }
 
-runtime::Module CreateDynBatchRuntime(Executable* exec) {
-  auto vm = make_object<DynBatchRuntime>();
+runtime::Module CreateEagerAllocationDynBatchRuntime(Executable* exec) {
+  auto vm = make_object<DynBatchRuntime<NDArray>>();
+  vm->LoadExecutable(exec);
+  return runtime::Module(vm);
+}
+
+runtime::Module CreateLazyAllocationDynBatchRuntime(Executable* exec) {
+  auto vm = make_object<DynBatchRuntime<DLTensor*>>();
   vm->LoadExecutable(exec);
   return runtime::Module(vm);
 }
@@ -387,8 +400,13 @@ runtime::Module CreateDynBatchRuntime(Executable* exec) {
 TVM_REGISTER_GLOBAL("runtime._DynBatchRuntime").set_body([](TVMArgs args, TVMRetValue* rv) {
   runtime::Module mod = args[0];
   auto* exec = dynamic_cast<Executable*>(mod.operator->());
+  bool eager = args[1];
   ICHECK(exec) << "The virtual machine executable has not been defined yet.";
-  *rv = CreateDynBatchRuntime(exec);
+  if (eager) {
+    *rv = CreateEagerAllocationDynBatchRuntime(exec);
+  } else {
+    *rv = CreateLazyAllocationDynBatchRuntime(exec);
+  }
 });
 
 }  // namespace vm

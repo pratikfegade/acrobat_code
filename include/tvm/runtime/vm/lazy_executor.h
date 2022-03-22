@@ -45,7 +45,12 @@ namespace runtime {
 namespace vm {
 
 class VirtualMachine;
-class VMSharedState;
+
+template <typename TensorType>
+struct VMSharedState;
+
+template <typename TensorType>
+class DynBatchRuntime;
 
 template <typename TensorType>
 class OpNode {
@@ -107,11 +112,11 @@ class LazyExecutor {
 
   friend class VirtualMachine;
   friend class ConcurrentVirtualMachine;
-  friend class DynBatchRuntime;
+  friend class DynBatchRuntime<TensorType>;
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
-  const VMSharedState* vm_shared_state_;
+  VMSharedState<TensorType>* vm_shared_state_;
   /*! \brief list of nodes to execute */
   std::vector<OpNode<TensorType>> nodes_;
   /*! \brief Profiling */
@@ -122,14 +127,28 @@ typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;
 typedef LazyExecutor<DLTensor*> LazyAllocationLazyExecutor;
 
 template <>
-EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                   const Index output_size, NDArray args,
-                                                   int num_args);
+void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
+                                                        const Index output_size, NDArray* args,
+                                                        int num_args);
 
 template <>
-LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                  const Index output_size, DLTensor** args,
-                                                  int num_args);
+void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
+                                                       const Index output_size, DLTensor** args,
+                                                       int num_args);
+
+template <>
+void EagerAllocationLazyExecutor::Execute();
+
+template <>
+void LazyAllocationLazyExecutor::Execute();
+
+template <>
+void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+                                                 bool all_nodes_same_depth);
+
+template <>
+void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+                                                bool all_nodes_same_depth);
 
 }  // namespace vm
 }  // namespace runtime

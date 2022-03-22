@@ -251,7 +251,7 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, i
 
 void VirtualMachine::InitSharedState() {
   if (!shared_state_) {
-    shared_state_ = new VMSharedState();
+    shared_state_ = new VMSharedState<NDArray>();
   }
   this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
 }

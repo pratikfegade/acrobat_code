@@ -47,17 +47,6 @@ struct Buffer {
   Device device;
 };
 
-#define MAX_TENSOR_DIM 4
-struct Dim {
-  int ndim;
-  int shape[MAX_TENSOR_DIM];
-};
-
-struct TensorPlaceholder {
-  Dim shape;
-  Device device;
-};
-
 enum AllocatorType {
   kNaive = 1,
   kPooled,
@@ -83,10 +72,32 @@ class Allocator {
    *  \return A sized allocation in the form of a buffer.
    */
   virtual Buffer Alloc(size_t nbytes, size_t alignment, DLDataType type_hint) = 0;
+  /*! \brief Allocate a buffer given a size, alignment and type, to be
+   *  freed all at once, similar to an arena allocator.
+   *
+   *  \param nbytes The size of the buffer.
+   *  \param alignment The alignment of the buffer.
+   *  \param type_hint A type hint to the allocator.
+   *  \return A sized allocation in the form of a buffer.
+   */
+  Buffer ArenaAlloc(size_t nbytes, size_t alignment, DLDataType type_hint) {
+    auto buffer = Alloc(nbytes, alignment, type_hint);
+    arena_allocated_.push_back(buffer);
+    return buffer;
+  }
   /*! \brief Free a buffer allocated by the allocator.
    *  \param buffer The buffer to free.
    */
   virtual void Free(const Buffer& buffer) = 0;
+  /*! \brief Free all the buffers allocated by the allocator using the
+   *  ArenaAlloc API.
+   */
+  void ArenaFree() {
+    for (auto& buffer : arena_allocated_) {
+      Free(buffer);
+    }
+    arena_allocated_.clear();
+  }
   /*! \brief The amount of memory currently allocated.
    *  \return The amount of memory currently allocated.
    */
@@ -94,6 +105,7 @@ class Allocator {
 
  private:
   AllocatorType type_;
+  std::vector<Buffer> arena_allocated_;
 };
 
 class MemoryManager {

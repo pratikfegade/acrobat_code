@@ -44,6 +44,7 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
+/* Other utils */
 std::string ShapeToString(const ShapeTuple& st) {
   std::stringstream ss;
   ss << "[";
@@ -55,7 +56,6 @@ std::string ShapeToString(const ShapeTuple& st) {
   return ss.str();
 }
 
-/* Other utils */
 std::vector<int64_t> ToShape(NDArray shape_tensor) {
   std::vector<int64_t> shape;
   auto rank = shape_tensor.Shape().size();
@@ -107,7 +107,7 @@ ObjectRef CopyTo(ObjectRef src, const DLDevice& dev) {
   }
 }
 
-/* Invoking packed functions */
+/* Utilities for invoking packed functions */
 void TestNDArray(DLTensor* array) {
   size_t total_nums = 1;
   for (size_t i = 0; i < array->ndim; ++i) {
@@ -133,7 +133,7 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
   }
 }
 
-NDArray CreatePointerNDArray(const std::vector<OpNode*>& nodes, int arg_num) {
+NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num) {
   size_t size = nodes.size();
   NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
                                   DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
@@ -157,6 +157,35 @@ NDArray CreatePointerNDArray(const std::vector<OpNode*>& nodes, int arg_num) {
   }
 
   // TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
+
+  return result;
+}
+
+NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                             Allocator* allocator) {
+  size_t size = nodes.size();
+  NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
+                                  DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
+                                  nodes[0]->args_[arg_num]->device);
+  void** raw_data = static_cast<void**>(result->data);
+
+  constexpr size_t unroll_factor = 16;
+  size_t preloop_bound = size / unroll_factor;
+
+  auto first_arg = nodes[0]->args_[arg_num];
+  auto data_size = GetDataSize(*first_arg);
+  if (first_arg->data != nullptr) {
+    for (size_t j = 0; j < size; ++j) {
+      // ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+      raw_data[j] = nodes[j]->args_[arg_num]->data;
+    }
+  } else {
+    void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
+    for (size_t j = 0; j < size; ++j) {
+      raw_data[j] = start + j * data_size;
+      nodes[j]->args_[arg_num]->data = start + j * data_size;
+    }
+  }
 
   return result;
 }
@@ -187,8 +216,10 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
   return result;
 }
 
+/* Invoking packed functions */
+template <typename TensorType>
 void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
-                            const NDArray* args, int arity) {
+                            TensorType* args, int arity) {
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("arg_prep_unbatched");
   }
@@ -211,10 +242,17 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index
   }
 }
 
+template void InvokePackedFnUnrolled<NDArray>(const size_t func_idx, const PackedFunc& func,
+                                              Index output_size, NDArray* args, int arity);
+
+template void InvokePackedFnUnrolled<DLTensor*>(const size_t func_idx, const PackedFunc& func,
+                                                Index output_size, DLTensor** args, int arity);
+
+template <typename TensorType>
 void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arity,
                                    Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
-                                   const std::vector<OpNode*>& nodes) {
+                                   const std::vector<OpNode<TensorType>*>& nodes) {
   // if (VMDBProfiler::DoProfile()) {
   //   VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
   // }
@@ -296,6 +334,15 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
   //   VMDBProfiler::ProfileDeviceStopCall();
   // }
 }
+
+template void InvokePackedFnBatchedUnrolled<NDArray>(const size_t func_idx, const PackedFunc& func,
+                                                     Index arity, Index output_size,
+                                                     const std::vector<DBBatchedArgMode>& arg_modes,
+                                                     const std::vector<OpNode<NDArray>*>& nodes);
+
+template void InvokePackedFnBatchedUnrolled<DLTensor*>(
+    const size_t func_idx, const PackedFunc& func, Index arity, Index output_size,
+    const std::vector<DBBatchedArgMode>& arg_modes, const std::vector<OpNode<DLTensor*>*>& nodes);
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const ObjectRef* args, int64_t num_args,

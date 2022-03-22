@@ -75,6 +75,19 @@ void TestNDArray(const NDArray& array);
 void TestNDArray(DLTensor* array);
 
 /*!
+ * \brief Create a gathered NDArray from a batch of scattered tensors.
+ *
+ * \param nodes The OpNodes that contain the scattered tensors.
+ * \param arg_num The index of the scattered argument tensors.
+ * \param allocator The allocator to allocate from.
+ *
+ * \return The created gathered array
+ */
+NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num);
+NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                             Allocator* allocator);
+
+/*!
  * \brief A simple procedure to write to all locations of an gathered
  * NDArray/DLTensor to check for invalid accesses.
  *
@@ -98,8 +111,9 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
  *
  * \note The return value will be stored in the last output_size slots of args.
  */
+template <typename TensorType>
 void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
-                            const NDArray* args, int num_args);
+                            TensorType* args, int arity);
 
 /*!
  * \brief Invoke a batch PackedFunction (refactored out to avoid code
@@ -115,10 +129,11 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index
  *
  * \note The return value will be stored in the last output_size slots of args.
  */
+template <typename TensorType>
 void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arg_count,
                                    Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
-                                   const std::vector<OpNode*>& nodes);
+                                   const std::vector<OpNode<TensorType>*>& nodes);
 
 /*!
  * \brief Invoke a PackedFunction (refactored out to avoid code duplication)
