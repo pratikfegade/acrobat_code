@@ -91,12 +91,16 @@ Op GetInvokeTVMOp() {
 
 typedef std::unordered_set<relay::Var, ObjectPtrHash, ObjectPtrEqual> RelayVarSet;
 
+typedef std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
+    AccessModesMap;
+typedef std::unordered_map<GlobalVar, AccessModesMap, ObjectPtrHash, ObjectPtrEqual>
+    FunctionsAccessModesMap;
+
 class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
  public:
   LeafTensorAccessModeCalculator(const tir::PrimFunc& func) : func_(func) {}
 
-  std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
-  Compute() {
+  AccessModesMap Compute() {
     for (auto pair : func_->buffer_map) {
       param_mapping_[pair.second->data] = pair.first;
     }
@@ -124,11 +128,17 @@ class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
   void VisitExpr_(const tir::LoadNode* op) {
     MergeAndSet(op->buffer_var, runtime::vm::kInput);
+    if (op->scatter_buffer_var.defined()) {
+      MergeAndSet(op->scatter_buffer_var, runtime::vm::kInput);
+    }
     StmtExprVisitor::VisitExpr_(op);
   }
 
   void VisitStmt_(const tir::StoreNode* op) {
     MergeAndSet(op->buffer_var, runtime::vm::kOutput);
+    if (op->scatter_buffer_var.defined()) {
+      MergeAndSet(op->scatter_buffer_var, runtime::vm::kOutput);
+    }
     StmtExprVisitor::VisitStmt_(op);
   }
 
@@ -150,21 +160,12 @@ class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
 class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
  public:
-  CoarsenedTensorAccessModeCalculator(const tir::PrimFunc& func, const IRModule& mod)
-      : func_(func), mod_(mod) {}
+  CoarsenedTensorAccessModeCalculator(const IRModule& mod) : mod_(mod) {}
 
-  Array<Integer> Compute() {
-    VisitStmt(func_->body);
-
-    Array<Integer> access_modes;
-    for (auto var : func_->params) {
-      auto it = access_modes_map_.find(var);
-      auto mode = Integer(
-          static_cast<int>((it != access_modes_map_.end() ? (*it).second : runtime::vm::kUnused)));
-      access_modes.push_back(mode);
-    }
-
-    return access_modes;
+  AccessModesMap Compute(const tir::Stmt& body) {
+    body_ = body;
+    VisitStmt(body);
+    return access_modes_map_;
   }
 
  private:
@@ -172,13 +173,18 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
     auto iit = access_modes_map_.find(var);
     if (iit == access_modes_map_.end()) {
       access_modes_map_[var] = mode;
-    } else if (iit->second != mode) {
-      access_modes_map_[var] = runtime::vm::kInputOutput;
+    } else {
+      auto old_mode = iit->second;
+      ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
+          << "Reused tensor: " << var << " in " << body_;
+      if (old_mode != mode) {
+        access_modes_map_[var] = runtime::vm::kInputOutput;
+      }
     }
   }
 
   void VisitExpr_(const tir::CallNode* op) {
-    // std::cout << "[CTAMC] Visiting Call " << GetRef<PrimExpr>(op) << std::endl;
+    std::cout << "[CTAMC] Visiting Call " << GetRef<PrimExpr>(op) << std::endl;
     ICHECK_EQ(op->op, tir::builtin::tvm_call_unpacked_from_packed());
     auto base_leaf_callee = mod_->Lookup(Downcast<tir::StringImm>(op->args[0])->value);
     ICHECK(base_leaf_callee.as<tir::PrimFuncNode>());
@@ -186,26 +192,27 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
     auto func_access_modes = LeafTensorAccessModeCalculator(leaf_callee).Compute();
 
-    // std::cout << "[CTAMC]  Function " << leaf_callee << std::endl;
-    for (size_t i = 1; i < op->args.size(); ++i) {
-      auto arg = op->args[i];
+    std::cout << "[CTAMC]  Function " << leaf_callee << std::endl;
+    size_t ctr = 1;
+    for (size_t i = 1; i <= leaf_callee->params.size(); ++i) {
+      auto arg = op->args[ctr];
       auto param = leaf_callee->params[i - 1];
       auto it = func_access_modes.find(param);
       if (it != func_access_modes.end()) {
         auto mode = it->second;
-        // std::cout << "[CTAMC]   " << arg << " " << param << " " << mode << std::endl;
+        std::cout << "[CTAMC]   " << arg << " " << param << " " << mode << std::endl;
         MergeAndSet(Downcast<tir::Var>(arg), mode);
+        ctr++;
       } else {
-        // std::cout << "[CTAMC]   " << arg << " " << param << " Unused " << std::endl;
+        std::cout << "[CTAMC]   " << arg << " " << param << " Unused " << std::endl;
       }
     }
-    // std::cout << std::endl;
+    std::cout << std::endl;
   }
 
-  std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
-      access_modes_map_;
-  const tir::PrimFunc func_;
   const IRModule mod_;
+  AccessModesMap access_modes_map_;
+  tir::Stmt body_;
 };
 
 class Serializer : public ExprVisitor {
@@ -295,8 +302,12 @@ struct TIRLowererResult {
 
 class AbstractTIRLowerer {
  public:
-  AbstractTIRLowerer(const IRModule& mod, bool scattered_kernels)
-      : mod_(mod), scattered_kernels_(scattered_kernels) {}
+  AbstractTIRLowerer(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
+                     const std::string& name, bool scattered_kernels)
+      : mod_(mod),
+        prim_funcs_access_modes_(prim_funcs_access_modes),
+        name_(name),
+        scattered_kernels_(scattered_kernels) {}
 
   ~AbstractTIRLowerer() {}
 
@@ -398,6 +409,8 @@ class AbstractTIRLowerer {
   }
 
   const IRModule& mod_;
+  const FunctionsAccessModesMap& prim_funcs_access_modes_;
+  const std::string& name_;
   bool scattered_kernels_;
   Map<relay::Var, tir::Var> var_to_var_mapping_;
   Map<relay::Var, Array<Expr>> tuple_var_values_;
@@ -405,25 +418,35 @@ class AbstractTIRLowerer {
 
 class TIRLowererUnbatched : public AbstractTIRLowerer {
  public:
-  TIRLowererUnbatched(const IRModule& mod, bool scattered_kernels)
-      : AbstractTIRLowerer(mod, scattered_kernels) {}
+  TIRLowererUnbatched(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
+                      const std::string& name, bool scattered_kernels)
+      : AbstractTIRLowerer(mod, prim_funcs_access_modes, name, scattered_kernels) {}
 
   TIRLowererResult LowerToTIR(const RelayVarSet& free_vars_set, const Expr& body,
                               const std::vector<std::pair<relay::Var, Expr>> bindings) final {
-    // std::cout << "[CG] Lowering group to TIR" << std::endl;
+    std::cout << "[CG] Creating coarsened function " << name_ << std::endl;
     std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
     std::vector<Var> flattened_free_vars;
-    std::vector<Expr> flattened_call_args;
+    std::vector<Expr> flattened_call_args_unsorted;
 
     for (auto var : free_vars) {
-      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
+      std::cout << "[CG]   FreeVar " << var << std::endl;
+      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args_unsorted);
     }
 
-    Array<tir::Var> prim_func_params;
-    Array<Type> prim_func_param_types;
-    for (auto rvar : flattened_free_vars) {
-      prim_func_params.push_back(CreateTIRVar(rvar));
-      prim_func_param_types.push_back(GetVarType(rvar));
+    for (size_t i = 0; i < flattened_free_vars.size(); ++i) {
+      std::cout << "[CG]   FlattenedFreeVar " << flattened_free_vars[i] << " "
+                << flattened_call_args_unsorted[i] << std::endl;
+    }
+
+    std::vector<tir::Var> prim_func_params_vec;
+    std::vector<Type> prim_func_param_types_vec;
+    std::vector<int> param_poses;
+    for (size_t i = 0; i < flattened_free_vars.size(); ++i) {
+      auto rvar = flattened_free_vars[i];
+      prim_func_params_vec.push_back(CreateTIRVar(rvar));
+      prim_func_param_types_vec.push_back(GetVarType(rvar));
+      param_poses.push_back(i);
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -473,27 +496,78 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
+    AccessModesMap access_modes_map =
+        CoarsenedTensorAccessModeCalculator(mod_).Compute(prim_func_body);
+
+    auto get_access_mode = [&access_modes_map](const tir::Var& var) {
+      auto it = access_modes_map.find(var);
+      auto mode = tvm::runtime::vm::kUnused;
+      if (it != access_modes_map.end()) {
+        mode = it->second;
+      }
+      return mode;
+    };
+
+    auto sorting_lambda = [&](int idx1, int idx2) {
+      const tir::Var& var1 = prim_func_params_vec[idx1];
+      const tir::Var& var2 = prim_func_params_vec[idx2];
+      auto mode1 = get_access_mode(var1);
+      auto mode2 = get_access_mode(var2);
+      return (static_cast<int>(mode1) < static_cast<int>(mode2));
+    };
+
+    std::sort(param_poses.begin(), param_poses.end(), sorting_lambda);
+
+    Array<tir::Var> prim_func_params;
+    Array<Type> prim_func_param_types;
+    Array<Integer> prim_func_arg_access_modes;
+    std::vector<Expr> flattened_call_args;
+    std::cout << "[CG]  Generating params for coarsened function" << std::endl;
+    for (size_t j = 0; j < param_poses.size(); ++j) {
+      auto pos = param_poses[j];
+      auto& param = prim_func_params_vec[pos];
+      if (get_access_mode(param) == tvm::runtime::vm::kUnused) {
+        std::cout << "[CG]   Ignoring " << param << std::endl;
+      } else {
+        auto& type = prim_func_param_types_vec[pos];
+        prim_func_params.push_back(param);
+        prim_func_param_types.push_back(type);
+        prim_func_arg_access_modes.push_back(Integer(static_cast<int>(get_access_mode(param))));
+        flattened_call_args.push_back(flattened_call_args_unsorted[pos]);
+      }
+      // std::cout << "[CG]   " << param << " " << type << " " << get_access_mode(param) << " "
+      // << flattened_call_args_unsorted[pos] << " " << prim_func_body << std::endl;
+    }
+
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
     func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
-    func = WithAttr(func, tir::attr::kDBArgAccessModes,
-                    CoarsenedTensorAccessModeCalculator(func, mod_).Compute());
-    // std::cout << "[CG]  Generated PrimFunc " << func << std::endl;
+    func = WithAttr(func, tir::attr::kDBArgAccessModes, prim_func_arg_access_modes);
     return TIRLowererResult({func, flattened_call_args, body_in_free_vars, Array<Integer>()});
   }
 
  private:
   PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) final {
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
+    auto callee = Downcast<tir::PrimFunc>(mod_->Lookup(callee_gv));
+    ICHECK(prim_funcs_access_modes_.count(callee_gv)) << callee_gv << " " << callee_gv.get();
+    auto access_modes_map = prim_funcs_access_modes_.at(callee_gv);
 
+    std::cout << "[CG]  Generating call " << RemoveOnDeviceCalls(GetRef<Expr>(call)) << std::endl;
     std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(name));
 
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
+    int ctr = 0;
     auto push_args = [&](const Expr& tuple) {
       for (auto arg : FlattenTuple(tuple)) {
-        ICHECK(arg.as<relay::VarNode>());
-        args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
+        std::cout << "[CG]   Arg " << arg << " " << callee->params[ctr] << std::endl;
+        if (access_modes_map.count(callee->params[ctr++])) {
+          ICHECK(arg.as<relay::VarNode>());
+          args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
+        } else {
+          std::cout << "[CG]    Ignoring" << std::endl;
+        }
       }
     };
     push_args(call->args[1]);
@@ -505,8 +579,9 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 
 class TIRLowererBatched : public AbstractTIRLowerer {
  public:
-  TIRLowererBatched(const IRModule& mod, bool scattered_kernels)
-      : AbstractTIRLowerer(mod, scattered_kernels) {
+  TIRLowererBatched(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
+                    const std::string& name, bool scattered_kernels)
+      : AbstractTIRLowerer(mod, prim_funcs_access_modes, name, scattered_kernels) {
     batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
   }
 
@@ -756,10 +831,14 @@ class TIRLowererBatched : public AbstractTIRLowerer {
   Map<relay::Var, Integer> arg_mode_states_;
 };
 
-class BetterCoarsener : public ExprMutator {
+class Coarsener : public ExprMutator {
  public:
-  BetterCoarsener(const IRModule& mod, bool batched_execution, bool scattered_kernels)
-      : mod_(mod), batched_execution_(batched_execution), scattered_kernels_(scattered_kernels) {}
+  Coarsener(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
+            bool batched_execution, bool scattered_kernels)
+      : mod_(mod),
+        prim_funcs_access_modes_(prim_funcs_access_modes),
+        batched_execution_(batched_execution),
+        scattered_kernels_(scattered_kernels) {}
 
   Function Coarsen(const Function& func, bool print) {
     print_ = print;
@@ -936,13 +1015,13 @@ class BetterCoarsener : public ExprMutator {
         }
         auto free_vars = GetFreeVarsInGroup(bindings);
 
-        auto res = TIRLowererUnbatched(mod_, scattered_kernels_)
+        std::string name = "prim_func" + std::to_string(ctr++);
+        auto res = TIRLowererUnbatched(mod_, prim_funcs_access_modes_, name, scattered_kernels_)
                        .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
 
         auto prim_func = res.func;
         auto call_args = res.call_args;
         auto replacement = res.replacement;
-        std::string name = "prim_func" + std::to_string(ctr++);
         GlobalVar prim_func_var(name, prim_func->checked_type_);
         auto input_args_tuple = Tuple(call_args);
         auto output_args_tuple = Tuple(Array<Expr>());
@@ -953,11 +1032,11 @@ class BetterCoarsener : public ExprMutator {
         prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
         if (batched_execution_) {
+          std::string batched_name = runtime::vm::GetBatchedName(name);
           auto batched_res =
-              TIRLowererBatched(mod_, scattered_kernels_)
+              TIRLowererBatched(mod_, prim_funcs_access_modes_, batched_name, scattered_kernels_)
                   .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
           auto batched_func = batched_res.func;
-          std::string batched_name = runtime::vm::GetBatchedName(name);
           GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
           batched_func = AddAttrsToWrapperFunc(batched_func, batched_name, true);
           // std::cout << "batched_func " << batched_func << std::endl;
@@ -980,15 +1059,13 @@ class BetterCoarsener : public ExprMutator {
       }
     }
 
-    // if (groups.size() > 0) {
-    // std::cout << "[CG] Body " << PrettyPrint(RemoveOnDeviceCalls(body)) << std::endl;
-    // }
-
     return body;
   }
 
   bool print_;
   const IRModule& mod_;
+  const FunctionsAccessModesMap& prim_funcs_access_modes_;
+
   const bool batched_execution_;
   const bool scattered_kernels_;
   static int ctr;
@@ -999,22 +1076,38 @@ class BetterCoarsener : public ExprMutator {
   std::vector<std::pair<GlobalVar, Array<Integer>>> batched_arg_modes_;
 };
 
-int BetterCoarsener::ctr = 0;
+int Coarsener::ctr = 0;
 
 IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
-  std::cout << "Coarsening now!" << std::endl;
+  std::cout << "==============================================================" << std::endl;
+  std::cout << "[CG] Coarsening now!" << std::endl;
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
 
   auto funcs = mod->functions;
+
+  FunctionsAccessModesMap prim_funcs_access_modes;
+  std::cout << "[CG] AccessModeMaps" << std::endl;
+  for (const auto& it : funcs) {
+    if (it.second.as<tir::PrimFuncNode>()) {
+      auto func = Downcast<tir::PrimFunc>(it.second);
+      auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
+      prim_funcs_access_modes[it.first] = access_modes_map;
+      std::cout << "[CG]  Func " << it.first << std::endl;
+      for (auto kv : access_modes_map) {
+        std::cout << "[CG]    " << kv.first << " " << kv.second << std::endl;
+      }
+    }
+  }
+
   for (const auto& it : funcs) {
     if (const auto* n = it.second.as<FunctionNode>()) {
       ICHECK_EQ(FreeVars(it.second).size(), 0);
       if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
       Function func = GetRef<Function>(n);
 
-      bool print = (it.first->name_hint == "lstm_cell");
-      BetterCoarsener coarsener(mod, batched_execution, scattered_kernels);
+      bool print = false;  //(it.first->name_hint == "lstm_cell");
+      Coarsener coarsener(mod, prim_funcs_access_modes, batched_execution, scattered_kernels);
       Function ret = coarsener.Coarsen(func, print);
 
       updates.Set(it.first, ret);
@@ -1031,19 +1124,46 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
           mod->UpdateArgMode(it.first, it.second);
         }
       }
-
-      // auto groups = GroupFinder().FindGroups(func, print);
-      // if (print) {
-      //   std::cout << "[CG] function " << it.first << std::endl;
-      //   std::cout << "[CG]  Groups " << groups.size() << std::endl;
-      // }
-      // Coarsener coarsener(groups, mod, batched_execution, scattered_kernels);
-      // Function ret = Downcast<Function>(coarsener(func));
     }
   }
 
   for (auto pair : updates) {
     mod->Add(pair.first, pair.second, true);
+  }
+
+  for (auto pair : new_prim_funcs) {
+    mod->Add(pair.first, pair.second, true);
+  }
+  new_prim_funcs.clear();
+
+  // Remove unused args in prim funcs
+  for (const auto& it : funcs) {
+    if (it.second.as<tir::PrimFuncNode>() &&
+        !it.second->HasNonzeroAttr(tir::attr::kDBCoarseWrapperPrimFunc)) {
+      bool print = (it.first->name_hint == "vm_mod_fused_nn_contrib_dense_pack_add_1");
+      auto func = Downcast<tir::PrimFunc>(it.second);
+      auto access_modes_map = prim_funcs_access_modes.at(it.first);
+      Array<tir::Var> used_params;
+      size_t tensor_args_start = 0;
+      if (func->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc)) {
+        tensor_args_start = 1;
+        used_params.push_back(func->params[0]);
+      }
+      // std::cout << "[CG] Func " << it.first << std::endl;
+      for (size_t i = tensor_args_start; i < func->params.size(); ++i) {
+        auto& var = func->params[i];
+        if (access_modes_map.count(var)) {
+          used_params.push_back(var);
+        } else {
+          // std::cout << "[CG]   Unused  " << var << " " << var.get() << std::endl;
+        }
+      }
+      if (used_params.size() != func->params.size()) {
+        new_prim_funcs.Set(it.first,
+                           tir::PrimFunc(used_params, func->body, func->ret_type, func->buffer_map,
+                                         func->scatter_buffer_map, func->attrs, func->span));
+      }
+    }
   }
 
   for (auto pair : new_prim_funcs) {

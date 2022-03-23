@@ -1020,8 +1020,8 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
 }
 
 void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
-  os << "template <typename TensorType>\n;";
-  os << "void invoke_model(std::vector<Device> devices)\n;";
+  os << "template <typename TensorType>\n";
+  os << "void invoke_model(std::vector<Device> devices);\n";
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner, "
         "bool profiling = false);\n";
 }
