@@ -107,8 +107,16 @@ class LazyExecutor {
   void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
 
  private:
-  void ExecuteOpNodeBatch(
-      const std::unordered_map<int, std::vector<OpNode<TensorType>*>>& func_to_node);
+  void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
+
+  inline size_t InputStart(const Index idx) { return 0; }
+  inline size_t InputEnd(const Index idx) { return vm_shared_state_->outputs_start[idx]; }
+
+  inline size_t OutputStart(const Index idx) { return vm_shared_state_->outputs_start[idx]; }
+  inline size_t OutputEnd(const Index idx) { return vm_shared_state_->inouts_start[idx]; }
+
+  inline size_t InoutStart(const Index idx) { return vm_shared_state_->inouts_start[idx]; }
+  inline size_t InoutEnd(const Index idx) { return vm_shared_state_->args_end[idx]; }
 
   friend class VirtualMachine;
   friend class ConcurrentVirtualMachine;
@@ -150,6 +158,13 @@ template <>
 void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                 bool all_nodes_same_depth);
 
+template <>
+void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
+                                                     const std::vector<EagerOpNode*>& func_nodes);
+
+template <>
+void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
+                                                    const std::vector<LazyOpNode*>& func_nodes);
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

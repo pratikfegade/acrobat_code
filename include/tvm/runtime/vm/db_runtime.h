@@ -210,12 +210,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Get the current instance of the runtime.
    */
-  static inline ObjectPtr<DynBatchRuntime<TensorType>> Current() { return current_; }
+  static inline DynBatchRuntime<TensorType>* Current() { return current_; }
 
-  static inline ObjectPtr<DynBatchRuntime<TensorType>> CreateRuntime() {
+  static inline DynBatchRuntime<TensorType>* CreateRuntime() {
     ICHECK(current_ == nullptr);
-    current_ = make_object<DynBatchRuntime<TensorType>>();
-    current_ref_ = ObjectRef(current_);
+    current_ = new DynBatchRuntime<TensorType>();
     return current_;
   }
 
@@ -263,17 +262,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Current instance of the runtime
    */
-  static ObjectPtr<DynBatchRuntime<TensorType>> current_;
-  /*!
-   * \brief Current instance of the runtime
-   */
-  static ObjectRef current_ref_;
+  static DynBatchRuntime<TensorType>* current_;
 };
 
 template <typename TensorType>
-ObjectPtr<DynBatchRuntime<TensorType>> DynBatchRuntime<TensorType>::current_;
-template <typename TensorType>
-ObjectRef DynBatchRuntime<TensorType>::current_ref_;
+DynBatchRuntime<TensorType>* DynBatchRuntime<TensorType>::current_;
 
 }  // namespace vm
 }  // namespace runtime

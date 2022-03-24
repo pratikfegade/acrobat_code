@@ -14,12 +14,11 @@ iterations = 1
 batch_size = 20
 
 mod, params = relay.testing.lstm.get_workload(iterations, hidden_size)
-print(mod)
 
-lazy_execution=True
-coarsened_execution=False
-batched_execution=True
-scattered_kernels=True
+lazy_execution=False
+coarsened_execution=True
+batched_execution=False
+scattered_kernels=False
 concurrent_execution=False
 dynamic_batch_size_estimate=64
 use_autoscheduler=False
@@ -79,6 +78,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule(True)
+# auto_schedule(True)
 print("===============================================================================", flush=True)
 execute()

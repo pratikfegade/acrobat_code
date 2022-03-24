@@ -1093,7 +1093,6 @@ void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
 }
 
 void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host) {
-  // std::cout << "Before lowering" << std::endl;
   VLOG_CONTEXT << "VM Lower";
   exec_ = make_object<Executable>();
   config_ = CompilationConfig(PassContext::Current(), std::move(targets), std::move(target_host));
@@ -1106,10 +1105,6 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   // Run the optimizations necessary to target the VM.
   context_.module = OptimizeModuleImpl(std::move(mod));
 
-  // for (auto it : context_.module->functions) {
-  //   std::cout << "[CO] Lowering functions: " << it.first->name_hint << std::endl;
-  // }
-
   // Build the map from global variables bound to Functions to a global index in the
   // VMFunction table.
   size_t num_functions = PopulateGlobalMap();
@@ -1117,6 +1112,19 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   // Next we get ready by allocating space for
   // the global state.
   exec_->functions.resize(num_functions);
+
+  std::vector<std::string> prim_func_names;
+  for (const auto& pair : context_.module->functions) {
+    if (pair.second.as<tir::PrimFuncNode>()) {
+      prim_func_names.push_back(pair.first->name_hint);
+    }
+  }
+  std::sort(prim_func_names.begin(), prim_func_names.end());
+  for (auto& name : prim_func_names) {
+    if (!context_.primitive_map.count(name)) {
+      context_.primitive_map.emplace(name, context_.primitive_map.size());
+    }
+  }
 
   bool batched_execution =
       PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();

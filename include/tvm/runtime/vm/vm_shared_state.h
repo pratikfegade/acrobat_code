@@ -128,6 +128,20 @@ struct VMSharedState {
    * counterparts.
    */
   std::vector<std::vector<DBArgAccessMode>> prim_func_arg_access_mode_;
+  /*!
+   * \brief A mapping from packed_funcs to the index in their parameters when their output tensors
+   * start.
+   */
+  std::vector<int> outputs_start;
+  /*!
+   * \brief A mapping from packed_funcs to the index in their
+   * parameters when their input/output tensors start.
+   */
+  std::vector<int> inouts_start;
+  /*!
+   * \brief A mapping from packed_funcs to the number of their arguments.
+   */
+  std::vector<int> args_end;
 };
 
 }  // namespace vm

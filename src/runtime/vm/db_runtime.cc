@@ -286,40 +286,86 @@ void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
       << "If the executable has declared primitive functions, the "
       << "generated kernel library must non-be null.";
 
-  this->shared_state_.batched_func_arg_mode_ = shared_state_.exec_->batched_func_arg_mode;
-  this->shared_state_.prim_func_arg_access_mode_ = shared_state_.exec_->prim_func_arg_access_mode;
+  size_t num_packed_funs = shared_state_.exec_->primitive_map.size();
+  ICHECK_EQ(num_packed_funs, shared_state_.exec_->batched_func_arg_mode.size());
+  ICHECK_EQ(num_packed_funs, shared_state_.exec_->prim_func_arg_access_mode.size());
+  for (size_t i = 0; i < num_packed_funs; ++i) {
+    shared_state_.batched_func_arg_mode_.push_back(shared_state_.exec_->batched_func_arg_mode[i]);
+    shared_state_.prim_func_arg_access_mode_.push_back(
+        shared_state_.exec_->prim_func_arg_access_mode[i]);
+  }
 
+  std::vector<std::string> ordered_packed_fn_names(num_packed_funs);
   for (const auto& it : shared_state_.exec_->primitive_map) {
     const auto& packed_name = it.first;
     auto packed_index = static_cast<size_t>(it.second);
+    ordered_packed_fn_names[packed_index] = packed_name;
+  }
+
+  for (size_t packed_index; packed_index < num_packed_funs; ++packed_index) {
+    const auto& packed_name = ordered_packed_fn_names[packed_index];
     if (shared_state_.packed_funcs_.size() <= packed_index) {
       shared_state_.packed_funcs_.resize(packed_index + 1);
+      shared_state_.outputs_start.resize(packed_index + 1);
+      shared_state_.inouts_start.resize(packed_index + 1);
+      shared_state_.args_end.resize(packed_index + 1);
     }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
 
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     shared_state_.packed_funcs_[packed_index] = pf;
 
-    if (batched_execution_) {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                << shared_state_.exec_->batched_func_arg_mode[packed_index].size();
-    } else {
-      std::cout << "[VM] Fun " << packed_index << " " << packed_name;
+    if (coarsened_execution_) {
+      auto& arg_access_modes = shared_state_.prim_func_arg_access_mode_[packed_index];
+
+      int num_inputs = 0;
+      int num_outputs = 0;
+      int num_inouts = 0;
+      for (size_t i = 0; i < arg_access_modes.size(); ++i) {
+        switch (arg_access_modes[i]) {
+          case kInput:
+            num_inputs++;
+            break;
+          case kOutput:
+            num_outputs++;
+            break;
+          case kInputOutput:
+            num_inouts++;
+            break;
+          case kUnused:
+            ICHECK(false);
+            break;
+        }
+      }
+
+      shared_state_.outputs_start[packed_index] = num_inputs;
+      shared_state_.inouts_start[packed_index] = num_inputs + num_outputs;
+      shared_state_.args_end[packed_index] = arg_access_modes.size();
     }
 
-    if (coarsened_execution_) {
-      std::cout << "  ScMode: [";
-      for (size_t i = 0; i < this->shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
-        std::cout << this->shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
+    bool print = true;
+    if (print) {
+      if (batched_execution_) {
+        std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
+                  << shared_state_.exec_->batched_func_arg_mode[packed_index].size();
+      } else {
+        std::cout << "[VM] Fun " << packed_index << " " << packed_name;
       }
-      std::cout << "]   AccMode: [";
-      for (size_t i = 0; i < this->shared_state_.prim_func_arg_access_mode_[packed_index].size();
-           ++i) {
-        std::cout << this->shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";
+
+      if (coarsened_execution_) {
+        std::cout << "  ScMode: [";
+        for (size_t i = 0; i < shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
+          std::cout << shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
+        }
+        std::cout << "]   AccMode: [";
+        for (size_t i = 0; i < shared_state_.prim_func_arg_access_mode_[packed_index].size(); ++i) {
+          std::cout << shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";
+        }
+        std::cout << "] " << shared_state_.outputs_start[packed_index] << " "
+                  << shared_state_.inouts_start[packed_index] << std::endl;
+      } else {
+        std::cout << std::endl;
       }
-      std::cout << "]" << std::endl;
-    } else {
-      std::cout << std::endl;
     }
 
     ICHECK(pf != nullptr) << packed_name;
@@ -336,18 +382,6 @@ void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
       }
     }
   }
-
-  // for (const auto& it : shared_state_.exec_->primitive_map) {
-  //   const auto& packed_name = it.first;
-  //   ICHECK(Registry::Get(packed_name)->body());
-  // }
-
-  // for (auto name : Registry::ListNames()) {
-  //   const PackedFunc* f = Registry::Get(name);
-  //   if (!f->body()) {
-  //     std::cout << "[VM] NoBody1 " << name << std::endl;
-  //   }
-  // }
 
   for (size_t i = 0; i < shared_state_.packed_funcs_.size(); ++i) {
     ICHECK(shared_state_.packed_funcs_[i] != nullptr)

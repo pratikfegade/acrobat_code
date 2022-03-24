@@ -717,8 +717,8 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
       if (arg_mode != runtime::vm::DBBatchedArgMode::kIgnore) {
         prim_func_params.push_back(param);
+        prim_func_arg_modes.push_back(arg_mode);
       }
-      prim_func_arg_modes.push_back(arg_mode);
       if (print) {
         std::cout << "[CG]  ArgMode: " << rvar->vid->name_hint << " " << param->name_hint << " "
                   << arg_mode << " " << (iit != arg_mode_states_.end()) << std::endl;
@@ -1136,6 +1136,8 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
   }
   new_prim_funcs.clear();
 
+  Map<GlobalVar, Array<Integer>> updated_batched_arg_modes;
+
   // Remove unused args in prim funcs
   for (const auto& it : funcs) {
     if (it.second.as<tir::PrimFuncNode>() &&
@@ -1154,9 +1156,23 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
         auto& var = func->params[i];
         if (access_modes_map.count(var)) {
           used_params.push_back(var);
-        } else {
-          // std::cout << "[CG]   Unused  " << var << " " << var.get() << std::endl;
         }
+      }
+      if (batched_execution && !it.second->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc)) {
+        auto func_gv = it.first;
+        ICHECK(mod->batched_prim_funcs.count(func_gv)) << func_gv;
+        auto batched_func_gv = mod->batched_prim_funcs.at(func_gv);
+        auto batched_arg_modes = mod->batched_arg_modes.at(batched_func_gv);
+        Array<Integer> updated_arg_modes;
+        for (size_t i = tensor_args_start; i < func->params.size(); ++i) {
+          auto& var = func->params[i];
+          if (access_modes_map.count(var)) {
+            updated_arg_modes.push_back(batched_arg_modes[i]);
+          }
+        }
+        std::cout << "[CG] BatchArgMode " << batched_arg_modes << " " << updated_arg_modes
+                  << std::endl;
+        updated_batched_arg_modes.Set(batched_func_gv, updated_arg_modes);
       }
       if (used_params.size() != func->params.size()) {
         new_prim_funcs.Set(it.first,
@@ -1164,6 +1180,10 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
                                          func->scatter_buffer_map, func->attrs, func->span));
       }
     }
+  }
+
+  for (auto kv : updated_batched_arg_modes) {
+    mod->batched_arg_modes.Set(kv.first, kv.second);
   }
 
   for (auto pair : new_prim_funcs) {
