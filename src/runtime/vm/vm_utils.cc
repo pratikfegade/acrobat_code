@@ -218,8 +218,8 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
 
 /* Invoking packed functions */
 template <typename TensorType>
-void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
-                            TensorType* args, int arity) {
+void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, TensorType* args,
+                            int arity) {
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("arg_prep_unbatched");
   }
@@ -243,10 +243,10 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index
 }
 
 template void InvokePackedFnUnrolled<NDArray>(const size_t func_idx, const PackedFunc& func,
-                                              Index output_size, NDArray* args, int arity);
+                                              NDArray* args, int arity);
 
 template void InvokePackedFnUnrolled<DLTensor*>(const size_t func_idx, const PackedFunc& func,
-                                                Index output_size, DLTensor** args, int arity);
+                                                DLTensor** args, int arity);
 
 template <typename TensorType>
 void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arity,

@@ -106,14 +106,13 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
  *
  * \param func The PackedFunction to be invoked.
  * \param arg_count The number of arguments to the PackedFunction.
- * \param output_size The number of outputs of the PackedFunction.
  * \param args Arguments to the PackedFunction.
  *
  * \note The return value will be stored in the last output_size slots of args.
  */
 template <typename TensorType>
-void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Index output_size,
-                            TensorType* args, int arity);
+void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, TensorType* args,
+                            int arity);
 
 /*!
  * \brief Invoke a batch PackedFunction (refactored out to avoid code

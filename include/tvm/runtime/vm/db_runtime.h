@@ -58,7 +58,7 @@ namespace vm {
  * multiple threads, or serialize them to disk or over the
  * wire.
  */
-template <typename TensorType>
+template <typename ExecutorType, typename TensorType>
 class DynBatchRuntime : public runtime::ModuleNode {
  public:
   /*!
@@ -120,12 +120,10 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \brief Invoke a packed function.
    * \param packed_index The index of the callee in the executable.
    * \param arity The arity of the function
-   * \param output_size The number of outputs of the function
    * \param args Pointer to args
    * \param num_args number of arguments
    */
-  void InvokePacked(int64_t packed_index, int64_t arg_count, int64_t output_size, TensorType* args,
-                    int64_t num_args);
+  void InvokePacked(int64_t packed_index, int64_t arg_count, TensorType* args, int64_t num_args);
 
   /*!
    * \brief Allocate a memory storage object.
@@ -210,11 +208,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Get the current instance of the runtime.
    */
-  static inline DynBatchRuntime<TensorType>* Current() { return current_; }
+  static inline DynBatchRuntime<ExecutorType, TensorType>* Current() { return current_; }
 
-  static inline DynBatchRuntime<TensorType>* CreateRuntime() {
+  static inline DynBatchRuntime<ExecutorType, TensorType>* CreateRuntime() {
     ICHECK(current_ == nullptr);
-    current_ = new DynBatchRuntime<TensorType>();
+    current_ = new DynBatchRuntime<ExecutorType, TensorType>();
     return current_;
   }
 
@@ -225,10 +223,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*! \brief The global state excluding all runtime state. Aggregated
       in a struct for easier shared across multiple vm instances when
       executing multiple concurrent batch elements */
-  VMSharedState<TensorType> shared_state_;
+  VMSharedState<ExecutorType> shared_state_;
 
  protected:
-  friend class LazyExecutor<TensorType>;
+  friend class LazyExecutor<NDArray>;
+  friend class LazyExecutor<DLTensor*>;
   /*!
    * \brief Whether the generated prim funcs are coarsened.
    */
@@ -262,11 +261,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Current instance of the runtime
    */
-  static DynBatchRuntime<TensorType>* current_;
+  static DynBatchRuntime<ExecutorType, TensorType>* current_;
 };
 
-template <typename TensorType>
-DynBatchRuntime<TensorType>* DynBatchRuntime<TensorType>::current_;
+template <typename ExecutorType, typename TensorType>
+DynBatchRuntime<ExecutorType, TensorType>* DynBatchRuntime<ExecutorType, TensorType>::current_;
 
 }  // namespace vm
 }  // namespace runtime

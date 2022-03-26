@@ -251,7 +251,7 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, i
 
 void VirtualMachine::InitSharedState() {
   if (!shared_state_) {
-    shared_state_ = new VMSharedState<NDArray>();
+    shared_state_ = new VMSharedState<EagerAllocationLazyExecutor>();
   }
   this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
 }
@@ -411,11 +411,40 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     auto packed_index = static_cast<size_t>(it.second);
     if (shared_state_->packed_funcs_.size() <= packed_index) {
       shared_state_->packed_funcs_.resize(packed_index + 1);
+      shared_state_->outputs_start.resize(packed_index + 1);
+      shared_state_->inouts_start.resize(packed_index + 1);
+      shared_state_->args_end.resize(packed_index + 1);
     }
     tvm::runtime::PackedFunc pf = lib.GetFunction(packed_name, /*query_imports=*/true);
 
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     shared_state_->packed_funcs_[packed_index] = pf;
+
+    auto& arg_access_modes = shared_state_->prim_func_arg_access_mode_[packed_index];
+
+    int num_inputs = 0;
+    int num_outputs = 0;
+    int num_inouts = 0;
+    for (size_t i = 0; i < arg_access_modes.size(); ++i) {
+      switch (arg_access_modes[i]) {
+        case kInput:
+          num_inputs++;
+          break;
+        case kOutput:
+          num_outputs++;
+          break;
+        case kInputOutput:
+          num_inouts++;
+          break;
+        case kUnused:
+          ICHECK(false);
+          break;
+      }
+    }
+
+    shared_state_->outputs_start[packed_index] = num_inputs;
+    shared_state_->inouts_start[packed_index] = num_inputs + num_outputs;
+    shared_state_->args_end[packed_index] = arg_access_modes.size();
 
     std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
 

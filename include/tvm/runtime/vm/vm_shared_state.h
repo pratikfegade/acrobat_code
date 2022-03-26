@@ -91,7 +91,7 @@ class VMExecutionOptions : public ObjectRef {
  * i.e. everything except the current runtime state (the pc, stacks,
  * etc).
  */
-template <typename TensorType>
+template <typename ExecutorType>
 struct VMSharedState {
   /*! \brief The executable the VM will operate on. */
   Executable* exec_ = nullptr;
@@ -114,7 +114,7 @@ struct VMSharedState {
    * \brief A lazy executor which maintains a computational graph of
    * all the packed funcs executed.
    */
-  LazyExecutor<TensorType> lazy_executor_;
+  ExecutorType lazy_executor_;
   /*!
    * \brief A mapping from packed_funcs to their batched counterparts.
    */

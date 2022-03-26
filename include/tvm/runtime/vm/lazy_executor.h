@@ -46,68 +46,49 @@ namespace vm {
 
 class VirtualMachine;
 
-template <typename TensorType>
+template <typename ExecutorType>
 struct VMSharedState;
 
-template <typename TensorType>
+template <typename ExecutorType, typename TensorType>
 class DynBatchRuntime;
 
 template <typename TensorType>
 class OpNode {
  public:
-  OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
-         const std::vector<TensorType> args)
-      : id_(id),
-        func_idx_(func_idx),
-        arg_count_(arg_count),
-        output_size_(output_size),
-        args_(args) {}
+  OpNode(const int id, const Index func_idx, const std::vector<TensorType> args)
+      : id_(id), func_idx_(func_idx), args_(args) {}
 
-  OpNode(const int id, const Index func_idx, const Index arg_count, const Index output_size,
-         TensorType* args, int num_args)
-      : id_(id), func_idx_(func_idx), arg_count_(arg_count), output_size_(output_size) {
+  OpNode(const int id, const Index func_idx, TensorType* args, int num_args)
+      : id_(id), func_idx_(func_idx) {
     args_.reserve(num_args);
     for (size_t i = 0; i < num_args; ++i) {
       args_.push_back(args[i]);
     }
   }
 
-  inline Index InputStart() { return 0; }
-
-  inline Index InputEnd() { return arg_count_ - output_size_; }
-
-  inline Index OutputStart() { return arg_count_ - output_size_; }
-
-  inline Index OutputEnd() { return arg_count_; }
-
   const int id_;
   const Index func_idx_;
-  const Index arg_count_;
-  const Index output_size_;
   std::vector<TensorType> args_;
 };
 
 typedef OpNode<NDArray> EagerOpNode;
 typedef OpNode<DLTensor*> LazyOpNode;
 
-/*!
- * \brief A lazy tensor executor for the virtual machine.
- *
- */
-template <typename TensorType>
-class LazyExecutor {
+template <typename ConcreteExecutorType, typename TensorType>
+class AbstractExecutor {
  public:
-  void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
-                     const ObjectRef* args, int num_args);
+  virtual void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
+                             const ObjectRef* args, int num_args) = 0;
 
-  void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, const Index output_size,
-                             TensorType* args, int num_args);
-  void Execute();
+  virtual void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, TensorType* args,
+                                     int num_args) = 0;
 
-  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
+  virtual void Execute() = 0;
 
- private:
-  void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
+  virtual void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false) = 0;
+
+  virtual void ExecuteOpNodeBatch(const Index func_idx,
+                                  const std::vector<OpNode<TensorType>*>& nodes) = 0;
 
   inline size_t InputStart(const Index idx) { return 0; }
   inline size_t InputEnd(const Index idx) { return vm_shared_state_->outputs_start[idx]; }
@@ -118,17 +99,36 @@ class LazyExecutor {
   inline size_t InoutStart(const Index idx) { return vm_shared_state_->inouts_start[idx]; }
   inline size_t InoutEnd(const Index idx) { return vm_shared_state_->args_end[idx]; }
 
-  friend class VirtualMachine;
-  friend class ConcurrentVirtualMachine;
-  friend class DynBatchRuntime<TensorType>;
+  inline size_t GetArity(const Index idx) { return vm_shared_state_->args_end[idx]; }
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
-  VMSharedState<TensorType>* vm_shared_state_;
-  /*! \brief list of nodes to execute */
-  std::vector<OpNode<TensorType>> nodes_;
+  VMSharedState<ConcreteExecutorType>* vm_shared_state_;
   /*! \brief Profiling */
   runtime::profiling::Profiler* profiler_{nullptr};
+};
+
+/*!
+ * \brief A lazy tensor executor for the virtual machine.
+ *
+ */
+template <typename TensorType>
+class LazyExecutor : public AbstractExecutor<LazyExecutor<TensorType>, TensorType> {
+ public:
+  void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
+                     const ObjectRef* args, int num_args) final;
+
+  void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, TensorType* args,
+                             int num_args) final;
+  void Execute() final;
+
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false) final;
+
+  void ExecuteOpNodeBatch(const Index func_idx,
+                          const std::vector<OpNode<TensorType>*>& nodes) final;
+
+  /*! \brief list of nodes to execute */
+  std::vector<OpNode<TensorType>> nodes_;
 };
 
 typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;
@@ -136,13 +136,11 @@ typedef LazyExecutor<DLTensor*> LazyAllocationLazyExecutor;
 
 template <>
 void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                        const Index output_size, NDArray* args,
-                                                        int num_args);
+                                                        NDArray* args, int num_args);
 
 template <>
 void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                       const Index output_size, DLTensor** args,
-                                                       int num_args);
+                                                       DLTensor** args, int num_args);
 
 template <>
 void EagerAllocationLazyExecutor::Execute();
@@ -165,6 +163,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
 template <>
 void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
                                                     const std::vector<LazyOpNode*>& func_nodes);
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

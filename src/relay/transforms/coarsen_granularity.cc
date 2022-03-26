@@ -37,6 +37,7 @@
 #include "../../printer/text_printer.h"
 #include "../../support/arena.h"
 #include "../op/annotation/annotation.h"
+#include "../op/memory/memory.h"
 #include "../op/vm/vm.h"
 #include "./expr_subst.h"
 #include "./pass_utils.h"
@@ -1075,7 +1076,6 @@ class Coarsener : public ExprMutator {
   std::vector<std::pair<GlobalVar, GlobalVar>> batched_func_pairs_;
   std::vector<std::pair<GlobalVar, Array<Integer>>> batched_arg_modes_;
 };
-
 int Coarsener::ctr = 0;
 
 IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
@@ -1193,6 +1193,37 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
   return mod;
 }
 
+IRModule ComputeAccessModes(IRModule& mod) {
+  tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
+
+  auto funcs = mod->functions;
+
+  FunctionsAccessModesMap prim_funcs_access_modes;
+  std::cout << "[CG] AccessModeMaps" << std::endl;
+  for (const auto& it : funcs) {
+    if (it.second.as<tir::PrimFuncNode>()) {
+      auto func = Downcast<tir::PrimFunc>(it.second);
+      auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
+      auto num_params = func->params.size();
+      auto num_outputs = 0;
+      Array<Integer> access_modes;
+      for (auto param : func->params) {
+        access_modes.push_back(Integer(static_cast<int>(
+            access_modes_map.count(param) ? access_modes_map.at(param) : runtime::vm::kInput)));
+      }
+      func = WithAttr(func, tir::attr::kDBArgAccessModes, access_modes);
+      std::cout << "[AccessMode] " << it.first << " " << access_modes << std::endl;
+      new_prim_funcs.Set(it.first, func);
+    }
+  }
+
+  for (auto pair : new_prim_funcs) {
+    mod->Add(pair.first, pair.second, true);
+  }
+
+  return mod;
+}
+
 namespace transform {
 Pass CoarsenPrimitiveFuncGranularity(bool batched_execution, bool scattered_kernels) {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule m,
@@ -1203,6 +1234,14 @@ Pass CoarsenPrimitiveFuncGranularity(bool batched_execution, bool scattered_kern
 }
 
 TVM_REGISTER_GLOBAL("relay._transform.CoarsenPrimitiveFuncGranularity").set_body_typed(FuseOps);
+
+Pass ComputePrimFuncAccessModes() {
+  runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
+      [=](IRModule m, PassContext pc) { return ComputeAccessModes(m); };
+  return CreateModulePass(pass_func, 0, "ComputePrimFuncAccessModes", {});
+}
+
+TVM_REGISTER_GLOBAL("relay._transform.ComputePrimFuncAccessModes").set_body_typed(FuseOps);
 
 }  // namespace transform
 

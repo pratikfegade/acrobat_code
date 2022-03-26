@@ -107,23 +107,21 @@ void LazyAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Index
 
 template <>
 void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                        const Index output_size, NDArray* args,
-                                                        int num_args) {
-  nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args, num_args);
+                                                        NDArray* args, int num_args) {
+  nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
 }
 
 template <>
 void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                       const Index output_size, DLTensor** args,
-                                                       int num_args) {
-  nodes_.emplace_back(nodes_.size(), func_idx, num_args, output_size, args, num_args);
+                                                       DLTensor** args, int num_args) {
+  nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
 }
 
 template <>
 void EagerAllocationLazyExecutor::Execute() {
   for (EagerOpNode& node : nodes_) {
     InvokePackedFnUnrolled(node.func_idx_, vm_shared_state_->packed_funcs_[node.func_idx_],
-                           node.output_size_, node.args_.data(), node.args_.size());
+                           node.args_.data(), node.args_.size());
   }
   nodes_.clear();
 }
@@ -143,7 +141,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   // std::cout << "[LE]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
   // if (func_nodes.size() == 1) {
   //   InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
-  //                          func_nodes[0]->output_size_, func_nodes[0]->args_.data(),
+  //                          func_nodes[0]->args_.data(),
   //                          func_nodes[0]->args_.size());
   // } else {
   //   auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
@@ -164,7 +162,7 @@ void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   auto& arg_modes = vm_shared_state_->batched_func_arg_mode_[batched_func_idx];
 
   int32_t batch_size = func_nodes.size();
-  auto arity = func_nodes[0]->arg_count_;
+  auto arity = GetArity(func_idx);
   std::vector<TVMValue> values(arity + 1);
   std::vector<int> codes(arity + 1);
   std::vector<NDArray> arg_holder(arity);
@@ -228,217 +226,105 @@ std::string PrintVector(std::vector<T> vector) {
   return ss.str();
 }
 
+template <typename TensorType, typename TensorPtrType>
+inline TensorPtrType GetPtr(TensorType& tensor);
+
 template <>
-void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
-                                                 bool all_nodes_same_depth) {
-  if (VMDBProfiler::DoProfile()) {
-    VMDBProfiler::ProfileHostStartCall("batched_execution");
-  }
-  if (all_nodes_same_depth) {
-    std::unordered_map<int, std::vector<EagerOpNode*>> func_to_node;
-    for (auto& node : nodes_) {
-      func_to_node[node.func_idx_].push_back(&node);
-    }
-    for (auto kv : func_to_node) {
-      ExecuteOpNodeBatch(kv.first, kv.second);
-    }
-  } else {
-    std::unordered_map<const Object*, int> output_tensor_to_node;
-    size_t num_nodes = nodes_.size();
-    output_tensor_to_node.reserve(num_nodes * 2);
-    int graph_depth = -1;
-    std::vector<std::vector<EagerOpNode*>> depth_to_node(num_nodes);
-    std::vector<int> node_to_depth(num_nodes, -1);
-
-    if (coarsened_execution) {
-      for (size_t i = 0; i < num_nodes; ++i) {
-        EagerOpNode& node = nodes_[i];
-        auto& access_modes = vm_shared_state_->prim_func_arg_access_mode_[node.func_idx_];
-        int max_depth = 0;
-
-        for (size_t j = 0; j < node.args_.size(); ++j) {
-          auto& access_mode = access_modes[j];
-          auto arg_ptr = node.args_[j].get();
-          if (access_mode == kInput || access_mode == kInputOutput) {
-            auto it = output_tensor_to_node.find(arg_ptr);
-            if (it != output_tensor_to_node.end()) {
-              auto input_node_id = it->second;
-              // ICHECK(node_to_depth[input_node_id] >= 0);
-              auto input_node_depth = node_to_depth[input_node_id];
-              max_depth = max_depth < input_node_depth ? input_node_depth : max_depth;
-            }
-          }
-          if (access_mode == kOutput || access_mode == kInputOutput) {
-            output_tensor_to_node[arg_ptr] = node.id_;
-          }
-        }
-
-        int node_depth = max_depth + 1;
-        node_to_depth[i] = node_depth;
-        depth_to_node[node_depth].push_back(&node);
-        graph_depth = std::max(graph_depth, node_depth);
-      }
-    } else {
-      for (EagerOpNode& node : nodes_) {
-        for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
-          output_tensor_to_node[node.args_[i].get()] = node.id_;
-        }
-      }
-
-      for (size_t i = 0; i < num_nodes; ++i) {
-        EagerOpNode& node = nodes_[i];
-        int max_depth = 0;
-        for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
-          auto it = output_tensor_to_node.find(node.args_[j].get());
-          if (it != output_tensor_to_node.end()) {
-            auto input_node_id = it->second;
-            // ICHECK(node_to_depth[input_node_id] >= 0);
-            max_depth = std::max(max_depth, node_to_depth[input_node_id]);
-          }
-        }
-        int node_depth = max_depth + 1;
-        node_to_depth[i] = node_depth;
-        depth_to_node[node_depth].push_back(&node);
-        graph_depth = std::max(graph_depth, node_depth);
-      }
-    }
-
-    std::unordered_map<int, std::vector<EagerOpNode*>> func_to_node;
-    for (int i = 0; i <= graph_depth; ++i) {
-      auto& depth_nodes = depth_to_node[i];
-      for (auto& node : depth_nodes) {
-        func_to_node[node->func_idx_].push_back(node);
-      }
-      for (auto kv : func_to_node) {
-        ExecuteOpNodeBatch(kv.first, kv.second);
-      }
-      func_to_node.clear();
-    }
-  }
-  nodes_.clear();
-  if (VMDBProfiler::DoProfile()) {
-    VMDBProfiler::ProfileHostStopCall();
-  }
+inline DLTensor* GetPtr(DLTensor*& tensor) {
+  return tensor;
 }
 
 template <>
-void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
-                                                bool all_nodes_same_depth) {
+inline const Object* GetPtr(NDArray& tensor) {
+  return tensor.get();
+}
+
+template <typename TensorType, typename TensorPtrType>
+void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execution,
+                        bool all_nodes_same_depth) {
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("batched_execution");
   }
   if (all_nodes_same_depth) {
-    std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
-    for (auto& node : nodes_) {
+    std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
+    for (auto& node : executor->nodes_) {
       func_to_node[node.func_idx_].push_back(&node);
     }
     for (auto kv : func_to_node) {
-      ExecuteOpNodeBatch(kv.first, kv.second);
+      executor->ExecuteOpNodeBatch(kv.first, kv.second);
     }
-  } else if (false) {
-    std::unordered_map<DLTensor*, int> output_tensor_to_node;
-    size_t num_nodes = nodes_.size();
+  } else if (true) {
+    std::unordered_map<TensorPtrType, int> output_tensor_to_node;
+    size_t num_nodes = executor->nodes_.size();
     output_tensor_to_node.reserve(num_nodes * 2);
     int graph_depth = -1;
-    std::vector<std::vector<LazyOpNode*>> depth_to_node(num_nodes);
+    std::vector<std::vector<OpNode<TensorType>*>> depth_to_node(num_nodes);
     std::vector<int> node_to_depth(num_nodes, -1);
 
-    if (coarsened_execution) {
-      for (size_t i = 0; i < num_nodes; ++i) {
-        LazyOpNode& node = nodes_[i];
-        auto& access_modes = vm_shared_state_->prim_func_arg_access_mode_[node.func_idx_];
-        // std::cout << "[LZ] Access modes for " << node.func_idx_ << " " << access_modes.size()
-        // << std::endl;
-        int max_depth = -1;
-
-        for (size_t j = 0; j < node.args_.size(); ++j) {
-          auto& access_mode = access_modes[j];
-          auto arg_ptr = node.args_[j];
-          if (access_mode == kInput || access_mode == kInputOutput) {
-            auto it = output_tensor_to_node.find(arg_ptr);
-            if (it != output_tensor_to_node.end()) {
-              auto input_node_id = it->second;
-              auto input_node_depth = node_to_depth[input_node_id];
-              max_depth = max_depth < input_node_depth ? input_node_depth : max_depth;
-            }
-          }
-          if (access_mode == kOutput || access_mode == kInputOutput) {
-            output_tensor_to_node[arg_ptr] = node.id_;
-          }
-        }
-
-        int node_depth = max_depth + 1;
-        node_to_depth[i] = node_depth;
-        depth_to_node[node_depth].push_back(&node);
-        graph_depth = std::max(graph_depth, node_depth);
-      }
-    } else {
-      for (LazyOpNode& node : nodes_) {
-        for (Index i = node.OutputStart(); i < node.OutputEnd(); ++i) {
-          output_tensor_to_node[node.args_[i]] = node.id_;
+    for (size_t i = 0; i < num_nodes; ++i) {
+      OpNode<TensorType>& node = executor->nodes_[i];
+      int max_depth = -1;
+      for (Index j = executor->InputStart(node.func_idx_); j < executor->InputEnd(node.func_idx_);
+           ++j) {
+        auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
+        if (it != output_tensor_to_node.end()) {
+          auto input_node_id = it->second;
+          max_depth = std::max(max_depth, node_to_depth[input_node_id]);
         }
       }
-
-      for (size_t i = 0; i < num_nodes; ++i) {
-        LazyOpNode& node = nodes_[i];
-        int max_depth = -1;
-        for (Index j = node.InputStart(); j < node.InputEnd(); ++j) {
-          auto it = output_tensor_to_node.find(node.args_[j]);
-          if (it != output_tensor_to_node.end()) {
-            auto input_node_id = it->second;
-            // ICHECK(node_to_depth[input_node_id] >= 0);
-            max_depth = std::max(max_depth, node_to_depth[input_node_id]);
-          }
-        }
-        int node_depth = max_depth + 1;
-        node_to_depth[i] = node_depth;
-        depth_to_node[node_depth].push_back(&node);
-        graph_depth = std::max(graph_depth, node_depth);
+      for (Index j = executor->OutputStart(node.func_idx_); j < executor->InoutEnd(node.func_idx_);
+           ++j) {
+        output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_[j])] = node.id_;
       }
+      int node_depth = max_depth + 1;
+      node_to_depth[i] = node_depth;
+      depth_to_node[node_depth].push_back(&node);
+      graph_depth = std::max(graph_depth, node_depth);
     }
 
     std::cout << "[LZ] Graph depth " << graph_depth << std::endl;
-    std::vector<std::unordered_map<int, std::vector<LazyOpNode*>>> func_to_node_vecs;
+    std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
     for (int j = 0; j <= graph_depth; ++j) {
       auto& depth_nodes = depth_to_node[j];
-      std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
+      std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
       std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
       for (auto& node : depth_nodes) {
         func_to_node[node->func_idx_].push_back(node);
       }
 
       for (auto kv : func_to_node) {
-        ExecuteOpNodeBatch(kv.first, kv.second);
+        executor->ExecuteOpNodeBatch(kv.first, kv.second);
       }
     }
   } else {
     std::cout << "Agenda scheduling" << std::endl;
-    std::unordered_map<DLTensor*, std::vector<LazyOpNode*>> tensor_to_consumers;
-    auto num_packed_funs = vm_shared_state_->packed_funcs_.size();
+    std::unordered_map<TensorPtrType, std::vector<OpNode<TensorType>*>> tensor_to_consumers;
+    auto num_packed_funs = executor->vm_shared_state_->packed_funcs_.size();
     std::vector<int> func_idx_to_position(num_packed_funs);
     std::vector<int> position_to_func_idx(num_packed_funs);
     for (size_t i = 0; i < num_packed_funs; ++i) {
       func_idx_to_position[i] = i;
       position_to_func_idx[i] = i;
     }
-    size_t num_nodes = nodes_.size();
+    size_t num_nodes = executor->nodes_.size();
     tensor_to_consumers.reserve(num_nodes * 2);
     std::vector<uint16_t> node_to_inputs(num_nodes, 0);
-    std::vector<std::vector<LazyOpNode*>> agenda(num_packed_funs);
+    std::vector<std::vector<OpNode<TensorType>*>> agenda(num_packed_funs);
     int agenda_size = 0;
     for (size_t j = 0; j < num_nodes; ++j) {
-      auto& node = nodes_[j];
+      auto& node = executor->nodes_[j];
       uint16_t num_inputs = 0;
-      std::vector<DLTensor*> uncomputed_inputs;
+      std::vector<TensorPtrType> uncomputed_inputs;
       std::vector<int> uncomputed_input_ids;
-      for (size_t k = InputStart(node.func_idx_); k < InputEnd(node.func_idx_); ++k) {
+      for (size_t k = executor->InputStart(node.func_idx_); k < executor->InputEnd(node.func_idx_);
+           ++k) {
         auto tensor = node.args_[k];
         if (tensor->data == nullptr) {
           num_inputs++;
-          uncomputed_inputs.push_back(tensor);
+          uncomputed_inputs.push_back(GetPtr<TensorType, TensorPtrType>(tensor));
           uncomputed_input_ids.push_back(k);
         }
-        tensor_to_consumers[tensor].push_back(&node);
+        tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
       }
       std::cout << " Node: " << j << " " << node.func_idx_ << " " << num_inputs << " "
                 << PrintVector(uncomputed_inputs) << " " << PrintVector(uncomputed_input_ids)
@@ -453,12 +339,13 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
     std::cout << " Map size: " << tensor_to_consumers.size() << std::endl;
     for (size_t j = 0; j < num_nodes; ++j) {
-      auto& node = nodes_[j];
+      auto& node = executor->nodes_[j];
       std::vector<int> consumer_ids;
-      for (size_t i = OutputStart(node.func_idx_); i < InoutEnd(node.func_idx_); ++i) {
+      for (size_t i = executor->OutputStart(node.func_idx_); i < executor->InoutEnd(node.func_idx_);
+           ++i) {
         auto tensor = node.args_[i];
-        if (tensor_to_consumers.count(tensor)) {
-          for (auto consumer : tensor_to_consumers.at(tensor)) {
+        if (tensor_to_consumers.count(GetPtr<TensorType, TensorPtrType>(tensor))) {
+          for (auto consumer : tensor_to_consumers.at(GetPtr<TensorType, TensorPtrType>(tensor))) {
             consumer_ids.push_back(consumer->id_);
           }
         }
@@ -485,17 +372,18 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
       std::cout << "Func " << func_idx << std::endl;
       // Make a copy here so we don't edit the vector we're iterating
       // upon below.
-      std::vector<LazyOpNode*> func_nodes(agenda[func_pos].begin(), agenda[func_pos].end());
-      ExecuteOpNodeBatch(func_idx, func_nodes);
+      std::vector<OpNode<TensorType>*> func_nodes(agenda[func_pos].begin(), agenda[func_pos].end());
+      executor->ExecuteOpNodeBatch(func_idx, func_nodes);
       agenda_size -= func_nodes.size();
       agenda[func_pos].clear();
       // Reduce to evaluate input counts for out nodes
       for (auto& node : func_nodes) {
         std::cout << " Node " << node->id_ << std::endl;
-        for (size_t i = OutputStart(func_idx); i < InoutEnd(func_idx); ++i) {
+        for (size_t i = executor->OutputStart(func_idx); i < executor->InoutEnd(func_idx); ++i) {
           auto tensor = node->args_[i];
-          std::cout << "  Computed tensor " << tensor << std::endl;
-          auto it = tensor_to_consumers.find(tensor);
+          std::cout << "  Computed tensor " << GetPtr<TensorType, TensorPtrType>(tensor)
+                    << std::endl;
+          auto it = tensor_to_consumers.find(GetPtr<TensorType, TensorPtrType>(tensor));
           if (it != tensor_to_consumers.end()) {
             for (auto& out_node : it->second) {
               if (node_to_inputs[out_node->id_] == 1) {
@@ -511,10 +399,22 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
       }
     }
   }
-  nodes_.clear();
+  executor->nodes_.clear();
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();
   }
+}
+
+template <>
+void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+                                                 bool all_nodes_same_depth) {
+  BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
+}
+
+template <>
+void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+                                                bool all_nodes_same_depth) {
+  BatchedExecuteImpl<DLTensor*, DLTensor*>(this, coarsened_execution, all_nodes_same_depth);
 }
 
 }  // namespace vm

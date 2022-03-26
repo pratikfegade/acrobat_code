@@ -152,6 +152,13 @@ TVM_DLL Pass LowerMapToTIR(bool batched_exection, bool scattered_kernels);
 TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection, bool scattered_kernels);
 
 /*!
+ * \brief Compute prim func access modes for all prim funcs
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass ComputePrimFuncAccessModes();
+
+/*!
  * \brief The inverse operation of FuseOps. It transforms a fused program returned by
  * FuseOps into the program before FuseOps. (i.e. x == DefuseOps(FuseOps(x)))
  *

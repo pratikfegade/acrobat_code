@@ -45,11 +45,11 @@ namespace tvm {
 namespace runtime {
 namespace vm {
 
-template class DynBatchRuntime<NDArray>;
-template class DynBatchRuntime<DLTensor*>;
+template class DynBatchRuntime<LazyExecutor<NDArray>, NDArray>;
+template class DynBatchRuntime<LazyExecutor<DLTensor*>, DLTensor*>;
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::CacheConstants() {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::CacheConstants() {
   for (int64_t const_index = 0; const_index < shared_state_.exec_->constants.size();
        ++const_index) {
     auto constant_obj = shared_state_.exec_->constants[const_index];
@@ -67,14 +67,15 @@ void DynBatchRuntime<TensorType>::CacheConstants() {
   }
 }
 
-template <typename TensorType>
-NDArray DynBatchRuntime<TensorType>::GetConstant(int64_t const_index) {
+template <typename ExecutorType, typename TensorType>
+NDArray DynBatchRuntime<ExecutorType, TensorType>::GetConstant(int64_t const_index) {
   return Downcast<NDArray>(shared_state_.const_pool_[const_index]);
 }
 
-template <typename TensorType>
-Storage DynBatchRuntime<TensorType>::AllocateStorage(int64_t size, int64_t alignment,
-                                                     DLDataType dtype, int64_t device_index) {
+template <typename ExecutorType, typename TensorType>
+Storage DynBatchRuntime<ExecutorType, TensorType>::AllocateStorage(int64_t size, int64_t alignment,
+                                                                   DLDataType dtype,
+                                                                   int64_t device_index) {
   auto storage_obj = SimpleObjAllocator().make_object<StorageObj>();
   Allocator* allocator = GetAllocator(device_index);
   ICHECK(allocator) << "Did you forget to init the VirtualMachine with devices?";
@@ -85,11 +86,12 @@ Storage DynBatchRuntime<TensorType>::AllocateStorage(int64_t size, int64_t align
   Storage storage(storage_obj);
   return storage;
 }
-template <typename TensorType>
+template <typename ExecutorType, typename TensorType>
 
-NDArray DynBatchRuntime<TensorType>::AllocTensor(const Storage& storage, int64_t offset,
-                                                 uint32_t ndim, int64_t* shape_array,
-                                                 DLDataType dtype) {
+NDArray DynBatchRuntime<ExecutorType, TensorType>::AllocTensor(const Storage& storage,
+                                                               int64_t offset, uint32_t ndim,
+                                                               int64_t* shape_array,
+                                                               DLDataType dtype) {
   auto shape = std::vector<int64_t>(ndim);
   for (uint32_t i = 0; i < ndim; ++i) {
     shape[i] = shape_array[i];
@@ -111,19 +113,22 @@ NDArray DynBatchRuntime<TensorType>::AllocTensor(const Storage& storage, int64_t
   return obj;
 }
 
-template <typename TensorType>
-NDArray DynBatchRuntime<TensorType>::AllocTensorReg(const Storage& storage, int64_t offset,
-                                                    const NDArray shape_tensor_dev,
-                                                    DLDataType dtype) {
+template <typename ExecutorType, typename TensorType>
+NDArray DynBatchRuntime<ExecutorType, TensorType>::AllocTensorReg(const Storage& storage,
+                                                                  int64_t offset,
+                                                                  const NDArray shape_tensor_dev,
+                                                                  DLDataType dtype) {
   Device cpu_dev = GetDevice(shared_state_.exec_->host_device_index);
   auto shape_tensor = Downcast<NDArray>(CopyTo(shape_tensor_dev, cpu_dev));
   auto shape = ToShape(shape_tensor);
   return storage->AllocNDArray(offset, shape, dtype);
 }
 
-template <typename TensorType>
-DLTensor* DynBatchRuntime<TensorType>::AllocArrayWrapper(int64_t* shape_data, int64_t ndim,
-                                                         DLDataType dtype, int64_t device_index) {
+template <typename ExecutorType, typename TensorType>
+DLTensor* DynBatchRuntime<ExecutorType, TensorType>::AllocArrayWrapper(int64_t* shape_data,
+                                                                       int64_t ndim,
+                                                                       DLDataType dtype,
+                                                                       int64_t device_index) {
   DLTensor* wrapper = Arena::Current()->allocate_<DLTensor>();
   wrapper->device = shared_state_.devices_[device_index];
   wrapper->data = nullptr;
@@ -134,24 +139,22 @@ DLTensor* DynBatchRuntime<TensorType>::AllocArrayWrapper(int64_t* shape_data, in
   return wrapper;
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::InvokePacked(int64_t packed_index, int64_t arg_count,
-                                               int64_t output_size, TensorType* args,
-                                               int64_t num_args) {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::InvokePacked(int64_t packed_index,
+                                                             int64_t arg_count, TensorType* args,
+                                                             int64_t num_args) {
   if (concurrent_execution_ || lazy_execution_) {
-    shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, output_size, args,
-                                                       num_args);
+    shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, args, num_args);
   } else {
     // std::cout << "Invoking " << packed_index << std::endl;
-    InvokePackedFnUnrolled(packed_index, shared_state_.packed_funcs_[packed_index], output_size,
-                           args, num_args);
+    InvokePackedFnUnrolled(packed_index, shared_state_.packed_funcs_[packed_index], args, num_args);
   }
 }
 
-template <typename TensorType>
-NDArray DynBatchRuntime<TensorType>::DeviceCopy(const NDArray& src_data,
-                                                const int64_t src_device_index,
-                                                const int64_t dst_device_index) {
+template <typename ExecutorType, typename TensorType>
+NDArray DynBatchRuntime<ExecutorType, TensorType>::DeviceCopy(const NDArray& src_data,
+                                                              const int64_t src_device_index,
+                                                              const int64_t dst_device_index) {
   Device actual_src_dev = src_data->device;
   Device inst_src_dev = GetDevice(src_device_index);
   ICHECK_EQ(actual_src_dev.device_type, inst_src_dev.device_type);
@@ -160,9 +163,9 @@ NDArray DynBatchRuntime<TensorType>::DeviceCopy(const NDArray& src_data,
   return src_data.CopyTo(dst_dev);
 }
 
-template <typename TensorType>
-NDArray DynBatchRuntime<TensorType>::ReshapeTensor(NDArray& tensor_arr,
-                                                   const NDArray& shape_tensor) {
+template <typename ExecutorType, typename TensorType>
+NDArray DynBatchRuntime<ExecutorType, TensorType>::ReshapeTensor(NDArray& tensor_arr,
+                                                                 const NDArray& shape_tensor) {
   // Read the shape from shape tensor
   const DLTensor* dl_tensor = shape_tensor.operator->();
   ICHECK_EQ(dl_tensor->dtype.code, 0u);
@@ -185,8 +188,8 @@ NDArray DynBatchRuntime<TensorType>::ReshapeTensor(NDArray& tensor_arr,
   return tensor_arr.CreateView(shape, tensor_arr->dtype);
 }
 
-template <typename TensorType>
-NDArray DynBatchRuntime<TensorType>::ShapeOf(const NDArray& input_array) {
+template <typename ExecutorType, typename TensorType>
+NDArray DynBatchRuntime<ExecutorType, TensorType>::ShapeOf(const NDArray& input_array) {
   int ndim = input_array->ndim;
   auto out_tensor =
       NDArray::Empty({ndim}, {kDLInt, 64, 1}, GetDevice(shared_state_.exec_->host_device_index));
@@ -196,8 +199,8 @@ NDArray DynBatchRuntime<TensorType>::ShapeOf(const NDArray& input_array) {
   return out_tensor;
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::LazyExecute() {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::LazyExecute() {
   if (batched_execution_) {
     shared_state_.lazy_executor_.BatchedExecute(coarsened_execution_);
   } else {
@@ -205,19 +208,19 @@ void DynBatchRuntime<TensorType>::LazyExecute() {
   }
 }
 
-template <typename TensorType>
-PackedFunc DynBatchRuntime<TensorType>::GetFunction(const std::string& name,
-                                                    const ObjectPtr<Object>& sptr_to_self) {
+template <typename ExecutorType, typename TensorType>
+PackedFunc DynBatchRuntime<ExecutorType, TensorType>::GetFunction(
+    const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
   return {};
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::InitSharedState() {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::InitSharedState() {
   this->shared_state_.lazy_executor_.vm_shared_state_ = &this->shared_state_;
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::SetExecutionOptions(VMExecutionOptions options) {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::SetExecutionOptions(VMExecutionOptions options) {
   this->coarsened_execution_ = options->coarsened_execution;
   this->lazy_execution_ = options->lazy_execution;
   this->scattered_kernels_ = options->scattered_kernels;
@@ -258,22 +261,23 @@ void DynBatchRuntime<TensorType>::SetExecutionOptions(VMExecutionOptions options
   }
 }
 
-template <typename TensorType>
-inline Device DynBatchRuntime<TensorType>::GetDevice(Index device_index) const {
+template <typename ExecutorType, typename TensorType>
+inline Device DynBatchRuntime<ExecutorType, TensorType>::GetDevice(Index device_index) const {
   ICHECK_GE(shared_state_.devices_.size(), device_index)
       << "invalid device index: " << device_index;
   return shared_state_.devices_[device_index];
 }
 
-template <typename TensorType>
-inline Allocator* DynBatchRuntime<TensorType>::GetAllocator(Index device_index) const {
+template <typename ExecutorType, typename TensorType>
+inline Allocator* DynBatchRuntime<ExecutorType, TensorType>::GetAllocator(
+    Index device_index) const {
   ICHECK_GE(shared_state_.allocators_.size(), device_index)
       << "invalid device index: " << device_index;
   return shared_state_.allocators_[device_index];
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec) {
   ICHECK(exec) << "The executable is not created yet.";
   ICHECK(exec->late_bound_constant_names.empty())
       << "Need to load late-bound-constants before creating VM";
@@ -315,33 +319,31 @@ void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
     ICHECK(pf != nullptr) << "Cannot find function in module: " << packed_name;
     shared_state_.packed_funcs_[packed_index] = pf;
 
-    if (coarsened_execution_) {
-      auto& arg_access_modes = shared_state_.prim_func_arg_access_mode_[packed_index];
+    auto& arg_access_modes = shared_state_.prim_func_arg_access_mode_[packed_index];
 
-      int num_inputs = 0;
-      int num_outputs = 0;
-      int num_inouts = 0;
-      for (size_t i = 0; i < arg_access_modes.size(); ++i) {
-        switch (arg_access_modes[i]) {
-          case kInput:
-            num_inputs++;
-            break;
-          case kOutput:
-            num_outputs++;
-            break;
-          case kInputOutput:
-            num_inouts++;
-            break;
-          case kUnused:
-            ICHECK(false);
-            break;
-        }
+    int num_inputs = 0;
+    int num_outputs = 0;
+    int num_inouts = 0;
+    for (size_t i = 0; i < arg_access_modes.size(); ++i) {
+      switch (arg_access_modes[i]) {
+        case kInput:
+          num_inputs++;
+          break;
+        case kOutput:
+          num_outputs++;
+          break;
+        case kInputOutput:
+          num_inouts++;
+          break;
+        case kUnused:
+          ICHECK(false);
+          break;
       }
-
-      shared_state_.outputs_start[packed_index] = num_inputs;
-      shared_state_.inouts_start[packed_index] = num_inputs + num_outputs;
-      shared_state_.args_end[packed_index] = arg_access_modes.size();
     }
+
+    shared_state_.outputs_start[packed_index] = num_inputs;
+    shared_state_.inouts_start[packed_index] = num_inputs + num_outputs;
+    shared_state_.args_end[packed_index] = arg_access_modes.size();
 
     bool print = true;
     if (print) {
@@ -357,15 +359,14 @@ void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
         for (size_t i = 0; i < shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
           std::cout << shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
         }
-        std::cout << "]   AccMode: [";
-        for (size_t i = 0; i < shared_state_.prim_func_arg_access_mode_[packed_index].size(); ++i) {
-          std::cout << shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";
-        }
-        std::cout << "] " << shared_state_.outputs_start[packed_index] << " "
-                  << shared_state_.inouts_start[packed_index] << std::endl;
-      } else {
-        std::cout << std::endl;
+        std::cout << "]";
       }
+      std::cout << "   AccMode: [";
+      for (size_t i = 0; i < shared_state_.prim_func_arg_access_mode_[packed_index].size(); ++i) {
+        std::cout << shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";
+      }
+      std::cout << "] " << shared_state_.outputs_start[packed_index] << " "
+                << shared_state_.inouts_start[packed_index] << std::endl;
     }
 
     ICHECK(pf != nullptr) << packed_name;
@@ -389,9 +390,9 @@ void DynBatchRuntime<TensorType>::LoadExecutable(Executable* exec) {
   }
 }
 
-template <typename TensorType>
-void DynBatchRuntime<TensorType>::Init(const std::vector<Device>& physical_devices,
-                                       const std::vector<AllocatorType>& alloc_types) {
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::Init(
+    const std::vector<Device>& physical_devices, const std::vector<AllocatorType>& alloc_types) {
   ICHECK_EQ(physical_devices.size(), alloc_types.size());
 
   // Find a physical device to represent each virtual device the VM code requires.
@@ -420,13 +421,13 @@ void DynBatchRuntime<TensorType>::Init(const std::vector<Device>& physical_devic
 }
 
 runtime::Module CreateEagerAllocationDynBatchRuntime(Executable* exec) {
-  auto vm = make_object<DynBatchRuntime<NDArray>>();
+  auto vm = make_object<DynBatchRuntime<EagerAllocationLazyExecutor, NDArray>>();
   vm->LoadExecutable(exec);
   return runtime::Module(vm);
 }
 
 runtime::Module CreateLazyAllocationDynBatchRuntime(Executable* exec) {
-  auto vm = make_object<DynBatchRuntime<DLTensor*>>();
+  auto vm = make_object<DynBatchRuntime<LazyAllocationLazyExecutor, DLTensor*>>();
   vm->LoadExecutable(exec);
   return runtime::Module(vm);
 }

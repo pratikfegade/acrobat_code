@@ -445,8 +445,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
           stream_ << "};\n";
           this->PrintIndent(stream_);
           stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index << ", "
-                  << instr.arity << ", " << instr.output_size << ", " << args_vec << ".data(), "
-                  << flattened_args.size() << ");\n";
+                  << instr.arity << ", " << args_vec << ".data(), " << flattened_args.size()
+                  << ");\n";
           break;
         }
         case Opcode::InvokeClosure: {

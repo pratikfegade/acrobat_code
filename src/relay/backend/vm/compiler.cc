@@ -1455,6 +1455,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
+  } else {
+    // Compute prim func access modes for all prim funcs
+    pass_seqs.push_back(transform::ComputePrimFuncAccessModes());
   }
   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
 

@@ -331,7 +331,7 @@ class VirtualMachine : public runtime::ModuleNode {
   /*! \brief The global state excluding all runtime state. Aggregated
       in a struct for easier shared across multiple vm instances when
       executing multiple concurrent batch elements */
-  VMSharedState<NDArray>* shared_state_{nullptr};
+  VMSharedState<LazyExecutor<NDArray>>* shared_state_{nullptr};
   /*! \brief The current stack of call frames. */
   std::vector<VMFrame> frames_;
   /*! \brief The fuction table index of the current function. */
