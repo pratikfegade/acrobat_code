@@ -63,6 +63,15 @@ bool lazy_execution() {
   return lazy_execution_;
 }
 
+bool use_depth_tracking_executor() {
+  // static bool use_depth_tracking_executor_ =
+  // tvm::transform::PassContext::Current()
+  // ->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false))
+  // .value();
+  // return use_depth_tracking_executor_;
+  return true;
+}
+
 inline std::string GetTensorType() {
   if (lazy_execution()) {
     return "DLTensor*";
@@ -104,6 +113,9 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
       if (i < ft->arg_types.size() - 1) {
         os << ",";
       }
+    }
+    if (use_depth_tracking_executor()) {
+      os << ", int&";
     }
     os << ")>";
   } else if (auto tv = type.as<TypeVarNode>()) {
@@ -165,14 +177,28 @@ std::string RelayTypeToCppStrString(const Type& type, bool no_shared_ptr = false
 
 std::string GetModelMainFunctionName() { return "model_main"; }
 
+std::string GetDepthTrackingMapFunctionName() { return "pmap"; }
+
 std::string GetCppFunctionName(const std::string& name) {
   if (name == "main") {
     return GetModelMainFunctionName();
+  } else if (name == "map") {
+    return GetDepthTrackingMapFunctionName();
   }
   return name;
 }
 
-inline std::string GetRuntimeType() { return "DynBatchRuntime<" + GetTensorType() + ">"; }
+std::string GetExecutorType() {
+  if (use_depth_tracking_executor()) {
+    return "DepthTrackingExecutor";
+  } else {
+    return "LazyExecutor<" + GetTensorType() + ">";
+  }
+}
+
+inline std::string GetRuntimeType() {
+  return "DynBatchRuntime<" + GetExecutorType() + ", " + GetTensorType() + ">";
+}
 
 Function GetCompiledRelayFunction(
     const std::unordered_map<std::string, Function>& compiled_functions, const IRModule& mod,
@@ -205,6 +231,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
         stream_(stream) {}
 
   void GenerateCPPForFunction(bool definition) {
+    if (vm_func_.name == "map") {
+      EmitPMapCPP(definition);
+      return;
+    }
     // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
     Type function_type = relay_func_->checked_type_;
     CreateFunctionDeclaration(vm_func_, relay_func_);
@@ -254,22 +284,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
         stream_ << ", ";
       }
     }
+    if (use_depth_tracking_executor()) {
+      stream_ << ", int& depth";
+    }
     stream_ << ")";
-
-    // std::cout << relay_func << "\n" << std::endl;
-    // std::cout << stream_.str() << std::endl;
-    // if (vm_func.params.size() != function_type->arg_types.size()) {
-    //   std::cout << " VM Func Params" << std::endl;
-    //   for (auto param : vm_func.params) {
-    //     std::cout << "   " << param << std::endl;
-    //   }
-
-    //   std::cout << "  Relay Func Params" << std::endl;
-    //   for (auto param : relay_func->params) {
-    //     std::cout << "   " << param->name_hint() << std::endl;
-    //   }
-    // }
-    // std::cout << "\n\n" << std::endl;
   }
 
   bool IsStorageType(const Type& type) {
@@ -396,7 +414,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           auto dst_var = GetVarForReg(instr.dst);
           auto callee_name = exec_.functions[instr.func_index].name;
           this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << callee_name;
+          stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
           auto it = invoke_type_vars_.find(i);
           if (it != invoke_type_vars_.end() && it->second.size() > 0) {
             auto types = it->second;
@@ -415,6 +433,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
             if (i < instr.num_args - 1) {
               stream_ << ",";
             }
+          }
+          if (use_depth_tracking_executor()) {
+            stream_ << ", depth";
           }
           stream_ << ");\n";
           break;
@@ -444,9 +465,20 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
           stream_ << "};\n";
           this->PrintIndent(stream_);
-          stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index << ", "
-                  << instr.arity << ", " << args_vec << ".data(), " << flattened_args.size()
-                  << ");\n";
+          if (use_depth_tracking_executor()) {
+            stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
+                    << instr.packed_index << ", depth++, " << args_vec << ".data(), "
+                    << flattened_args.size() << ");\n";
+          } else {
+            if (lazy_execution()) {
+              stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                      << ", " << instr.arity << ", " << args_vec << ".data(), "
+                      << flattened_args.size() << ");\n";
+            } else {
+              stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                      << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
+            }
+          }
           break;
         }
         case Opcode::InvokeClosure: {
@@ -458,8 +490,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
           for (int i = 0; i < instr.num_closure_args; ++i) {
             stream_ << GetVarForReg(instr.closure_args[i]);
             if (i < instr.num_closure_args - 1) {
-              stream_ << ",";
+              stream_ << ", ";
             }
+          }
+          if (use_depth_tracking_executor()) {
+            stream_ << ", depth";
           }
           stream_ << ");\n";
           break;
@@ -663,10 +698,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
               stream_ << ", ";
             }
           }
+          if (use_depth_tracking_executor()) {
+            stream_ << ", int& depth";
+          }
           stream_ << ") {\n";
           this->BeginScope();
           this->PrintIndent(stream_);
-          stream_ << "return " << closure_func.name << "(";
+          stream_ << "return " << GetCppFunctionName(closure_func.name) << "(";
           int j = 0;
           for (; j < instr.num_freevar; ++j) {
             stream_ << GetVarForReg(instr.invoke_args_registers[j]);
@@ -679,6 +717,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
             if (j < closure_func.params.size() - 1) {
               stream_ << ", ";
             }
+          }
+          if (use_depth_tracking_executor()) {
+            stream_ << ", depth";
           }
           stream_ << ");\n";
           this->EndScope();
@@ -745,6 +786,49 @@ class VMAOTFunctionCompiler : SourcePrinter {
           LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
           return;
       }
+    }
+  }
+
+  void EmitPMapCPP(bool definition) {
+    auto pmap_func_declaration =
+        "template <class A, class B>\n"
+        "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, std::shared_ptr<List<A>> "
+        "local_1, int& depth)";
+    stream_ << pmap_func_declaration;
+    if (definition) {
+      auto pmap_func_body =
+          "{"
+          "  auto current = local_1;"
+          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());"
+          "  nil_node->tag = LIST_NIL_TAG;"
+          "  auto new_list_head = nil_node;"
+          "  auto new_list_tail = nil_node;"
+          "  int map_depth_value = depth;"
+          "  while (true) {"
+          "    if (current->tag == LIST_NIL_TAG) {"
+          "      break;"
+          "    }"
+          "    int tmp_depth = map_depth_value;"
+          "    auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());"
+          "    new_node->tag = LIST_CONS_TAG;"
+          "    static_cast<Cons<B>*>(new_node.get())->field_0 ="
+          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);"
+          "    depth = std::max(depth, tmp_depth);"
+          "    if (new_list_tail->tag != LIST_NIL_TAG) {"
+          "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;"
+          "    } else {"
+          "      new_list_head = new_node;"
+          "    }"
+          "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;"
+          "    new_list_tail = new_node;"
+          "    current = static_cast<Cons<A>*>(current.get())->field_1;"
+          "  }"
+          ""
+          "  return new_list_head;"
+          "}";
+      stream_ << pmap_func_body << "\n" << std::endl;
+    } else {
+      stream_ << ";";
     }
   }
 
@@ -841,7 +925,8 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
       "  CHECK_EQ(DataType(cpu_array->dtype), int64_dtype);\n"
       "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
       "}";
-  os << nd_to_int64_func << "\n" << std::endl;
+
+  os << nd_to_int64_func << "\n\n" << std::endl;
 }
 
 void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
@@ -864,6 +949,10 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   os << "for (size_t b = 0; b < batch_size; ++b) {\n";
   this->BeginScope();
   this->PrintIndent(os);
+  if (use_depth_tracking_executor()) {
+    os << "int depth = 0;\n";
+  }
+  this->PrintIndent(os);
   os << "res.push_back(" << GetCppFunctionName("main") << "(";
   for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
     auto arg_type = function_type->arg_types[i];
@@ -871,6 +960,9 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
     if (i != function_type->arg_types.size() - 1) {
       os << ", ";
     }
+  }
+  if (use_depth_tracking_executor()) {
+    os << ", depth";
   }
   os << "));\n";
   this->EndScope();

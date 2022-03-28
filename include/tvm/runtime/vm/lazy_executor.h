@@ -80,8 +80,10 @@ class AbstractExecutor {
   virtual void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
                              const ObjectRef* args, int num_args) = 0;
 
-  virtual void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, TensorType* args,
-                                     int num_args) = 0;
+  virtual void AddPackedCallUnrolled(const Index func_idx, TensorType* args, int num_args) = 0;
+
+  virtual void AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
+                                              TensorType* args, int num_args) = 0;
 
   virtual void Execute() = 0;
 
@@ -90,16 +92,16 @@ class AbstractExecutor {
   virtual void ExecuteOpNodeBatch(const Index func_idx,
                                   const std::vector<OpNode<TensorType>*>& nodes) = 0;
 
-  inline size_t InputStart(const Index idx) { return 0; }
-  inline size_t InputEnd(const Index idx) { return vm_shared_state_->outputs_start[idx]; }
+  inline size_t InputStart(const Index idx) const { return 0; }
+  inline size_t InputEnd(const Index idx) const { return vm_shared_state_->outputs_start[idx]; }
 
-  inline size_t OutputStart(const Index idx) { return vm_shared_state_->outputs_start[idx]; }
-  inline size_t OutputEnd(const Index idx) { return vm_shared_state_->inouts_start[idx]; }
+  inline size_t OutputStart(const Index idx) const { return vm_shared_state_->outputs_start[idx]; }
+  inline size_t OutputEnd(const Index idx) const { return vm_shared_state_->inouts_start[idx]; }
 
-  inline size_t InoutStart(const Index idx) { return vm_shared_state_->inouts_start[idx]; }
-  inline size_t InoutEnd(const Index idx) { return vm_shared_state_->args_end[idx]; }
+  inline size_t InoutStart(const Index idx) const { return vm_shared_state_->inouts_start[idx]; }
+  inline size_t InoutEnd(const Index idx) const { return vm_shared_state_->args_end[idx]; }
 
-  inline size_t GetArity(const Index idx) { return vm_shared_state_->args_end[idx]; }
+  inline size_t GetArity(const Index idx) const { return vm_shared_state_->args_end[idx]; }
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
@@ -113,19 +115,23 @@ class AbstractExecutor {
  *
  */
 template <typename TensorType>
-class LazyExecutor : public AbstractExecutor<LazyExecutor<TensorType>, TensorType> {
+class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, TensorType> {
  public:
   void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
-                     const ObjectRef* args, int num_args) final;
+                     const ObjectRef* args, int num_args);
 
-  void AddPackedCallUnrolled(const Index func_idx, const Index arg_count, TensorType* args,
-                             int num_args) final;
-  void Execute() final;
+  void AddPackedCallUnrolled(const Index func_idx, TensorType* args, int num_args);
 
-  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false) final;
+  void AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth, TensorType* args,
+                                      int num_args) {
+    ICHECK(false) << "Not implemented. Use a depth tracking executor.";
+  }
 
-  void ExecuteOpNodeBatch(const Index func_idx,
-                          const std::vector<OpNode<TensorType>*>& nodes) final;
+  void Execute();
+
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
+
+  void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
 
   /*! \brief list of nodes to execute */
   std::vector<OpNode<TensorType>> nodes_;
@@ -135,12 +141,12 @@ typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;
 typedef LazyExecutor<DLTensor*> LazyAllocationLazyExecutor;
 
 template <>
-void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                        NDArray* args, int num_args);
+void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, NDArray* args,
+                                                        int num_args);
 
 template <>
-void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                       DLTensor** args, int num_args);
+void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, DLTensor** args,
+                                                       int num_args);
 
 template <>
 void EagerAllocationLazyExecutor::Execute();
@@ -163,6 +169,30 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
 template <>
 void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
                                                     const std::vector<LazyOpNode*>& func_nodes);
+
+class DepthTrackingExecutor final : public AbstractExecutor<DepthTrackingExecutor, DLTensor*> {
+ public:
+  void AddPackedCall(const Index func_idx, const Index arg_count, const Index output_size,
+                     const ObjectRef* args, int num_args) {
+    ICHECK(false) << "Not implemented. Use a depth tracking executor.";
+  }
+
+  void AddPackedCallUnrolled(const Index func_idx, DLTensor** args, int num_args) {
+    ICHECK(false) << "Not implemented. Use a depth tracking executor.";
+  }
+
+  void AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth, DLTensor** args,
+                                      int num_args);
+
+  void Execute();
+
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
+
+  void ExecuteOpNodeBatch(const Index func_idx, const std::vector<LazyOpNode*>& nodes);
+
+  /*! \brief list of nodes to execute sorted by depth */
+  std::vector<std::vector<OpNode<DLTensor*>>> nodes_;
+};
 
 }  // namespace vm
 }  // namespace runtime

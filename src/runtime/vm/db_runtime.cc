@@ -47,6 +47,7 @@ namespace vm {
 
 template class DynBatchRuntime<LazyExecutor<NDArray>, NDArray>;
 template class DynBatchRuntime<LazyExecutor<DLTensor*>, DLTensor*>;
+template class DynBatchRuntime<DepthTrackingExecutor, DLTensor*>;
 
 template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::CacheConstants() {
@@ -140,14 +141,26 @@ DLTensor* DynBatchRuntime<ExecutorType, TensorType>::AllocArrayWrapper(int64_t* 
 }
 
 template <typename ExecutorType, typename TensorType>
-void DynBatchRuntime<ExecutorType, TensorType>::InvokePacked(int64_t packed_index,
-                                                             int64_t arg_count, TensorType* args,
+void DynBatchRuntime<ExecutorType, TensorType>::InvokePacked(int64_t packed_index, TensorType* args,
                                                              int64_t num_args) {
   if (concurrent_execution_ || lazy_execution_) {
-    shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, arg_count, args, num_args);
+    shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, args, num_args);
   } else {
     // std::cout << "Invoking " << packed_index << std::endl;
     InvokePackedFnUnrolled(packed_index, shared_state_.packed_funcs_[packed_index], args, num_args);
+  }
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::InvokePackedWithDepth(int64_t packed_index,
+                                                                      int64_t depth,
+                                                                      TensorType* args,
+                                                                      int64_t num_args) {
+  if (concurrent_execution_ || lazy_execution_) {
+    shared_state_.lazy_executor_.AddPackedCallUnrolledWithDepth(packed_index, depth, args,
+                                                                num_args);
+  } else {
+    ICHECK(false) << "Depth tracking not supported with eager execution";
   }
 }
 

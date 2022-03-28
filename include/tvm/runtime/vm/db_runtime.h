@@ -119,11 +119,14 @@ class DynBatchRuntime : public runtime::ModuleNode {
   /*!
    * \brief Invoke a packed function.
    * \param packed_index The index of the callee in the executable.
+   * \param depth The depth of the call in the dataflow graph
    * \param arity The arity of the function
    * \param args Pointer to args
    * \param num_args number of arguments
    */
-  void InvokePacked(int64_t packed_index, int64_t arg_count, TensorType* args, int64_t num_args);
+  void InvokePacked(int64_t packed_index, TensorType* args, int64_t num_args);
+  void InvokePackedWithDepth(int64_t packed_index, int64_t depth, TensorType* args,
+                             int64_t num_args);
 
   /*!
    * \brief Allocate a memory storage object.

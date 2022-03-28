@@ -106,14 +106,14 @@ void LazyAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Index
 }
 
 template <>
-void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                        NDArray* args, int num_args) {
+void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, NDArray* args,
+                                                        int num_args) {
   nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
 }
 
 template <>
-void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, const Index arg_count,
-                                                       DLTensor** args, int num_args) {
+void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, DLTensor** args,
+                                                       int num_args) {
   nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
 }
 
@@ -130,6 +130,67 @@ template <>
 void LazyAllocationLazyExecutor::Execute() {
   // TODO
   nodes_.clear();
+}
+
+template <typename ConcreteExecutorType>
+void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,
+                                      const std::vector<LazyOpNode*>& func_nodes) {
+  const VMSharedState<ConcreteExecutorType>& vm_shared_state = *(executor.vm_shared_state_);
+  auto& batched_func_idx = vm_shared_state.batched_funcs_[func_idx];
+  auto& arg_modes = vm_shared_state.batched_func_arg_mode_[batched_func_idx];
+
+  int32_t batch_size = func_nodes.size();
+  auto arity = executor.GetArity(func_idx);
+  std::vector<TVMValue> values(arity + 1);
+  std::vector<int> codes(arity + 1);
+  std::vector<NDArray> arg_holder(arity);
+  runtime::TVMArgsSetter setter(values.data(), codes.data());
+  setter(0, batch_size);
+  int ctr = 1;
+
+  // std::cout << "[LZ] Executing " << batched_func_idx << " " << arity << " " << arg_modes.size()
+  // << std::endl;
+  for (Index i = 0; i < arity; ++i) {
+    switch (arg_modes[i]) {
+      case kIgnore: {
+        break;
+      }
+      case kReuse: {
+        auto& arg = func_nodes[0]->args_[i];
+        if (arg->data == nullptr) {
+          auto ptr =
+              vm_shared_state.allocators_[0]->ArenaAlloc(GetDataSize(*arg), 256, arg->dtype).data;
+          for (size_t j = 0; j < batch_size; ++j) {
+            func_nodes[j]->args_[i]->data = ptr;
+          }
+        }
+        setter(ctr, func_nodes[0]->args_[i]);
+        ctr += 1;
+        break;
+      }
+      case kScatter: {
+        arg_holder[i] = CreatePointerNDArray(func_nodes, i, vm_shared_state.allocators_[0]);
+        setter(ctr, arg_holder[i]);
+        ctr += 1;
+        break;
+      }
+      case kConcat: {
+        // std::vector<NDArray> to_concat(batch_size);
+        // for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
+        //   to_concat[j] = func_nodes[j]->args_[i];
+        // }
+
+        // NDArray concat_array = CreateConcatenatedNDArray(to_concat);
+        // arg_holder[i] = concat_array;
+        // setter(ctr, concat_array);
+        // ctr += 1;
+      }
+    }
+  }
+
+  TVMRetValue rv;
+  vm_shared_state.packed_funcs_[batched_func_idx].CallPacked(
+      TVMArgs(values.data(), codes.data(), ctr), &rv);
 }
 
 template <>
@@ -158,61 +219,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
 template <>
 void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
                                                     const std::vector<LazyOpNode*>& func_nodes) {
-  auto& batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
-  auto& arg_modes = vm_shared_state_->batched_func_arg_mode_[batched_func_idx];
-
-  int32_t batch_size = func_nodes.size();
-  auto arity = GetArity(func_idx);
-  std::vector<TVMValue> values(arity + 1);
-  std::vector<int> codes(arity + 1);
-  std::vector<NDArray> arg_holder(arity);
-  runtime::TVMArgsSetter setter(values.data(), codes.data());
-  setter(0, batch_size);
-  int ctr = 1;
-
-  std::cout << "[LZ] Executing " << batched_func_idx << " " << arity << " " << arg_modes.size()
-            << std::endl;
-  for (Index i = 0; i < arity; ++i) {
-    switch (arg_modes[i]) {
-      case kIgnore: {
-        break;
-      }
-      case kReuse: {
-        auto& arg = func_nodes[0]->args_[i];
-        if (arg->data == nullptr) {
-          auto ptr =
-              vm_shared_state_->allocators_[0]->ArenaAlloc(GetDataSize(*arg), 256, arg->dtype).data;
-          for (size_t j = 0; j < batch_size; ++j) {
-            func_nodes[j]->args_[i]->data = ptr;
-          }
-        }
-        setter(ctr, func_nodes[0]->args_[i]);
-        ctr += 1;
-        break;
-      }
-      case kScatter: {
-        arg_holder[i] = CreatePointerNDArray(func_nodes, i, vm_shared_state_->allocators_[0]);
-        setter(ctr, arg_holder[i]);
-        ctr += 1;
-        break;
-      }
-      case kConcat: {
-        // std::vector<NDArray> to_concat(batch_size);
-        // for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
-        //   to_concat[j] = func_nodes[j]->args_[i];
-        // }
-
-        // NDArray concat_array = CreateConcatenatedNDArray(to_concat);
-        // arg_holder[i] = concat_array;
-        // setter(ctr, concat_array);
-        // ctr += 1;
-      }
-    }
-  }
-
-  TVMRetValue rv;
-  vm_shared_state_->packed_funcs_[batched_func_idx].CallPacked(
-      TVMArgs(values.data(), codes.data(), ctr), &rv);
+  LazyAllocationExecuteOpNodeBatch<LazyAllocationLazyExecutor>(*this, func_idx, func_nodes);
 }
 
 template <typename T>
@@ -415,6 +422,39 @@ template <>
 void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                 bool all_nodes_same_depth) {
   BatchedExecuteImpl<DLTensor*, DLTensor*>(this, coarsened_execution, all_nodes_same_depth);
+}
+
+void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
+                                                           DLTensor** args, int num_args) {
+  std::cout << "[LZ] Node " << func_idx << " " << depth << std::endl;
+  nodes_.resize(depth + 1);
+  nodes_[depth].emplace_back(nodes_.size(), func_idx, args, num_args);
+}
+
+void DepthTrackingExecutor::ExecuteOpNodeBatch(const Index func_idx,
+                                               const std::vector<LazyOpNode*>& nodes) {
+  LazyAllocationExecuteOpNodeBatch<DepthTrackingExecutor>(*this, func_idx, nodes);
+}
+
+void DepthTrackingExecutor::Execute() {
+  ICHECK(false)
+      << "Not implemented. Please use LazyExecutor<DLTensor*> class for this functionality.";
+}
+
+void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
+  for (int j = 0; j < nodes_.size(); ++j) {
+    auto& depth_nodes = nodes_[j];
+    std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
+    std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
+    for (auto& node : depth_nodes) {
+      func_to_node[node.func_idx_].push_back(&node);
+    }
+
+    for (auto kv : func_to_node) {
+      ExecuteOpNodeBatch(kv.first, kv.second);
+    }
+  }
+  nodes_.clear();
 }
 
 }  // namespace vm
