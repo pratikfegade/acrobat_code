@@ -402,7 +402,7 @@ Pass CPPMemoryPlan() {
   return CreateFunctionPass(pass_func, 0, "CPPMemoryPlan", {});
 }
 
-TVM_REGISTER_GLOBAL("relay._transform.CPPMemoryPlan").set_body_typed(FuseOps);
+TVM_REGISTER_GLOBAL("relay._transform.CPPMemoryPlan").set_body_typed(CPPMemoryPlan);
 
 }  // namespace transform
 

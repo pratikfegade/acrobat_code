@@ -32,6 +32,7 @@
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/packed_func.h>
 
+#include <iostream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -380,6 +381,9 @@ inline ReflectionVTable::Registry ReflectionVTable::Register() {
   fsequal_reduce_[tindex] = ::tvm::detail::SelectSEqualReduce<T, TraitName>::SEqualReduce;
 
   fshash_reduce_[tindex] = ::tvm::detail::SelectSHashReduce<T, TraitName>::SHashReduce;
+
+  std::cout << "[REG] Registering hash for " << tindex << " " << Object::TypeIndex2Key(tindex)
+            << std::endl;
 
   return Registry(this, tindex);
 }

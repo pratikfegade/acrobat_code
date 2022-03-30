@@ -159,6 +159,14 @@ TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection, bool scatter
 TVM_DLL Pass ComputePrimFuncAccessModes();
 
 /*!
+ * \brief Determine and compute fixed depths for ops that are not
+ * dependent on the results of any recursive functions
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass HoistNonSequentialOps();
+
+/*!
  * \brief The inverse operation of FuseOps. It transforms a fused program returned by
  * FuseOps into the program before FuseOps. (i.e. x == DefuseOps(FuseOps(x)))
  *

@@ -17,7 +17,7 @@ num_nodes = 6
 
 target = "llvm -mcpu=core-avx2"
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False

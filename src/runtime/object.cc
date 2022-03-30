@@ -133,6 +133,7 @@ class TypeContext {
     type_table_[allocated_tindex].name_hash = std::hash<std::string>()(skey);
     // update the key2index mapping.
     type_key2index_[skey] = allocated_tindex;
+    std::cout << "[ALLOC] Type index for " << skey << " " << allocated_tindex << std::endl;
     return allocated_tindex;
   }
 

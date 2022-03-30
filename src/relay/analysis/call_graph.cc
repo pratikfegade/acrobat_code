@@ -27,6 +27,7 @@
 #include <tvm/relay/attrs/annotation.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/runtime/object.h>
+#include <tvm/tir/function.h>
 
 #include <algorithm>
 #include <memory>
@@ -67,6 +68,8 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   // post-order visitor will visit each AST node of the current function to
   // figure out the dependencies between functions.
 
+  const Op invoke_tvm_op = Op::Get("vm.invoke_tvm_op");
+  ICHECK(invoke_tvm_op.defined());
   auto batched_prim_funcs = module->batched_prim_funcs;
   PostOrderVisit(func, [&](const Expr& expr) {
     // TODO(mbs): Cleanup shapes functions.
@@ -77,6 +80,17 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
         CallGraphEntry* callee_cg_node =
             LookupGlobalVar(Downcast<GlobalVar>(props.attrs.metadata["prim_shape_fn_var"]));
         cg_node->AddCalledGlobal(callee_cg_node);
+      }
+      if (call_node->op == invoke_tvm_op) {
+        auto callee = Downcast<GlobalVar>(call_node->args[0]);
+        CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
+        cg_node->AddCalledGlobal(callee_cg_node);
+        auto it = batched_prim_funcs.find(callee);
+        if (it != batched_prim_funcs.end()) {
+          auto batched_callee = (*it).second;
+          CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
+          cg_node->AddCalledGlobal(batched_callee_cg_node);
+        }
       }
     } else if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
       auto callee = GetRef<GlobalVar>(global_var_node);

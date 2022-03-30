@@ -147,6 +147,16 @@ inline const Op& CompilerEndOp() {
   return op;
 }
 
+/*!
+ * \brief Cache the invoke_tvm_op annotation op to reduce registry lookup overhead
+ * \param void
+ * \return invoke_tvm op
+ */
+inline const Op& GetInvokeTVMOp() {
+  static const Op& op = Op::Get("vm.invoke_tvm_op");
+  return op;
+}
+
 template <typename ConditionObjectPtr>
 struct TreeNode {
   typedef std::shared_ptr<TreeNode<ConditionObjectPtr>> pointer;

@@ -426,7 +426,7 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
-  std::cout << "[LZ] Node " << func_idx << " " << depth << std::endl;
+  // std::cout << "[LZ] Node " << func_idx << " " << depth << std::endl;
   nodes_.resize(depth + 1);
   nodes_[depth].emplace_back(nodes_.size(), func_idx, args, num_args);
 }
@@ -445,7 +445,7 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
   for (int j = 0; j < nodes_.size(); ++j) {
     auto& depth_nodes = nodes_[j];
     std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
-    std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
+    // std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
     for (auto& node : depth_nodes) {
       func_to_node[node.func_idx_].push_back(&node);
     }
