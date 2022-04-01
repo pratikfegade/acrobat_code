@@ -219,6 +219,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
                         const std::unordered_map<std::string, Function>& compiled_functions,
                         const std::unordered_map<Index, int32_t>& get_field_tags,
+                        const std::unordered_map<Index, int32_t>& call_graph_depths,
                         std::ostream& stream)
       : exec_(exec),
         mod_(mod),
@@ -228,6 +229,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         invoke_type_vars_(invoke_type_vars),
         compiled_functions_(compiled_functions),
         get_field_tags_(get_field_tags),
+        call_graph_depths_(call_graph_depths),
         stream_(stream) {}
 
   void GenerateCPPForFunction(bool definition) {
@@ -466,8 +468,15 @@ class VMAOTFunctionCompiler : SourcePrinter {
           stream_ << "};\n";
           this->PrintIndent(stream_);
           if (use_depth_tracking_executor()) {
+            std::string depth_str = ", ";
+            auto it = call_graph_depths_.find(i);
+            if (it != call_graph_depths_.end()) {
+              depth_str += std::to_string(it->second);
+            } else {
+              depth_str += "depth++";
+            }
             stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
-                    << instr.packed_index << ", depth++, " << args_vec << ".data(), "
+                    << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
                     << flattened_args.size() << ");\n";
           } else {
             if (lazy_execution()) {
@@ -797,35 +806,35 @@ class VMAOTFunctionCompiler : SourcePrinter {
     stream_ << pmap_func_declaration;
     if (definition) {
       auto pmap_func_body =
-          "{"
-          "  auto current = local_1;"
-          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());"
-          "  nil_node->tag = LIST_NIL_TAG;"
-          "  auto new_list_head = nil_node;"
-          "  auto new_list_tail = nil_node;"
-          "  int map_depth_value = depth;"
-          "  while (true) {"
-          "    if (current->tag == LIST_NIL_TAG) {"
-          "      break;"
-          "    }"
-          "    int tmp_depth = map_depth_value;"
-          "    auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());"
-          "    new_node->tag = LIST_CONS_TAG;"
-          "    static_cast<Cons<B>*>(new_node.get())->field_0 ="
-          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);"
-          "    depth = std::max(depth, tmp_depth);"
-          "    if (new_list_tail->tag != LIST_NIL_TAG) {"
-          "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;"
-          "    } else {"
-          "      new_list_head = new_node;"
-          "    }"
-          "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;"
-          "    new_list_tail = new_node;"
-          "    current = static_cast<Cons<A>*>(current.get())->field_1;"
-          "  }"
+          "{\n"
+          "  auto current = local_1;\n"
+          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n"
+          "  nil_node->tag = LIST_NIL_TAG;\n"
+          "  auto new_list_head = nil_node;\n"
+          "  auto new_list_tail = nil_node;\n"
+          "  int map_depth_value = depth;\n"
+          "  while (true) {\n"
+          "    if (current->tag == LIST_NIL_TAG) {\n"
+          "      break;\n"
+          "    }\n"
+          "    int tmp_depth = map_depth_value;\n"
+          "    auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
+          "    new_node->tag = LIST_CONS_TAG;\n"
+          "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
+          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n"
+          "    depth = std::max(depth, tmp_depth);\n"
+          "    if (new_list_tail->tag != LIST_NIL_TAG) {\n"
+          "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
+          "    } else {\n"
+          "      new_list_head = new_node;\n"
+          "    }\n"
+          "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
+          "    new_list_tail = new_node;\n"
+          "    current = static_cast<Cons<A>*>(current.get())->field_1;\n"
+          "  }\n"
           ""
-          "  return new_list_head;"
-          "}";
+          "  return new_list_head;\n"
+          "}\n";
       stream_ << pmap_func_body << "\n" << std::endl;
     } else {
       stream_ << ";";
@@ -840,6 +849,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<Index, Array<Type>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
   const std::unordered_map<Index, int32_t>& get_field_tags_;
+  const std::unordered_map<Index, int32_t>& call_graph_depths_;
   std::ostream& stream_;
 };
 
@@ -1129,9 +1139,10 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
+    auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, cpp_stream_);
+        compiled_functions_, function_get_field_tags, function_call_graph_depths, cpp_stream_);
     function_compiler.GenerateCPPForFunction(true);
     cpp_stream_ << "\n";
   }
@@ -1190,9 +1201,10 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
+    auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, hpp_stream_);
+        compiled_functions_, function_get_field_tags, function_call_graph_depths, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 

@@ -74,7 +74,8 @@ def copy_var(v):
     return relay.Var(v.name_hint, v.type_annotation)
 
 class Network:
-    stack = []
+    module = None
+    prelude = None
     cnt = 0
     used_function_names = OrderedSet()
 
@@ -83,12 +84,12 @@ class Network:
             name = f"{name}_{Network.cnt}"
         Network.used_function_names.add(name)
         Network.cnt += 1
-        if len(Network.stack) != 0:
-            mod = Network.stack[-1].mod
-            p = Network.stack[-1].p
-        else:
-            mod = Module()
-            p = Prelude(mod)
+        if Network.module is None:
+            Network.module = Module()
+            Network.prelude = Prelude(Network.module)
+
+        mod = Network.module
+        p = Network.prelude
 
         self.mod = mod
         self.p = p
@@ -100,6 +101,7 @@ class Network:
         self.use_recurse = False
         self.ret_type = None
         self.replacement_weights = {}
+        self.initialize(**kwargs)
         body = self.build(**kwargs)
         assert isinstance(body, relay.Expr)
         if self.use_recurse:
@@ -114,6 +116,7 @@ class Network:
         self.mod[self.f] = relay.Function(weights + self.inputs, body, self.ret_type, attrs=attrs)
 
     def get_replacement_weight(self, weight):
+        # return weight
         if weight in self.weights:
             return weight
         elif weight in self.replacement_weights:
@@ -122,12 +125,14 @@ class Network:
             self.replacement_weights[weight] = copy_var(weight)
             return self.replacement_weights[weight]
 
+    def initialize(self, *args):
+        raise NotImplementedError
+
     def build(self, **kwargs):
-        Network.stack.append(self)
         try:
             return self.build_impl(**kwargs)
         finally:
-            Network.stack.pop()
+            pass
 
     def build_impl(self, *args):
         raise NotImplementedError
@@ -136,6 +141,11 @@ class Network:
         assert isinstance(w, relay.Var)
         self.weights.add(w)
         return w
+
+    def create_sub_network(self, net):
+        assert isinstance(net, Network)
+        self.sub_network.add(net)
+        return net
 
     def input(self, i):
         assert isinstance(i, relay.Var)
@@ -149,15 +159,12 @@ class Network:
         weights = [caller.get_replacement_weight(weight) for weight in self.all_weights()]
         return self.f(*(weights + list(inputs)))
 
-    def __call__(self, caller, *inputs):
-        if self in Network.stack:
-            self.use_recurse = True
-            return self.recurse(*inputs)
+    def __call__(self, caller, recursive, *inputs):
+        if recursive:
+            print("Recursive call", self.all_weights())
+            weights = [caller.get_replacement_weight(weight) for weight in self.all_weights()]
+            return self.f(*(weights + list(inputs)))
         else:
-            assert len(Network.stack) > 0
-            assert Network.stack[-1].mod == self.mod
-            assert Network.stack[-1].p == self.p
-            Network.stack[-1].sub_network.add(self)
             return self.call_from_outside(caller, *inputs)
 
     def interface_type(self):

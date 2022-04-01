@@ -86,6 +86,7 @@ class VMAOTCompiler : SourcePrinter {
           invoke_type_vars,
       const std::unordered_map<std::string, Function>& compiled_functions,
       const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags,
+      const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& call_graph_depths,
       const std::string& output_directory, const std::string& model_name)
       : exec_(exec),
         mod_(mod),
@@ -93,6 +94,7 @@ class VMAOTCompiler : SourcePrinter {
         invoke_type_vars_(invoke_type_vars),
         compiled_functions_(compiled_functions),
         get_field_tags_(get_field_tags),
+        call_graph_depths_(call_graph_depths),
         output_directory_(output_directory),
         model_name_(model_name) {}
 
@@ -125,6 +127,7 @@ class VMAOTCompiler : SourcePrinter {
   const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
   const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags_;
+  const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& call_graph_depths_;
   const std::string& output_directory_;
   const std::string& model_name_;
   std::stringstream hpp_stream_;

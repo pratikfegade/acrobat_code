@@ -323,6 +323,7 @@ struct VMFunctionCompilerResult {
   std::unordered_map<size_t, Type> register_types;
   std::unordered_map<Index, Array<Type>> invoke_type_vars;
   std::unordered_map<Index, int32_t> get_field_tags;
+  std::unordered_map<Index, int32_t> call_graph_depths;
 };
 
 int64_t NDToInt64(const NDArray& nd) {
@@ -400,7 +401,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     return {compiled_function,
             VMFunction(var->name_hint, params_, instructions_, registers_num_,
                        std::move(param_device_indexes)),
-            register_types_, invoke_type_vars_, get_field_tags_};
+            register_types_,
+            invoke_type_vars_,
+            get_field_tags_,
+            call_graph_depths_};
   }
 
   /*! \brief Attrs objects for each op. */
@@ -671,8 +675,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     }
   }
 
-  void EmitInvokeTVMOp(const Expr& func, const Expr& inputs, const Expr& outputs,
-                       const DictAttrs& attrs) {
+  Index EmitInvokeTVMOp(const Expr& func, const Expr& inputs, const Expr& outputs,
+                        const DictAttrs& attrs) {
     std::vector<Index> argument_registers;
 
     const auto* global_var_node = func.as<GlobalVarNode>();
@@ -705,8 +709,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       AddPrimFuncToContext(GetBatchedName(global_var_node->name_hint), attrs);
     }
 
-    Emit(Instruction::InvokePacked(op_index, argument_registers.size(), output_tuple->fields.size(),
-                                   argument_registers));
+    return Emit(Instruction::InvokePacked(op_index, argument_registers.size(),
+                                          output_tuple->fields.size(), argument_registers));
   }
 
   void DeviceAwareVisitExpr_(const CallNode* call_node) final {
@@ -735,10 +739,17 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       OpMatch<void> matcher;
       matcher
           .Match("vm.invoke_tvm_op",
-                 [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
+                 [this, call_node](const Array<Expr>& args, const Attrs& attrs,
+                                   const Array<Type>& type_arg) {
                    ICHECK_EQ(args.size(), 3);
-                   EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
+                   auto pc = EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
                    CollectAndRegisterTIRCallees(args[0], Downcast<DictAttrs>(attrs));
+
+                   auto depth = Downcast<DictAttrs>(call_node->attrs)
+                                    .GetAttr(tir::attr::kDBGraphDepth, Integer(-1));
+                   if (depth.value()->value >= 0) {
+                     call_graph_depths_[pc] = depth.value()->value;
+                   }
                  })
           .Match("memory.alloc_tensor",
                  [this, call_node](const Array<Expr>& args, const Attrs& attrs,
@@ -1046,6 +1057,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   std::unordered_map<Index, Array<Type>> invoke_type_vars_;
   /*! \brief Tag information for GetField, used in AOT code generation. */
   std::unordered_map<Index, int32_t> get_field_tags_;
+  /*! \brief Statically computed depth information, used in AOT code generation. */
+  std::unordered_map<Index, int32_t> call_graph_depths_;
 };
 
 PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
@@ -1132,6 +1145,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars;
   std::unordered_map<std::string, Function> compiled_functions;
   std::unordered_map<std::string, std::unordered_map<Index, int32_t>> get_field_tags;
+  std::unordered_map<std::string, std::unordered_map<Index, int32_t>> call_graph_depths;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -1149,6 +1163,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       invoke_type_vars[vm_func.name] = func_invoke_type_vars;
       compiled_functions[vm_func.name] = result.compiled_function;
       get_field_tags[vm_func.name] = result.get_field_tags;
+      call_graph_depths[vm_func.name] = result.call_graph_depths;
 
       size_t func_index = context_.global_map.at(gvar);
       ICHECK(func_index < exec_->functions.size());
@@ -1274,7 +1289,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
                           ->GetConfig<String>("relay.db_model_name", String("model_name"))
                           .value();
     VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                  get_field_tags, output_directory, model_name)
+                  get_field_tags, call_graph_depths, output_directory, model_name)
         .Codegen();
   }
 }
@@ -1460,12 +1475,13 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(transform::ComputePrimFuncAccessModes());
   }
 
+  pass_seqs.push_back(transform::InferType());
+
   if (true) {
     pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
+    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   }
-
-  pass_seqs.push_back(transform::InferType());
 
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);

@@ -320,6 +320,10 @@ constexpr const char* kDBUnpackedAPI = "db.unpacked_api";
     in-out, or unused). */
 constexpr const char* kDBArgAccessModes = "db.args_access_modes";
 
+/*! \brief statically computed grpah depth for hoistable
+    functions. */
+constexpr const char* kDBGraphDepth = "db.graph_depth";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

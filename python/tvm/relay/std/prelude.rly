@@ -97,8 +97,8 @@ def @update[A](%xs: List[A], %n: Tensor[(), int32], %v: A) -> List[A] {
  * Map a function over a list's elements. That is, `map(f, xs)` returns a new
  * list where the `i`th member is `f` applied to the `i`th member of `xs`.
  */
-def @map[A, B](%f: fn(A) -> B, %xs: List[A]) -> List[B] {
-  match (%xs) {
+def @map[A, B](%f: fn(A) -> B, %xsm: List[A]) -> List[B] {
+  match (%xsm) {
     Cons(%x, %rest) => Cons(%f(%x), @map(%f, %rest)),
     Nil => Nil,
   }
@@ -110,8 +110,8 @@ def @map[A, B](%f: fn(A) -> B, %xs: List[A]) -> List[B] {
  * `foldl(f, z, cons(a1, cons(a2, cons(a3, cons(..., nil)))))`
  * evaluates to `f(...f(f(f(z, a1), a2), a3)...)`.
  */
-def @foldl[A, B](%f: fn(A, B) -> A, %acc: A, %xs: List[B]) -> A {
-  match (%xs) {
+def @foldl[A, B](%f: fn(A, B) -> A, %acc: A, %xsl: List[B]) -> A {
+  match (%xsl) {
     Cons(%x, %rest) => @foldl(%f, %f(%acc, %x), %rest),
     Nil => %acc,
   }
@@ -123,8 +123,8 @@ def @foldl[A, B](%f: fn(A, B) -> A, %acc: A, %xs: List[B]) -> A {
  * `foldr(f, z, cons(a1, cons(a2, cons(..., cons(an, nil)))))`
  * evaluates to `f(a1, f(a2, f(..., f(an, z)))...)`.
  */
-def @foldr[A, B](%f: fn(A, B) -> B, %acc: B, %xs: List[A]) -> B {
-  match (%xs) {
+def @foldr[A, B](%f: fn(A, B) -> B, %acc: B, %xsr: List[A]) -> B {
+  match (%xsr) {
     Cons(%x, %rest) => %f(%x, @foldr(%f, %acc, %rest)),
     Nil => %acc,
   }
