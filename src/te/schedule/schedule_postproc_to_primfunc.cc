@@ -199,7 +199,7 @@ PrimFunc SchedulePostProcToPrimFunc(Array<ObjectRef> arg_list, Stmt body,
   //   std::cout << "[MNO] " << it.first->name_hint << " " << it.first.get() << std::endl;
   // }
 
-  std::cout << "[SCHED] Body " << body << std::endl;
+  // std::cout << "[SCHED] Body " << body << std::endl;
 
   body = TensorToBufferMapper(std::move(extern_buffer))(std::move(body));
   // We mark this PrimFunc as coming from a TE schedule

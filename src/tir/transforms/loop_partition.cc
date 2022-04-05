@@ -674,6 +674,9 @@ class CUDAKernelHeaderStripper : public StmtExprVisitor {
   void VisitStmt_(const AllocateNode* op) final {
     std::string var_name = op->buffer_var->name_hint;
     if (std::regex_match(std::string(op->buffer_var->name_hint), std::regex("(.*)[.]local"))) {
+      ICHECK(support::IsLocal(GetPtrStorageScope(op->buffer_var)));
+    }
+    if (support::IsLocal(GetPtrStorageScope(op->buffer_var))) {
       kernel_body = op->body;
       return;
     }
@@ -687,8 +690,10 @@ class CUDAKernelHeaderAdder : public StmtExprMutator {
 
  private:
   Stmt VisitStmt_(const AllocateNode* op) final {
-    std::string var_name = op->buffer_var->name_hint;
     if (std::regex_match(std::string(op->buffer_var->name_hint), std::regex("(.*)[.]local"))) {
+      ICHECK(support::IsLocal(GetPtrStorageScope(op->buffer_var)));
+    }
+    if (support::IsLocal(GetPtrStorageScope(op->buffer_var))) {
       return Allocate(op->buffer_var, op->dtype, op->extents, op->condition, new_kernel_body_);
     }
     return StmtExprMutator::VisitStmt_(op);
