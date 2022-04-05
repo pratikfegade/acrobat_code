@@ -129,7 +129,7 @@ void TensorComputeOpNode::PropBoundToInputs(
 
 size_t TensorComputeOpNode::num_schedulable_dims() const { return schedulable_ndim; }
 
-Stmt TensorComputeOpNode::BuildProvide(const Stage& stage,
+Stmt TensorComputeOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                        const std::unordered_map<IterVar, Range>& dom_map,
                                        bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);
@@ -199,7 +199,8 @@ Stmt TensorComputeOpNode::BuildProvide(const Stage& stage,
   binder.BindArray(sp_expr, user_expr, this->name);
 
   size_t tloc = stage->leaf_iter_vars.size();
-  ComputeLoopNest n = ComputeLoopNest::Create(this, stage, dom_map, debug_keep_trivial_loop);
+  ComputeLoopNest n =
+      ComputeLoopNest::Create(this, schedule, stage, dom_map, debug_keep_trivial_loop);
 
   if (this->reduce_axis.size() == 0) {
     std::vector<std::vector<Stmt> > nest(n.main_nest.begin(), n.main_nest.begin() + tloc + 1);

@@ -28,6 +28,8 @@
 
 #include <regex>
 
+#include "../../support/utils.h"
+
 namespace tvm {
 namespace te {
 
@@ -525,7 +527,24 @@ bool IsRangeSame(const Range input_1, const Range input_2) {
           analyzer.CanProve(input_1->extent == input_2->extent));
 }
 
-std::vector<PrimExpr> MakeBoundCheck(const Stage& stage, const Map<IterVar, Range>& dom_map,
+bool IsLocalOpPadded(const Schedule& schedule, const Stage& stage) {
+  if (!dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 0)) {
+    return false;
+  }
+  if (!support::IsLocal(stage->scope) && !support::IsShared(stage->scope)) {
+    return false;
+  }
+  for (auto& tensor : stage->op->InputTensors()) {
+    auto input_stage = schedule[tensor->op];
+    if (!support::IsLocal(input_stage->scope) && !support::IsShared(input_stage->scope)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stage,
+                                     const Map<IterVar, Range>& dom_map,
                                      const std::unordered_map<IterVar, PrimExpr>& value_map,
                                      bool skip_ivar_domain,
                                      const std::unordered_set<IterVar>& skip_iter) {
@@ -551,6 +570,10 @@ std::vector<PrimExpr> MakeBoundCheck(const Stage& stage, const Map<IterVar, Rang
 
   // record the iteration variables with predicates
   std::unordered_set<IterVar> ivs_w_pred;
+  bool stage_is_local_padded = IsLocalOpPadded(schedule, stage);
+  if (std::regex_match(std::string(stage->op->name), std::regex("(.*)[.]local"))) {
+    ICHECK(stage_is_local_padded);
+  }
 
   for (const IterVar& iv : stage->all_iter_vars) {
     if (skip_iter.count(iv) || iv->iter_type == kOpaque) continue;
@@ -601,8 +624,7 @@ std::vector<PrimExpr> MakeBoundCheck(const Stage& stage, const Map<IterVar, Rang
           // we also perform padding (at the vectorization stage) to make sure
           // that the program behavior is correct. The predicates on the spatial
           // axes are processed several lines later.
-          if (dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1) &&
-              std::regex_match(std::string(stage->op->name), std::regex("(.*)[.]local"))) {
+          if (stage_is_local_padded) {
             continue;
           }
         }
@@ -631,10 +653,12 @@ std::vector<PrimExpr> MakeBoundCheck(const Stage& stage, const Map<IterVar, Rang
         // predicates on the spatial axes.
         if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) &&
             dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) {
-          if (std::regex_match(std::string(stage->op->name), std::regex("(.*)[.]local"))) {
+          if (stage_is_local_padded) {
             // Make sure that we only ignore predicates on spatial axes. Those
             // axes usually have ".c" suffix in their namings.
-            CHECK(std::regex_match(std::string(iv->var->name_hint), std::regex("(.*)[.]c")));
+            // ICHECK(std::regex_match(std::string(iv->var->name_hint), std::regex("(.*)[.]c"))) <<
+            // iv;
+            ICHECK_NE(iv->iter_type, kCommReduce) << iv;
             continue;
           }
         }

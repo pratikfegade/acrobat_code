@@ -188,8 +188,9 @@ Tensor Schedule::cache_read(const Tensor& tensor, const std::string& scope,
 }
 
 template <typename OpType>
-void PrepareAxisMapping(Stage orig_stage, OpType* op, std::unordered_set<IterVar>* p_red_axis,
-                        Array<IterVar>* p_new_axis, std::unordered_map<IterVar, Range>* p_dom_map,
+void PrepareAxisMapping(const Schedule& schedule, Stage orig_stage, OpType* op,
+                        std::unordered_set<IterVar>* p_red_axis, Array<IterVar>* p_new_axis,
+                        std::unordered_map<IterVar, Range>* p_dom_map,
                         std::unordered_map<const VarNode*, PrimExpr>* p_vsub,
                         std::unordered_map<const VarNode*, PrimExpr>* p_vsub2newvar,
                         std::vector<PrimExpr>* p_predicates) {
@@ -231,7 +232,7 @@ void PrepareAxisMapping(Stage orig_stage, OpType* op, std::unordered_set<IterVar
       skip_bound_check.insert(iv);
     }
     PassUpIndex(orig_stage, dom_map, &value_map, true);
-    predicates = MakeBoundCheck(orig_stage, dom_map, value_map, true, skip_bound_check);
+    predicates = MakeBoundCheck(schedule, orig_stage, dom_map, value_map, true, skip_bound_check);
     // The root axis
     for (IterVar iv : op->axis) {
       if (value_map.count(iv)) {
@@ -296,7 +297,7 @@ Array<Tensor> CacheWriteWithReLayout(Schedule sch, const Array<Tensor>& tensor_a
   std::unordered_map<const VarNode*, PrimExpr> vsub2newvar;
   std::vector<PrimExpr> predicates;
 
-  PrepareAxisMapping(orig_stage, compute, &red_axis, &new_axis, &dom_map, &vsub, &vsub2newvar,
+  PrepareAxisMapping(sch, orig_stage, compute, &red_axis, &new_axis, &dom_map, &vsub, &vsub2newvar,
                      &predicates);
 
   PrimExpr body;
@@ -368,8 +369,8 @@ Array<Tensor> CacheWriteWithReLayoutTensor(Schedule sch, const Array<Tensor>& te
   std::unordered_map<const VarNode*, PrimExpr> vsub2newvar;
   std::vector<PrimExpr> predicates;
 
-  PrepareAxisMapping(orig_stage, tensor_op, &red_axis, &new_axis, &dom_map, &vsub, &vsub2newvar,
-                     &predicates);
+  PrepareAxisMapping(sch, orig_stage, tensor_op, &red_axis, &new_axis, &dom_map, &vsub,
+                     &vsub2newvar, &predicates);
 
   for (int i = tensor_op->schedulable_ndim; i < static_cast<int>(tensor_op->axis.size()); ++i) {
     IterVar iv = tensor_op->axis[i];
@@ -779,7 +780,7 @@ Array<Tensor> Schedule::rfactor(const Tensor& tensor, const IterVar& axis, int f
   }
   te::PassUpIndex(reduce_stage, dom_map, &value_map, true);
   std::vector<PrimExpr> predicates =
-      MakeBoundCheck(reduce_stage, dom_map, value_map, true, skip_bound_check);
+      MakeBoundCheck((*this), reduce_stage, dom_map, value_map, true, skip_bound_check);
 
   // Get the factored op node.
   const int factor_axis_pos =

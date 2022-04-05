@@ -54,12 +54,14 @@ struct ComputeLoopNest {
   /*!
    * \brief constructor to build ComputeOpNest
    * \param self The pointer to compute op.
+   * \param schedule The schedule.
    * \param stage The scxhedule stage.
    * \param dom_map The domain map.
    * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
    * \return The constructed loop nest
    */
-  static ComputeLoopNest Create(const BaseComputeOpNode* self, const Stage& stage,
+  static ComputeLoopNest Create(const BaseComputeOpNode* self, const Schedule& schedule,
+                                const Stage& stage,
                                 const std::unordered_map<IterVar, Range>& dom_map,
                                 bool debug_keep_trivial_loop);
 };
@@ -67,24 +69,26 @@ struct ComputeLoopNest {
 /*!
  * \brief Build body of compute for cross thread reduction pattern.
  * \param self The pointer to ComputeOpNode
+ * \param schedule The schedule.
  * \param stage The schedule stage.
  * \param dom_map The domain map.
  * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
  * \return The created statement.
  */
-Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Stage& stage,
-                              const std::unordered_map<IterVar, Range>& dom_map,
+Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Schedule& schedule,
+                              const Stage& stage, const std::unordered_map<IterVar, Range>& dom_map,
                               bool debug_keep_trivial_loop);
 
 /*!
  * \brief Build body of compute for tensorization.
  * \param self The pointer to ComputeOpNode
+ * \param schedule The schedule.
  * \param stage The schedule stage.
  * \param dom_map The domain map.
  * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
  * \return The created statement.
  */
-Stmt MakeTensorize(const ComputeOpNode* self, const Stage& stage,
+Stmt MakeTensorize(const ComputeOpNode* self, const Schedule& schedule, const Stage& stage,
                    const std::unordered_map<IterVar, Range>& dom_map, bool debug_keep_trivial_loop);
 
 /*!

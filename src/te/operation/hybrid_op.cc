@@ -159,7 +159,7 @@ Stmt HybridOpNode::BuildRealize(const Stage& stage,
   return realize_body;
 }
 
-Stmt HybridOpNode::BuildProvide(const Stage& stage,
+Stmt HybridOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                 const std::unordered_map<IterVar, Range>& dom_map,
                                 bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);

@@ -40,9 +40,10 @@ namespace te {
 
 using namespace tir;
 
-Stmt MakePipeline(const Stage& s, const std::unordered_map<IterVar, Range>& dom_map, Stmt consumer,
+Stmt MakePipeline(const Schedule& sch, const Stage& s,
+                  const std::unordered_map<IterVar, Range>& dom_map, Stmt consumer,
                   bool debug_keep_trivial_loop) {
-  Stmt producer = s->op->BuildProvide(s, dom_map, debug_keep_trivial_loop);
+  Stmt producer = s->op->BuildProvide(sch, s, dom_map, debug_keep_trivial_loop);
   if (s->double_buffer) {
     producer = AttrStmt(s->op, tir::attr::double_buffer_scope, 1, producer);
   }
@@ -62,9 +63,10 @@ Stmt MakePipeline(const Stage& s, const std::unordered_map<IterVar, Range>& dom_
 // inject the operator's realization on the stmt.
 class InjectAttach : public StmtMutator {
  public:
-  InjectAttach(const Stage& stage, const Stage& attach_spec,
+  InjectAttach(const Schedule& schedule, const Stage& stage, const Stage& attach_spec,
                const std::unordered_map<IterVar, Range>& dom_map, bool debug_keep_trivial_loop)
-      : stage_(stage),
+      : schedule_(schedule),
+        stage_(stage),
         attach_spec_(attach_spec),
         dom_map_(dom_map),
         debug_keep_trivial_loop_(debug_keep_trivial_loop) {}
@@ -78,8 +80,9 @@ class InjectAttach : public StmtMutator {
         ICHECK(!found_attach) << "Find IterVar" << attach_spec_->attach_ivar
                               << " in multiple places in the IR";
         found_attach = true;
-        stmt = AttrStmt(op->node, op->attr_key, op->value,
-                        MakePipeline(stage_, dom_map_, op->body, debug_keep_trivial_loop_));
+        stmt =
+            AttrStmt(op->node, op->attr_key, op->value,
+                     MakePipeline(schedule_, stage_, dom_map_, op->body, debug_keep_trivial_loop_));
       }
     }
     return stmt;
@@ -88,6 +91,7 @@ class InjectAttach : public StmtMutator {
   bool found_attach{false};
 
  private:
+  const Schedule& schedule_;
   // The stage.
   const Stage& stage_;
   // The attach spec, may not contain op.
@@ -102,10 +106,11 @@ class InjectAttach : public StmtMutator {
 // inject the operator's realization on the stmt.
 class InjectScanStep : public StmtMutator {
  public:
-  InjectScanStep(const Stage& stage, const Operation& scan_op,
+  InjectScanStep(const Schedule& schedule, const Stage& stage, const Operation& scan_op,
                  const std::unordered_map<IterVar, Range>& dom_map, bool is_init,
                  bool debug_keep_trivial_loop)
-      : stage_(stage),
+      : schedule_(schedule),
+        stage_(stage),
         scan_op_(scan_op),
         dom_map_(dom_map),
         is_init_(is_init),
@@ -120,8 +125,9 @@ class InjectScanStep : public StmtMutator {
                           (op->attr_key == tir::attr::scan_init_scope && is_init_))) {
       if (op->node.same_as(scan_op_)) {
         found_attach = true;
-        stmt = AttrStmt(op->node, op->attr_key, op->value,
-                        MakePipeline(stage_, dom_map_, op->body, debug_keep_trivial_loop_));
+        stmt =
+            AttrStmt(op->node, op->attr_key, op->value,
+                     MakePipeline(schedule_, stage_, dom_map_, op->body, debug_keep_trivial_loop_));
       }
     }
     return stmt;
@@ -131,6 +137,7 @@ class InjectScanStep : public StmtMutator {
   bool found_attach{false};
 
  private:
+  const Schedule& schedule_;
   // the operations to be carried
   const Stage& stage_;
   const Operation& scan_op_;
@@ -350,24 +357,25 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, bool debug_keep_tri
 
     if (scan_init.count(s->op)) {
       ICHECK(body.defined());
-      InjectScanStep mu(s, scan_init.at(s->op), dom_map, true, debug_keep_trivial_loop);
+      InjectScanStep mu(sch, s, scan_init.at(s->op), dom_map, true, debug_keep_trivial_loop);
       body = mu(std::move(body));
       ICHECK(mu.found_attach) << "did not find attachment point for scan.init";
     } else if (attach_spec->attach_type == kScanUpdate) {
       // Handle scan update
       ICHECK(body.defined());
-      InjectScanStep mu(s, attach_spec->attach_stage->op, dom_map, false, debug_keep_trivial_loop);
+      InjectScanStep mu(sch, s, attach_spec->attach_stage->op, dom_map, false,
+                        debug_keep_trivial_loop);
       body = mu(std::move(body));
       ICHECK(mu.found_attach) << "did not find attachment point for scan.update";
     } else if (attach_spec->attach_type == kInlinedAlready) {
       // do nothing
     } else if (attach_spec->attach_type == kGroupRoot) {
       ICHECK(!s->group.defined());
-      body = MakePipeline(s, dom_map, body, debug_keep_trivial_loop);
+      body = MakePipeline(sch, s, dom_map, body, debug_keep_trivial_loop);
     } else {
       ICHECK_EQ(attach_spec->attach_type, kScope);
       ICHECK(body.defined());
-      InjectAttach mutator(s, attach_spec, dom_map, debug_keep_trivial_loop);
+      InjectAttach mutator(sch, s, attach_spec, dom_map, debug_keep_trivial_loop);
       body = mutator(std::move(body));
       ICHECK(mutator.found_attach)
           << "did not find attachment point for " << s << " in " << attach_spec->attach_stage->op

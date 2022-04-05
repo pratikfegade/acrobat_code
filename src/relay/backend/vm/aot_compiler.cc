@@ -699,11 +699,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
             }
           }
           stream_ << "](";
-          for (int j = instr.num_freevar; j < closure_func.params.size(); ++j) {
+          int closure_params_size = static_cast<int>(closure_func.params.size());
+          for (int j = instr.num_freevar; j < closure_params_size; ++j) {
             Type arg_type = closure_relay_func->params[j]->checked_type_;
             RelayTypeToCppStr(stream_, arg_type);
             stream_ << " " << GetTmpVarName(j);
-            if (j < closure_func.params.size() - 1) {
+            if (j < closure_params_size - 1) {
               stream_ << ", ";
             }
           }
@@ -717,13 +718,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
           int j = 0;
           for (; j < instr.num_freevar; ++j) {
             stream_ << GetVarForReg(instr.invoke_args_registers[j]);
-            if (j < closure_func.params.size() - 1) {
+            if (j < closure_params_size - 1) {
               stream_ << ", ";
             }
           }
-          for (; j < closure_func.params.size(); ++j) {
+          for (; j < closure_params_size; ++j) {
             stream_ << GetTmpVarName(j);
-            if (j < closure_func.params.size() - 1) {
+            if (j < closure_params_size - 1) {
               stream_ << ", ";
             }
           }

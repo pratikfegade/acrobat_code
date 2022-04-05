@@ -89,7 +89,7 @@ Stmt PlaceholderOpNode::BuildRealize(const Stage& stage,
   return body;
 }
 
-Stmt PlaceholderOpNode::BuildProvide(const Stage& stage,
+Stmt PlaceholderOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                      const std::unordered_map<IterVar, Range>& dom_map,
                                      bool debug_keep_trivial_loop) const {
   return Stmt();

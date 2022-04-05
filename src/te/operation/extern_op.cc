@@ -138,7 +138,7 @@ Stmt ExternOpNode::BuildRealize(const Stage& stage,
   return realize_body;
 }
 
-Stmt ExternOpNode::BuildProvide(const Stage& stage,
+Stmt ExternOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                 const std::unordered_map<IterVar, Range>& dom_map,
                                 bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);

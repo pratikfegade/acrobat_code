@@ -298,6 +298,8 @@ class Schedule : public ObjectRef {
    * \param op The operation.
    */
   TVM_DLL Stage operator[](const Operation& op);
+  TVM_DLL Stage operator[](const Operation& op) const;
+
   /*!
    * \brief Short hand for getting the stage of tensor's operation.
    * \param tensor The tensor

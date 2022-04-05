@@ -162,6 +162,20 @@ inline bool EndsWith(std::string const& value, std::string const& end) {
 }
 
 /*!
+ * \brief Check if a storage scope is local
+ * \param scope The scope string
+ * \return bool The result.
+ */
+inline bool IsLocal(std::string const& scope) { return (scope.compare(0, 5, "local") == 0); }
+
+/*!
+ * \brief Check if a storage scope is shared
+ * \param scope The scope string
+ * \return bool The result.
+ */
+inline bool IsShared(std::string const& scope) { return (scope.compare(0, 6, "shared") == 0); }
+
+/*!
  * \brief Execute the command
  * \param cmd The command we want to execute
  * \param err_msg The error message if we have

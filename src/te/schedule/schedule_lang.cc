@@ -488,6 +488,13 @@ Stage Schedule::operator[](const Operation& op) {
   return (*it).second;
 }
 
+Stage Schedule::operator[](const Operation& op) const {
+  auto it = (*this)->stage_map.find(op);
+  ICHECK(it != (*this)->stage_map.end())
+      << "Cannot find Stage for operator " << op << " in the schedule";
+  return (*it).second;
+}
+
 Stage LeastCommonAncestor(Stage g1, Stage g2) {
   if (!g1.defined()) return g1;
   if (!g2.defined()) return g2;

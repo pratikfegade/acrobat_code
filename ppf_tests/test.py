@@ -1,7 +1,7 @@
 import os
 os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
-os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
+os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "0"
 
 from tvm import te
 import argparse
@@ -33,9 +33,11 @@ I = te.placeholder((batch_size, hidden_size), name = 'I', dtype = float_dtype)
 
 ##################### Computation #####################
 k = te.reduce_axis((0, hidden_size), name = 'i_kh2h')
-O = te.compute((batch_size, hidden_size),
-               lambda n, i: te.sum(W[i, k] * I[n, k], axis = k),
-               name = 'O')
+Ol = te.compute((batch_size, hidden_size),
+                lambda n, i: te.sum(W[i, k] * I[n, k], axis = k),
+                name = 'Ol')
+
+O = te.compute((batch_size, hidden_size), lambda n, i: 2*Ol[n, k], name = 'O')
 
 ##################### Scheduling #####################
 s = te.create_schedule([O.op])
@@ -47,10 +49,11 @@ if args.target == "cuda":
     block_y = lambda: te.thread_axis("blockIdx.y")
 
     ############# Scheduling for internal nodes #############
-    hS = s.cache_read(I, 'shared', [O])
-    wS = s.cache_read(W, 'shared', [O])
+    hS = s.cache_read(I, 'shared', [Ol])
+    wS = s.cache_read(W, 'shared', [Ol])
 
-    Ol = s.cache_write(O, 'local')
+    # Ol = s.cache_write(O, 'local')
+    s[Ol].set_scope('local')
 
     x, y = s[O].leaf_iter_vars[0:2]
     xo, xi = s[O].split(x, nparts = 4)

@@ -80,8 +80,8 @@ using namespace tir;
 // input_pred will be applied to both normal reduction and
 // the writeback step.
 //
-Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Stage& stage,
-                              const std::unordered_map<IterVar, Range>& dom_map,
+Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Schedule& schedule,
+                              const Stage& stage, const std::unordered_map<IterVar, Range>& dom_map,
                               bool debug_keep_trivial_loop) {
   Array<PrimExpr> args;
   for (IterVar iv : self->axis) {
@@ -104,7 +104,7 @@ Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Stage& stage,
 
   // This computes the bound checking predicates in normal reduction.
   auto normal_preds =
-      MakeBoundCheck(stage, dom_map, value_map, false, std::unordered_set<IterVar>());
+      MakeBoundCheck(schedule, stage, dom_map, value_map, false, std::unordered_set<IterVar>());
 
   // normal_pred = input_pred && normal_pred
   PrimExpr input_pred = reduces[0]->condition;

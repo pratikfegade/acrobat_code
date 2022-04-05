@@ -939,7 +939,6 @@ class Coarsener : public ExprMutator {
 
     for (size_t i = 0; i < flattened.size(); ++i) {
       auto& p = flattened[i];
-      auto& var = p.first;
       auto& value = p.second;
       Expr cleaned_value = value;
       if (auto vn = value.as<CallNode>()) {
@@ -1006,7 +1005,7 @@ class Coarsener : public ExprMutator {
       } else {
         auto start = it->second;
         std::vector<std::pair<Var, Expr>> bindings;
-        for (size_t j = start; j <= i; ++j) {
+        for (int j = start; j <= i; ++j) {
           bindings.push_back(
               std::make_pair(flattened[j].first, RemoveOnDeviceCalls(flattened[j].second)));
         }
@@ -1200,8 +1199,6 @@ IRModule ComputeAccessModes(IRModule& mod) {
     if (it.second.as<tir::PrimFuncNode>()) {
       auto func = Downcast<tir::PrimFunc>(it.second);
       auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
-      auto num_params = func->params.size();
-      auto num_outputs = 0;
       Array<Integer> access_modes;
       for (auto param : func->params) {
         access_modes.push_back(Integer(static_cast<int>(
