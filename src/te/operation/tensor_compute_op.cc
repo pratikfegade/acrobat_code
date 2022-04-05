@@ -111,7 +111,7 @@ Operation TensorComputeOpNode::ReplaceInputs(const Operation& self,
 }
 
 void TensorComputeOpNode::PropBoundToInputs(
-    const Operation& self, arith::Analyzer* analyzer,
+    const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
     const std::unordered_map<const VarNode*, IntSet>& dom_map,
     std::unordered_map<Tensor, TensorDom>* out_dom_map) const {
   for (size_t i = 0; i < this->inputs.size(); ++i) {

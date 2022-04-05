@@ -158,7 +158,8 @@ Operation ScanOpNode::ReplaceInputs(const Operation& self,
   }
 }
 
-void ScanOpNode::PropBoundToInputs(const Operation& self, arith::Analyzer* analyzer,
+void ScanOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
+                                   arith::Analyzer* analyzer,
                                    const std::unordered_map<const VarNode*, IntSet>& dom_map,
                                    std::unordered_map<Tensor, TensorDom>* out_dom_map) const {
   ICHECK_EQ(self.operator->(), this);

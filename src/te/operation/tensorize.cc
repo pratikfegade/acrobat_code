@@ -94,7 +94,7 @@ size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
     temp_dmap[iv->var.get()] = iset;
   }
   // Input domains
-  self->PropBoundToInputs(stage->op, &analyzer, temp_dmap, &in_dom);
+  self->PropBoundToInputs(stage, stage->op, &analyzer, temp_dmap, &in_dom);
   Range none;
   for (const auto& kv : in_dom) {
     Array<Range> vec;

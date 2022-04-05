@@ -37,6 +37,7 @@
 #include <utility>
 
 #include "../../arith/interval_set.h"
+#include "../../support/utils.h"
 #include "../schedule/message_passing.h"
 #include "op_utils.h"
 
@@ -200,11 +201,12 @@ Operation ComputeOpNode::ReplaceInputs(const Operation& self,
   }
 }
 
-void ComputeOpNode::PropBoundToInputs(const Operation& self, arith::Analyzer* analyzer,
+void ComputeOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
+                                      arith::Analyzer* analyzer,
                                       const std::unordered_map<const VarNode*, IntSet>& dom_map,
                                       std::unordered_map<Tensor, TensorDom>* out_dom_map) const {
   ICHECK_EQ(self.operator->(), this);
-  auto fvisit = [&dom_map, out_dom_map, analyzer](const ObjectRef& n) {
+  auto fvisit = [&dom_map, out_dom_map, analyzer, &stage](const ObjectRef& n) {
     if (auto* pload = n.as<tir::ProducerLoadNode>()) {
       Tensor t = Downcast<Tensor>(pload->producer);
       if (t->op.defined() && out_dom_map->count(t)) {
@@ -237,9 +239,12 @@ void ComputeOpNode::PropBoundToInputs(const Operation& self, arith::Analyzer* an
               // In the case when the tensor name contains ".shared", we do not
               // shrink its bounds. Because to support local padding, the size
               // of the local workspace must be preserved in FULL.
+              // if ((!dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) ||
+              //      !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
+              //     std::regex_match(std::string(t->op->name), std::regex("(.*)[.]shared"))) {
               if ((!dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) ||
                    !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
-                  std::regex_match(std::string(t->op->name), std::regex("(.*)[.]shared"))) {
+                  support::IsShared(stage->scope)) {
                 min_value = shape_i_min_value;
                 max_value = shape_i_max_value;
               }

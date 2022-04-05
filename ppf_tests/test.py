@@ -1,7 +1,7 @@
 import os
 os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
-os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "0"
+os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
 
 from tvm import te
 import argparse
@@ -85,8 +85,8 @@ if args.target == "cuda":
     s[wS].bind(s[wS].leaf_iter_vars[2], thread_x())
 
 print_after_passes = [
-    # "tir.VectorizeLoop",
-    # "tir.VerifyMemory",
+    "tir.NarrowDataType",
+    "tir.InjectPrefetch",
     # "tir.LowerThreadAllreduce",
     # "tir.LowerThreadAllreduce",
     # "tir.SplitHostDevice"

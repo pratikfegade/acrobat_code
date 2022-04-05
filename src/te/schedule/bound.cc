@@ -199,7 +199,7 @@ void InferRootBound(const Stage& stage, const GraphContext& ctx,
       }
       analyzer.Bind(iv->var, r, true);
     }
-    op->PropBoundToInputs(op, &analyzer, dom_map, &tmap);
+    op->PropBoundToInputs(op_stage, op, &analyzer, dom_map, &tmap);
   }
   stage->op->GatherBound(stage->op, tmap, rmap);
 }
