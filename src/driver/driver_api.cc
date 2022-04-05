@@ -257,11 +257,41 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.insert(pass_list.end(), user_lower_phase1.begin(), user_lower_phase1.end());
 
   // PHASE 2
-  if (!disable_loop_partition) {
-    pass_list.push_back(tir::transform::LoopPartition());
+
+  // <DietCode>
+  //
+  // If loop partitioning is about to take place, it must happen AFTER loop
+  // vectorization.
+  //
+  // Consider the following example: Let X be an input that is to be loaded and
+  // has shape dimension [*, 770]. Assuming that a tile of X of size 128×128 is
+  // to be loaded with a vector of size 4.
+  //
+  // Without any optimizations, the vectorization will be disabled since the
+  // vectorizer will figure out that
+  //
+  //     ((770 % 128) = 2) % 4 ≠ 0
+  //
+  // However, if loop partitioning has been enabled, then the last (770 % 128) =
+  // 2 iterations will be peeled off, with the first 768 iterations done using a
+  // vector of size 4. This works fine for the first row of X, but starting from
+  // the second row, X has a storage alignment of 770, which does NOT align with
+  // the vector size, leading to runtime errors.
+  //
+  // Therefore, we should let the vectorizer to run first before the partitioner
+  // to check various constraints such as alignment.
+  if (dmlc::GetEnv("DIETCODE_DO_LOOP_PARTITIONING", 0)) {
+    pass_list.push_back(tir::transform::VectorizeLoop(!disable_vectorize));
+    if (!disable_loop_partition) {
+      pass_list.push_back(tir::transform::LoopPartition());
+    }
+  } else {
+    if (!disable_loop_partition) {
+      pass_list.push_back(tir::transform::LoopPartition());
+    }
+    pass_list.push_back(tir::transform::VectorizeLoop(!disable_vectorize));
   }
 
-  pass_list.push_back(tir::transform::VectorizeLoop(!disable_vectorize));
   pass_list.push_back(tir::transform::InjectVirtualThread());
   pass_list.push_back(tir::transform::InjectDoubleBuffer());
   pass_list.push_back(tir::transform::StorageRewrite());

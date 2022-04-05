@@ -92,6 +92,86 @@ class VecAllocAccess : public StmtExprMutator {
   int var_lanes_;
 };
 
+// <DietCode>
+//
+// The class that performs local padding.
+namespace {
+class LocalPadder : public StmtExprMutator {
+ private:
+  // As is commented in the `MakeBoundCheck` function call, we have to *inline*
+  // predicates as part of the StoreNode's for local padding, where by *inline*
+  // we mean the following:
+  //
+  //     if (cond) X_shared[...] = X[...]; ⇒ X_shared[...] = cond ? X[...] : 0;
+  //
+  // However, note that we cannot directly inline all the predicates, for
+  // example, if the predicates are in the format of
+  //
+  //     if (threadIdx.x < ...)
+  //
+  // then we cannot inline it, as doing so would cause a thread to overwrite the
+  // shared memory blocks that belong to others (similarly for other formats
+  // that only depend on threadIdx.x). For predicates that do not fall into this
+  // category, we put them on a stack and inline them upon seeing a StoreNode.
+  Stmt VisitStmt_(const IfThenElseNode* op) final {
+    if (!CanLocalPad(op->condition) || !is_no_op(op->else_case)) {
+      if (op->else_case.defined()) {
+        return IfThenElse(op->condition, VisitStmt(op->then_case), VisitStmt(op->else_case));
+      } else {
+        return IfThenElse(op->condition, VisitStmt(op->then_case));
+      }
+    }
+    predicate_stack_.push_back(op->condition);
+    Stmt body_stmt_with_inlined_predicates = VisitStmt(op->then_case);
+    predicate_stack_.pop_back();
+    return body_stmt_with_inlined_predicates;
+  }
+  Stmt VisitStmt_(const StoreNode* op) final {
+    // merge all the predicates on stack
+    PrimExpr merged_predicate;
+    for (PrimExpr pred : predicate_stack_) {
+      if (!merged_predicate.defined()) {
+        merged_predicate = pred;
+      } else {
+        merged_predicate = merged_predicate && pred;
+      }
+    }
+    if (!merged_predicate.defined()) {
+      return StmtExprMutator::VisitStmt_(op);
+    }
+    ICHECK(op->value.dtype().is_float())
+        << "The current implementation assumes that the data type is FP32";
+    return Store(op->buffer_var, Select(merged_predicate, op->value, PrimExpr(0.f)), op->index,
+                 op->predicate);
+  }
+  PrimExpr VisitExpr_(const VarNode* op) final {
+    if (!substitute_mode_ || op->name_hint != "threadIdx.x") {
+      return StmtExprMutator::VisitExpr_(op);
+    }
+    return Integer(0);
+  }
+
+ public:
+  /**
+   * @brief Check whether can perform local padding on the if-condition. This is
+   *        done by testing whether the condition's only dependency is
+   *        threadIdx.x. If tested true, then local padding is NOT allowed.
+   */
+  bool CanLocalPad(const PrimExpr& cond) {
+    substitute_mode_ = true;
+    PrimExpr subsituted_cond = analyzer.Simplify(VisitExpr(cond));
+    substitute_mode_ = false;
+    return !subsituted_cond.as<IntImmNode>();
+  }
+
+ private:
+  bool substitute_mode_ = false;
+  arith::Analyzer analyzer;
+  // predicate stack, constructed by traversing down the if-nest
+  std::vector<PrimExpr> predicate_stack_;
+};
+}  // anonymous namespace
+
 // We use ExprFunctor directly instead of StmtExprMutator
 // This is because the transformation can change the dtype of the Expr
 // The existing ExprMutator transformation rules may not be well defined.
@@ -101,7 +181,12 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   using StmtMutator::operator();
 
   Vectorizer(Var var, int var_lanes) : var_(var), var_lanes_(var_lanes) {
-    ramp_ = Ramp(0, 1, var_lanes);
+    if (var_lanes == 1) {
+      ramp_ = Integer(0);
+    } else {
+      ramp_ = Ramp(0, 1, var_lanes);
+    }
+    // ramp_ = Ramp(0, 1, var_lanes);
   }
 
   Stmt VisitStmt(const Stmt& stmt) final {
@@ -419,6 +504,29 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   Stmt VisitStmt_(const IfThenElseNode* op) final {
     ICHECK(!op->condition.dtype().is_vector());
     PrimExpr condition = this->VisitExpr(op->condition);
+
+    // <DietCode>
+    //
+    // Do NOT perform vectorization load in the case of local padding. The
+    // reason is two-fold:
+    //
+    // - Our evaluations show that vectorized loads are NOT able to
+    //   significantly improve the performance of the generated CUDA kernels on
+    //   modern GPUs.
+    // - Vectorized loads, if working together with local padding, can greatly
+    //   complicate the generated CUDA kernels. The reason is because a vector
+    //   can have some values loaded from the global memory while some that are
+    //   padded. Such situation is challenging to handle in the code generation
+    //   process.
+    //
+    // Therefore, upon seeing an IfThenElseNode, we directly scalarize its body
+    // (i.e., transform the vectorized loop into the equivalent serial version).
+    LocalPadder local_padder;
+    if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) && dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1) &&
+        local_padder.CanLocalPad(condition)) {
+      return local_padder(Scalarize(GetRef<Stmt>(op)));
+    }
+
     if (condition.dtype().is_vector()) {
       return Scalarize(GetRef<Stmt>(op));
     }

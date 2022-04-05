@@ -111,7 +111,13 @@ std::vector<std::vector<Stmt> > MakeLoopNest(const Stage& stage,
               AttrStmt(iv, tir::attr::pragma_scope_prefix + pkey, pvalue, no_op));
         }
       }
-      if (!debug_keep_trivial_loop && is_one(dom->extent)) {
+      // <DietCode>
+      //
+      // Need to keep trivialized vectorized loop for local padding.
+      bool keep_trivial_vectorized_loop = dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) &&
+                                          dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1) &&
+                                          (kind == ForKind::kVectorized);
+      if (!debug_keep_trivial_loop && is_one(dom->extent) && !keep_trivial_vectorized_loop) {
         nest[i + 1].emplace_back(LetStmt(var, cast(var.dtype(), dom->min), no_op));
         value_map[iv] = cast(var.dtype(), dom->min);
       } else if (is_zero(dom->min)) {

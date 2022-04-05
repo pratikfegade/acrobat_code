@@ -78,9 +78,12 @@ class BoundDeducer : public ExprVisitor {
   BoundDeducer(PrimExpr target, PrimExpr expr,
                const std::unordered_map<const VarNode*, IntSet>& hint_map,
                const std::unordered_map<const VarNode*, IntSet>& relax_map)
-      : target_(target), expr_(expr), hint_map_(hint_map), relax_map_(relax_map) {}
+      : expr_(expr), target_(target), hint_map_(hint_map), relax_map_(relax_map) {}
 
   void Deduce();
+
+  // <DietCode>
+  void DeduceRelaxedPredicate();
 
   void VisitExpr(const PrimExpr& e) final {
     if (!success_) return;
@@ -219,6 +222,8 @@ class BoundDeducer : public ExprVisitor {
     this->VisitExpr(op->a);
   }
 
+  PrimExpr expr_;
+  PrimExpr relaxed_predicate_;
   PrimExpr result_;
   CompareOp comp_op{kGreater};
   bool success_{true};
@@ -229,7 +234,6 @@ class BoundDeducer : public ExprVisitor {
   void Relax();
   CompareOp ReverseOp(CompareOp comp_op);
   PrimExpr target_;
-  PrimExpr expr_;
   const std::unordered_map<const VarNode*, IntSet>& hint_map_;
   const std::unordered_map<const VarNode*, IntSet>& relax_map_;
   ExprIntSetMap expr_map_;
@@ -343,26 +347,35 @@ void BoundDeducer::Transform() {
 void BoundDeducer::Deduce() {
   Init();
   if (!success_) {
-    std::cout << "[BD]   Failuire after init" << std::endl;
+    // std::cout << "[BD]   Failuire after init" << std::endl;
     return;
   }
 
   Relax();
   if (!success_) {
-    std::cout << "[BD]   Failuire after relaxation" << std::endl;
+    // std::cout << "[BD]   Failuire after relaxation" << std::endl;
     return;
   }
   // get the path
   path_ = GetPath(target_, expr_);
   if (!path_.size()) {
-    std::cout << "[BD]   Failuire becasue path length" << std::endl;
+    // std::cout << "[BD]   Failuire becasue path length" << std::endl;
     success_ = false;
     return;
   }
   expr_map_ = EvalSetForEachSubExpr(expr_, hint_map_);
 
-  std::cout << "[BD]   Visiting " << expr_ << " " << result_ << std::endl;
+  // std::cout << "[BD]   Visiting " << expr_ << " " << result_ << std::endl;
   this->VisitExpr(expr_);
+}
+
+// <DietCode>
+void BoundDeducer::DeduceRelaxedPredicate() {
+  // do the same initialization and relaxation as before
+  Init();
+  if (!success_) return;
+  Relax();
+  if (!success_) return;
 }
 
 void BoundDeducer::Relax() {
@@ -384,10 +397,32 @@ void BoundDeducer::Relax() {
   result_ = (comp_op == kGreater) ? b.max() : b.min();
 }
 
+// <DietCode>
+//
+// Please refer to the comments in `tir/transforms/loop_partition.cc` as of why
+// this function is needed.
+PrimExpr DeduceRelaxedPredicate(Var var, PrimExpr predicate,
+                                const std::unordered_map<const VarNode*, IntSet>& hint_map,
+                                const std::unordered_map<const VarNode*, IntSet>& relax_map) {
+  BoundDeducer d(var, predicate, hint_map, relax_map);
+  d.DeduceRelaxedPredicate();
+  if (!d.success_) {
+    return PrimExpr();
+  }
+  Analyzer analyzer;
+  if (d.comp_op == kGreater) {
+    return analyzer.Simplify(d.expr_ > d.result_);
+  } else if (d.comp_op == kLess) {
+    return analyzer.Simplify(d.expr_ < d.result_);
+  }
+  // if (d.comp_op == kEqual)
+  return analyzer.Simplify(d.expr_ == d.result_);
+}
+
 IntSet DeduceBound(PrimExpr v, PrimExpr e,
                    const std::unordered_map<const VarNode*, IntSet>& hint_map,
                    const std::unordered_map<const VarNode*, IntSet>& relax_map) {
-  std::cout << "[BD]  Deducing bounds: " << v << " " << e << std::endl;
+  // std::cout << "[BD]  Deducing bounds: " << v << " " << e << std::endl;
   BoundDeducer d(v, e, hint_map, relax_map);
   d.Deduce();
   if (!d.success_) return IntSet::Nothing();

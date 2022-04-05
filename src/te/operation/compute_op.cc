@@ -31,6 +31,7 @@
 #include <tvm/tir/expr.h>
 #include <tvm/tir/stmt_functor.h>
 
+#include <regex>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -228,8 +229,20 @@ void ComputeOpNode::PropBoundToInputs(const Operation& self, arith::Analyzer* an
             if ((arith::is_pos_inf(max_value) && arith::is_neg_inf(min_value)) ||
                 (analyzer->CanProve(shape_i_min_value >= min_value) &&
                  analyzer->CanProve(shape_i_max_value <= max_value))) {
-              min_value = shape_i_min_value;
-              max_value = shape_i_max_value;
+              // min_value = shape_i_min_value;
+              // max_value = shape_i_max_value;
+
+              // <DietCode>
+              //
+              // In the case when the tensor name contains ".shared", we do not
+              // shrink its bounds. Because to support local padding, the size
+              // of the local workspace must be preserved in FULL.
+              if ((!dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) ||
+                   !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
+                  std::regex_match(std::string(t->op->name), std::regex("(.*)[.]shared"))) {
+                min_value = shape_i_min_value;
+                max_value = shape_i_max_value;
+              }
             }
             dom.data[i].push_back(IntSet::Interval(min_value, max_value));
           } else {

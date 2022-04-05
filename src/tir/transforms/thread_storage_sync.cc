@@ -97,7 +97,21 @@ class ThreadSyncPlanner : public StorageAccessVisitor {
         }
       }
       if (sync_before_stmt) {
-        ICHECK_EQ(condition_counter(), 0) << "Cannot insert syncs inside condition";
+        // <DietCode>
+        //
+        // In the case of loop partitioning, need to enable synchronization
+        // inside conditional statements. This happens as we partition a spatial
+        // axis (which is bound to blockIdx.x). Depending on the value of
+        // blockIdx.x, the body is partitioned into two regions (or more), some
+        // with predicates while others do not. Since whether to enter the
+        // partitioned regions or not depends sololy on blockIdx.x, all threads
+        // in the same block will still execute the same body statements.
+        // Therefore, enableing synchronization inside conditional statements in
+        // this case would NOT lead to program errors.
+        if (!dmlc::GetEnv("DIETCODE_DO_LOOP_PARTITIONING", 0)) {
+          ICHECK_EQ(condition_counter(), 0) << "Cannot insert syncs inside condition";
+        }
+
         syncs_inserted_.insert(s.stmt);
       }
     }
@@ -124,7 +138,10 @@ class ThreadSyncPlanner : public StorageAccessVisitor {
           }
         }
         if (sync_before_stmt) {
-          ICHECK_EQ(condition_counter(), 0) << "Cannot insert syncs inside condition";
+          // ditto
+          if (!dmlc::GetEnv("DIETCODE_DO_LOOP_PARTITIONING", 0)) {
+            ICHECK_EQ(condition_counter(), 0) << "Cannot insert syncs inside condition";
+          }
           syncs_inserted_.insert(s.stmt);
           break;
         }
