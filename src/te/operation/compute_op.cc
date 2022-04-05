@@ -231,9 +231,6 @@ void ComputeOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
             if ((arith::is_pos_inf(max_value) && arith::is_neg_inf(min_value)) ||
                 (analyzer->CanProve(shape_i_min_value >= min_value) &&
                  analyzer->CanProve(shape_i_max_value <= max_value))) {
-              // min_value = shape_i_min_value;
-              // max_value = shape_i_max_value;
-
               // <DietCode>
               //
               // In the case when the tensor name contains ".shared", we do not
@@ -358,10 +355,10 @@ Stmt MakeProvide(const ComputeOpNode* op, const Tensor& t) {
 
 Stmt MakeComputeStmt(const ComputeOpNode* self, const Schedule& schedule, const Stage& stage,
                      const std::unordered_map<IterVar, Range>& dom_map,
-                     bool debug_keep_trivial_loop) {
+                     const Map<Var, Range>& user_constraints, bool debug_keep_trivial_loop) {
   // grab the nest structure
-  ComputeLoopNest n =
-      ComputeLoopNest::Create(self, schedule, stage, dom_map, debug_keep_trivial_loop);
+  ComputeLoopNest n = ComputeLoopNest::Create(self, schedule, stage, dom_map, user_constraints,
+                                              debug_keep_trivial_loop);
   // Normal loop structure
   n.init_nest.emplace_back(MakeIfNest(n.init_predicates));
   n.main_nest.emplace_back(MakeIfNest(n.main_predicates));
@@ -441,30 +438,34 @@ ComputeType DetectComputeType(const ComputeOpNode* self, const Stage& stage) {
 // implement the provide utility.
 Stmt ComputeOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                  const std::unordered_map<IterVar, Range>& dom_map,
+                                 const Map<Var, Range>& user_contraints,
                                  bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);
   ComputeType ctype = DetectComputeType(this, stage);
   if (ctype == ComputeType::kCrossThreadReduction) {
     // specially handle cross thread reduction.
-    return MakeCrossThreadReduction(this, schedule, stage, dom_map, debug_keep_trivial_loop);
+    return MakeCrossThreadReduction(this, schedule, stage, dom_map, user_contraints,
+                                    debug_keep_trivial_loop);
   } else if (ctype == ComputeType::kTensorize) {
-    return MakeTensorize(this, schedule, stage, dom_map, debug_keep_trivial_loop);
+    return MakeTensorize(this, schedule, stage, dom_map, user_contraints, debug_keep_trivial_loop);
   } else {
-    return MakeComputeStmt(this, schedule, stage, dom_map, debug_keep_trivial_loop);
+    return MakeComputeStmt(this, schedule, stage, dom_map, user_contraints,
+                           debug_keep_trivial_loop);
   }
 }
 
 ComputeLoopNest ComputeLoopNest::Create(const BaseComputeOpNode* self, const Schedule& schedule,
                                         const Stage& stage,
                                         const std::unordered_map<IterVar, Range>& dom_map,
+                                        const Map<Var, Range>& user_contraints,
                                         bool debug_keep_trivial_loop) {
   ICHECK_EQ(stage->op.operator->(), self);
   ComputeLoopNest ret;
   // make main loop nest
   ret.main_nest = MakeLoopNest(stage, dom_map, 0, false, std::unordered_set<IterVar>(),
                                &ret.main_vmap, debug_keep_trivial_loop);
-  ret.main_predicates =
-      MakeBoundCheck(schedule, stage, dom_map, ret.main_vmap, false, std::unordered_set<IterVar>());
+  ret.main_predicates = MakeBoundCheck(schedule, stage, dom_map, ret.main_vmap, false,
+                                       std::unordered_set<IterVar>(), user_contraints);
   for (auto& e : ret.main_predicates) {
     e = likely(e);
   }
@@ -504,8 +505,8 @@ ComputeLoopNest ComputeLoopNest::Create(const BaseComputeOpNode* self, const Sch
     }
     ret.init_nest = MakeLoopNest(stage, dom_map, begin_loop, true, skip_iter, &(ret.init_vmap),
                                  debug_keep_trivial_loop);
-    ret.init_predicates =
-        MakeBoundCheck(schedule, stage, dom_map, ret.init_vmap, !stage->rolling_buffer, skip_iter);
+    ret.init_predicates = MakeBoundCheck(schedule, stage, dom_map, ret.init_vmap,
+                                         !stage->rolling_buffer, skip_iter, user_contraints);
     for (auto& e : ret.init_predicates) {
       e = likely(e);
     }

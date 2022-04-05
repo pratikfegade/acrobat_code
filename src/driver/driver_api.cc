@@ -343,7 +343,8 @@ Array<transform::Pass> AddPrintPasses(const Array<transform::Pass>& pass_list,
 // Convert te schedule to IRModule
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                           const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                          const Map<te::Tensor, tir::Buffer>& scatter_buffers) {
+                          const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                          const Map<tir::Var, Range>& user_constraints) {
   sch = sch.normalize();
 
   transform::PassContext pass_ctx = transform::PassContext::Current();
@@ -351,7 +352,8 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
       pass_ctx->GetConfig<Bool>("tir.debug_keep_trivial_loop", Bool(false)).value();
 
   // Before TIR transformation.
-  tir::Stmt stmt = te::ScheduleOps(sch, te::InferBound(sch), debug_keep_trivial_loop);
+  tir::Stmt stmt =
+      te::ScheduleOps(sch, te::InferBound(sch), user_constraints, debug_keep_trivial_loop);
   bool compact = te::VerifyCompactBuffer(stmt);
 
   Map<te::Tensor, tir::Buffer> out_binds;
@@ -389,7 +391,9 @@ IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const 
 
 TVM_REGISTER_GLOBAL("driver.schedule_to_module")
     .set_body_typed([](te::Schedule sch, const Array<ObjectRef>& args, const String& name,
-                       const Map<te::Tensor, tir::Buffer>& binds) {
+                       const Map<te::Tensor, tir::Buffer>& binds,
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                       const Map<tir::Var, Range>& user_constraints) {
       std::unordered_map<te::Tensor, tir::Buffer> c_binds;
       // Check to make sure binds is not null before doing the conversion;
       if (binds.defined()) {
@@ -397,8 +401,10 @@ TVM_REGISTER_GLOBAL("driver.schedule_to_module")
           c_binds.insert({kv.first, kv.second});
         }
       }
+      // IRModule mod = ScheduleToModule(std::move(sch), args, name, c_binds,
+      // Map<te::Tensor, tir::Buffer>(), user_constraints);
       IRModule mod =
-          ScheduleToModule(std::move(sch), args, name, c_binds, Map<te::Tensor, tir::Buffer>());
+          ScheduleToModule(std::move(sch), args, name, c_binds, scatter_buffers, user_constraints);
       return mod;
     });
 
@@ -434,20 +440,23 @@ TVM_REGISTER_GLOBAL("driver.lower_primfunc")
 
 IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args, const std::string& name,
                        const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                       const Map<tir::Var, Range>& user_constraints, bool simple_mode,
                        const Array<String>& print_after_passes) {
   Array<ObjectRef> ref_args;
   for (ObjectRef x : args) {
     ref_args.push_back(x);
   }
-  return LowerSchedule(std::move(sch), ref_args, name, binds, scatter_buffers);
+  return LowerSchedule(std::move(sch), ref_args, name, binds, scatter_buffers, user_constraints);
 }
 
 IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                        const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                       const Map<te::Tensor, tir::Buffer>& scatter_buffers, bool simple_mode,
+                       const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                       const Map<tir::Var, Range>& user_constraints, bool simple_mode,
                        const Array<String>& print_after_passes) {
-  IRModule mod = ScheduleToModule(std::move(sch), args, name, binds, scatter_buffers);
+  IRModule mod =
+      ScheduleToModule(std::move(sch), args, name, binds, scatter_buffers, user_constraints);
   // Get the legacy TE pass list
   Array<transform::Pass> pass_list = CreatePassList(simple_mode);
   auto list = AddPrintPasses(pass_list, print_after_passes);
@@ -459,6 +468,7 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
     .set_body_typed([](te::Schedule sch, const Array<ObjectRef>& args, const String& name,
                        const Map<te::Tensor, tir::Buffer>& binds, bool simple_mode,
                        const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                       const Map<tir::Var, Range> user_constraints,
                        const Array<String>& print_after_passes) {
       std::unordered_map<te::Tensor, tir::Buffer> c_binds;
       // Check to make sure binds is not null before doing the conversion;
@@ -467,8 +477,8 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
           c_binds.insert({kv.first, kv.second});
         }
       }
-      auto mod = LowerSchedule(std::move(sch), args, name, c_binds, scatter_buffers, simple_mode,
-                               print_after_passes);
+      auto mod = LowerSchedule(std::move(sch), args, name, c_binds, scatter_buffers,
+                               user_constraints, simple_mode, print_after_passes);
       // std::cout << "[RET] " << mod << std::endl;
       return mod;
     });

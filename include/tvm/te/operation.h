@@ -138,11 +138,15 @@ class TVM_DLL OperationNode : public Object {
    * \param schedule The schedule.
    * \param stage The schedule stage of the op.
    * \param dom_map The domain map of all iteration domains.
+   * \param user_constraints A set of range constraints on variables
+   *                         provided by the user, especially for
+   *                         variables used as extents of loops.
    * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
    * \return A statement that add production and wraps consumer.
    */
   virtual Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                             const std::unordered_map<IterVar, Range>& dom_map,
+                            const Map<Var, Range>& user_constraints,
                             bool debug_keep_trivial_loop) const = 0;
 
   static constexpr const char* _type_key = "Operation";
@@ -176,6 +180,7 @@ class PlaceholderOpNode : public OperationNode {
                     const Stmt& body, String storage_scope = "") const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
 
   void VisitAttrs(AttrVisitor* v) {
@@ -245,6 +250,7 @@ class TVM_DLL ComputeOpNode : public BaseComputeOpNode {
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
   size_t num_schedulable_dims() const final;
 
@@ -301,6 +307,7 @@ class TensorComputeOpNode : public BaseComputeOpNode {
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
   size_t num_schedulable_dims() const final;
 
@@ -381,6 +388,7 @@ class ScanOpNode : public OperationNode {
                     const Stmt& body, String storage_scope = "") const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
 
   void VisitAttrs(AttrVisitor* v) {
@@ -445,6 +453,7 @@ class ExternOpNode : public OperationNode {
                     const Stmt& body, String storage_scope = "") const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
 
   void VisitAttrs(AttrVisitor* v) {
@@ -511,6 +520,7 @@ class HybridOpNode : public OperationNode {
                     const Stmt& body, String storage_scope = "") const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
                     const std::unordered_map<IterVar, Range>& dom_map,
+                    const Map<Var, Range>& user_constraints,
                     bool debug_keep_trivial_loop) const final;
 
   void VisitAttrs(AttrVisitor* v) {

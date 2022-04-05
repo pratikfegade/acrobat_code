@@ -258,6 +258,7 @@ Stmt ScanOpNode::BuildRealize(const Stage& stage, const std::unordered_map<IterV
 
 Stmt ScanOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                               const std::unordered_map<IterVar, Range>& dom_map,
+                              const Map<Var, Range>& user_constraints,
                               bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);
   Stmt provide =
@@ -274,7 +275,8 @@ Stmt ScanOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
   std::unordered_set<IterVar> empty;
   auto nest = MakeLoopNest(stage, dom_map, 0, false, empty, &vmap, debug_keep_trivial_loop);
   nest[begin_scan].push_back(init);
-  nest.push_back(MakeIfNest(MakeBoundCheck(schedule, stage, dom_map, vmap, false, empty)));
+  nest.push_back(
+      MakeIfNest(MakeBoundCheck(schedule, stage, dom_map, vmap, false, empty, user_constraints)));
   return MergeNest(nest, provide);
 }
 }  // namespace te

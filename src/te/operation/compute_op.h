@@ -57,12 +57,16 @@ struct ComputeLoopNest {
    * \param schedule The schedule.
    * \param stage The scxhedule stage.
    * \param dom_map The domain map.
+   * \param user_constraints A set of range constraints on variables
+   *                         provided by the user, especially for
+   *                         variables used as extents of loops.
    * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
    * \return The constructed loop nest
    */
   static ComputeLoopNest Create(const BaseComputeOpNode* self, const Schedule& schedule,
                                 const Stage& stage,
                                 const std::unordered_map<IterVar, Range>& dom_map,
+                                const Map<Var, Range>& user_constraints,
                                 bool debug_keep_trivial_loop);
 };
 
@@ -72,11 +76,15 @@ struct ComputeLoopNest {
  * \param schedule The schedule.
  * \param stage The schedule stage.
  * \param dom_map The domain map.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
  * \return The created statement.
  */
 Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Schedule& schedule,
                               const Stage& stage, const std::unordered_map<IterVar, Range>& dom_map,
+                              const Map<Var, Range>& user_constraints,
                               bool debug_keep_trivial_loop);
 
 /*!
@@ -85,11 +93,15 @@ Stmt MakeCrossThreadReduction(const ComputeOpNode* self, const Schedule& schedul
  * \param schedule The schedule.
  * \param stage The schedule stage.
  * \param dom_map The domain map.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \param debug_keep_trivial_loop Whether keep trivial loops with extent of 1
  * \return The created statement.
  */
 Stmt MakeTensorize(const ComputeOpNode* self, const Schedule& schedule, const Stage& stage,
-                   const std::unordered_map<IterVar, Range>& dom_map, bool debug_keep_trivial_loop);
+                   const std::unordered_map<IterVar, Range>& dom_map,
+                   const Map<Var, Range>& user_constraints, bool debug_keep_trivial_loop);
 
 /*!
  * \brief Transform the update part when there is no init func in tensorizing

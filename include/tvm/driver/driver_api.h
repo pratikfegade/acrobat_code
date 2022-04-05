@@ -108,6 +108,10 @@ TVM_DLL IRModule LowerPrimFunc(tvm::tir::PrimFunc func, const std::string& name,
  * \param args The arguments to the function.
  * \param name The name of the lowered function.
  * \param binds Buffer assignments.
+ * \param scatter_buffers Mapping from to buffers holding scattered pointers.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \param simple_mode Disables the loop partition pass. Defaults to false.
  * \return The result module.
  */
@@ -116,6 +120,7 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args,
                                const std::string& name,
                                const std::unordered_map<te::Tensor, tir::Buffer>& binds,
                                const Map<te::Tensor, tir::Buffer>& scatter_buffers = {},
+                               const Map<tir::Var, Range>& user_constraints = {},
                                bool simple_mode = false,
                                const Array<String>& print_after_passes = {});
 
@@ -126,6 +131,10 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<te::Tensor>& args,
  * \param args The arguments to the function (Array of Tensor, Buffer and Vars)
  * \param name The name of the lowered function.
  * \param binds Buffer assignments.
+ * \param scatter_buffers Mapping from to buffers holding scattered pointers.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \param simple_mode Disables the loop partition pass. Defaults to false.
  * \return The result module.
  */
@@ -133,6 +142,7 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args,
                                const std::string& name,
                                const std::unordered_map<te::Tensor, tir::Buffer>& binds,
                                const Map<te::Tensor, tir::Buffer>& scatter_buffers = {},
+                               const Map<tir::Var, Range>& user_constraints = {},
                                bool simple_mode = false,
                                const Array<String>& print_after_passes = {});
 
@@ -143,11 +153,16 @@ TVM_DLL IRModule LowerSchedule(te::Schedule sch, const Array<ObjectRef>& args,
  * \param args The arguments to the function.
  * \param name The name of the lowered function.
  * \param binds Buffer assignments.
+ * \param scatter_buffers Mapping from to buffers holding scattered pointers.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \return The result module.
  */
 IRModule ScheduleToModule(te::Schedule sch, const Array<ObjectRef>& args, const std::string& name,
                           const std::unordered_map<te::Tensor, tir::Buffer>& binds,
-                          const Map<te::Tensor, tir::Buffer>& scatter_buffers);
+                          const Map<te::Tensor, tir::Buffer>& scatter_buffers,
+                          const Map<tir::Var, Range>& user_constraints);
 /*!
  * \brief Build a device and host module for a specific target from an IRModule.
  * \param funcs The functions to be built.

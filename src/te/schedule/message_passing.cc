@@ -547,7 +547,8 @@ std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stag
                                      const Map<IterVar, Range>& dom_map,
                                      const std::unordered_map<IterVar, PrimExpr>& value_map,
                                      bool skip_ivar_domain,
-                                     const std::unordered_set<IterVar>& skip_iter) {
+                                     const std::unordered_set<IterVar>& skip_iter,
+                                     const Map<Var, Range>& user_constraints) {
   arith::Analyzer analyzer;
 
   std::unordered_map<IterVar, bool> bound_state;
@@ -566,6 +567,10 @@ std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stag
 
   for (auto entry : dom_map) {
     analyzer.Bind(entry.first->var, entry.second);
+  }
+
+  for (auto entry : user_constraints) {
+    analyzer.Bind(entry.first, entry.second);
   }
 
   // record the iteration variables with predicates

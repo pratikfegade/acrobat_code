@@ -141,6 +141,7 @@ Stmt ExternOpNode::BuildRealize(const Stage& stage,
 
 Stmt ExternOpNode::BuildProvide(const Schedule& schedule, const Stage& stage,
                                 const std::unordered_map<IterVar, Range>& dom_map,
+                                const Map<Var, Range>& user_constraints,
                                 bool debug_keep_trivial_loop) const {
   ICHECK_EQ(stage->op.operator->(), this);
   Stmt ret = AttrStmt(make_zero(DataType::Int(32)), tir::attr::extern_scope, 0, this->body);

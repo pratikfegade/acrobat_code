@@ -1279,7 +1279,7 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
 
     auto mod = ScheduleToModule(sch, Array<ObjectRef>{tensors.begin(), tensors.end()}, name,
                                 std::unordered_map<te::Tensor, te::Buffer>(),
-                                Map<te::Tensor, tir::Buffer>());
+                                Map<te::Tensor, tir::Buffer>(), Map<tir::Var, Range>());
 
     bool disable_vectorize =
         pass_ctx->GetConfig<Bool>("tir.disable_vectorize", Bool(false)).value();

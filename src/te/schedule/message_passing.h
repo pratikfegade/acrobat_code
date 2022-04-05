@@ -109,13 +109,17 @@ void PassDownBitMaskOr(const Stage& stage, std::unordered_map<IterVar, int>* p_s
  * \param value_map The value map of the root iter var.
  * \param skip_ivar_domain Whether we skip check for IterVar's original domain.
  * \param skip_iter The set of variables to skip bound condition.
+ * \param user_constraints A set of range constraints on variables
+ *                         provided by the user, especially for
+ *                         variables used as extents of loops.
  * \return List of predicates that we need to check.
  */
 std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stage,
                                      const Map<IterVar, Range>& dom_map,
                                      const std::unordered_map<IterVar, PrimExpr>& value_map,
                                      bool skip_ivar_domain,
-                                     const std::unordered_set<IterVar>& skip_iter);
+                                     const std::unordered_set<IterVar>& skip_iter,
+                                     const Map<Var, Range>& user_constraints = {});
 
 }  // namespace te
 }  // namespace tvm

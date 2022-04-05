@@ -97,6 +97,7 @@ def lower(
     binds: Optional[Mapping[tensor.Tensor, Buffer]] = None,
     simple_mode: bool = False,
     scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]] = None,
+    user_constraints: Optional[Mapping[tvm.tir.Var, tvm.ir.Range]] = None,
     print_after_passes: Optional[List[str]] = []
 ) -> IRModule:
     """Lowering step before build into target.
@@ -118,6 +119,13 @@ def lower(
         requirement of the function. By default, a new compact buffer is created
         for each tensor in the argument.
 
+    scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]]
+        Mapping from to buffers holding scattered pointers.
+
+    user_constraints: Optional[Mapping[tir.Var, Range]]
+       A set of range constraints on variables provided by the user,
+       especially for variables used as extents of loops.
+
     simple_mode : bool
         Whether only output simple and compact statement, this will skip
         LoopPartition, api wrapper generation and Unrolling.
@@ -126,13 +134,15 @@ def lower(
     -------
     m : IRModule
        The result IRModule
+
     """
     if isinstance(inp, IRModule):
         return ffi.lower_module(inp, simple_mode)
     if isinstance(inp, PrimFunc):
         return ffi.lower_primfunc(inp, name, simple_mode)
     if isinstance(inp, schedule.Schedule):
-        return ffi.lower_schedule(inp, args, name, binds, simple_mode, scatter_buffers, print_after_passes)
+        return ffi.lower_schedule(inp, args, name, binds, simple_mode, scatter_buffers,
+                                  user_constraints, print_after_passes)
     raise ValueError("Expected input to be an IRModule, PrimFunc or Schedule, but got, ", type(inp))
 
 
@@ -147,6 +157,7 @@ def build(
     name: Optional[str] = "default_function",
     binds: Optional[Mapping[tensor.Tensor, Buffer]] = None,
     scatter_buffers: Optional[Mapping[tensor.Tensor, Buffer]] = None,
+    user_constraints: Optional[Mapping[tvm.tir.Var, tvm.ir.Range]] = None,
     print_after_passes: Optional[List[str]] = None
 ):
     """Build a function with arguments as signature. Code will be generated
@@ -227,7 +238,7 @@ def build(
         if args is None:
             raise ValueError("args must be given for build from schedule")
         input_mod = lower(inputs, args, name=name, binds=binds, scatter_buffers=scatter_buffers,
-                          print_after_passes=print_after_passes)
+                          print_after_passes=print_after_passes, user_constraints=user_constraints)
     elif isinstance(inputs, (list, tuple, container.Array)):
         merged_mod = tvm.IRModule({})
         for x in inputs:
