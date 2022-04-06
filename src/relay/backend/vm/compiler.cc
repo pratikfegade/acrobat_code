@@ -649,7 +649,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     auto false_start_offset = false_offset;
     auto false_end_offset = false_offset + false_branch_instructions;
 
-    std::cout << "[COM] If Offsets for " << if_pc << std::endl;
     if_offsets_[if_pc] = std::array<Index, 4>(
         {true_start_offset, true_end_offset, false_start_offset, false_end_offset});
 
@@ -1511,7 +1510,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
     // pass_seqs.push_back(transform::HoistNonSequentialOps());
     pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
-    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", false, false));
   }
 
   transform::Sequential seq(pass_seqs);

@@ -56,6 +56,27 @@ std::string DTypeToStr(const DLDataType& dtype) {
          std::to_string(dtype.lanes) + "}";
 }
 
+std::string DTypeToTypeStr(const DLDataType& dtype) {
+  std::stringstream os;
+  switch (dtype.code) {
+    case kDLInt:
+      os << "int";
+      break;
+    case kDLUInt:
+      os << "uint";
+      break;
+    case kDLFloat:
+      os << "float";
+      break;
+  }
+
+  os << int(dtype.bits);
+  if (dtype.lanes != 1) {
+    os << "x" << dtype.lanes;
+  }
+  return os.str();
+}
+
 bool lazy_execution() {
   static bool lazy_execution_ = tvm::transform::PassContext::Current()
                                     ->GetConfig<Bool>("relay.db_lazy_execution", Bool(false))
@@ -82,8 +103,12 @@ inline std::string GetTensorType() {
 
 void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = false,
                        const std::string& replacement = "") {
-  if (type.as<TensorTypeNode>()) {
-    os << GetTensorType();
+  if (auto tn = type.as<TensorTypeNode>()) {
+    if (tn->shape.size() == 0) {
+      os << DTypeToTypeStr(tn->dtype);
+    } else {
+      os << GetTensorType();
+    }
   } else if (auto pt = type.as<PrimTypeNode>()) {
     os << pt->dtype << "_t";
   } else if (auto td = type.as<TypeDataNode>()) {
@@ -323,6 +348,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
       auto it = register_types_.find(i);
       ICHECK(it != register_types_.end()) << i;
       Type reg_type = it->second;
+      if (lazy_execution() && IsStorageType(reg_type)) {
+        continue;
+      }
       if (reg_type.as<TensorTypeNode>() || reg_type.as<PrimTypeNode>() || IsStorageType(reg_type)) {
         std::stringstream ss;
         RelayTypeToCppStr(ss, reg_type);
@@ -370,6 +398,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     int target_count = 0;
 
     // std::cout << "[BT]  Visiting targets" << std::endl;
+    std::unordered_set<Index> ignorable_gotos;
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
 
@@ -380,11 +409,18 @@ class VMAOTFunctionCompiler : SourcePrinter {
       // }
       // std::cout << std::endl;
 
-      if (instr.op == Opcode::Goto) {
+      if (instr.op == Opcode::Goto && !ignorable_gotos.count(i)) {
         targets[instr.pc_offset + i] = "target" + std::to_string(target_count++);
       } else if (instr.op == Opcode::If) {
-        targets[instr.if_op.true_offset + i] = "target" + std::to_string(target_count++);
-        targets[instr.if_op.false_offset + i] = "target" + std::to_string(target_count++);
+        auto it = if_offsets_.find(i);
+        if (it != if_offsets_.end()) {
+          auto true_end_offset = it->second[1];
+          auto goto_pc = i + true_end_offset;
+          ignorable_gotos.insert(goto_pc);
+        } else {
+          targets[instr.if_op.true_offset + i] = "target" + std::to_string(target_count++);
+          targets[instr.if_op.false_offset + i] = "target" + std::to_string(target_count++);
+        }
       }
     }
 
