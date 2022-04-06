@@ -1,15 +1,25 @@
 #[version = "0.0.5"]
 
 def @main(%inputs: List[Tensor[(1, 256), float32]], %weight: Tensor[(256, 256), float32],
-  %initial: Tensor[(1, 256), float32]) -> Tensor[(1, 256), float32] {
+  %initial: Tensor[(1, 256), float32], %zero: Tensor[(), float32]) -> Tensor[(1, 256), float32] {
   let %relu_fn = fn(%tt: Tensor[(1, 256), float32]) -> Tensor[(1, 256), float32] {
-    nn.relu(%tt)
+    let %mean = mean(%weight);
+    if (%mean >= %zero) {
+      nn.relu(%tt)
+    } else {
+      nn.leaky_relu(%tt)
+    }
   };
   let %relued = @map(%relu_fn, %inputs);
 
   let %linear_fn = fn(%tt1: Tensor[(1, 256), float32], %tt2: Tensor[(1, 256), float32]) ->
-      Tensor[(1, 256), float32] {
-    add(nn.dense(%tt1, %weight, units=256), nn.dense(%tt2, %weight, units=256))
+  Tensor[(1, 256), float32] {
+    let %mean = mean(%tt1);
+    if (%mean >= %zero) {
+      add(nn.dense(%tt1, %weight, units=256), nn.dense(%tt2, %weight, units=256))
+    } else {
+      add(%tt1, %tt2)
+    }
   };
   @foldl(%linear_fn, %initial, %relued)
 }

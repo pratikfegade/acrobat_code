@@ -49,21 +49,19 @@
 namespace tvm {
 namespace relay {
 
-using SAIVarKey = std::pair<const FunctionNode*, const VarNode*>;
-using SAIFunctionKey = std::pair<const FunctionNode*, const FunctionNode*>;
-using SAIOpKey = std::pair<const FunctionNode*, const CallNode*>;
-
-using SAIBaseExprFunctor = ExprFunctor<int(const Expr& n)>;
-using SAIVarStateMap = std::unordered_map<SAIVarKey, int, PairHash, PairEquals>;
-using SAIInvokeTVMOpDepthMap = std::unordered_map<SAIOpKey, int, PairHash, PairEquals>;
-using SAIFunctionStateMap = std::unordered_map<SAIFunctionKey, int, PairHash, PairEquals>;
+using TDCOTAVarKey = std::pair<const FunctionNode*, const VarNode*>;
+using TDCOTAFunctionKey = std::pair<const FunctionNode*, const FunctionNode*>;
+using TDCOTAOpKey = std::pair<const FunctionNode*, const CallNode*>;
+using TDCOTABaseExprFunctor = ExprFunctor<bool(const Expr& n)>;
+using TDCOTAVarStateMap = std::unordered_map<TDCOTAVarKey, bool, PairHash, PairEquals>;
+using TDCOTAInvokeTVMOpDepthMap = std::unordered_map<TDCOTAOpKey, bool, PairHash, PairEquals>;
+using TDCOTAFunctionStateMap = std::unordered_map<TDCOTAFunctionKey, bool, PairHash, PairEquals>;
 
 constexpr int MAX_DEPTH_VALUE = 1 << 4;
-class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
+class TensorDependentControlOpsTaintAnalysis : public TDCOTABaseExprFunctor {
  public:
-  SchedulingAbstractInterpreter(IRModule& mod, const FunctionSet& recursive_functions,
-                                const CalleesMap& callees_map)
-      : mod_(mod), recursive_functions_(recursive_functions), callees_map_(callees_map) {
+  TensorDependentControlOpsTaintAnalysis(IRModule& mod, const CalleesMap& callees_map)
+      : mod_(mod), callees_map_(callees_map) {
     for (auto kv : mod_->functions) {
       func_name_map_[kv.second.get()] = kv.first->name_hint;
       std::cout << "[FUNC_NAME] " << kv.second.get() << " " << kv.first->name_hint << std::endl;
@@ -80,7 +78,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     auto call_graph = CallGraph(mod_);
     size_t i = 0;
     for (; i < max_iterations_; ++i) {
-      std::cout << "[SAI] ITERATION " << i << std::endl;
+      std::cout << "[TDCOTA] ITERATION " << i << std::endl;
       visited_functions_.clear();
       changed_ = false;
       auto entry_func = Downcast<Function>(mod_->Lookup("main"));
@@ -88,78 +86,6 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       if (!changed_) {
         break;
       }
-    }
-
-    std::unordered_map<const VarNode*, int> merged_var_states;
-    for (auto kv : var_states_) {
-      merged_var_states[kv.first.second] =
-          Merge(merged_var_states[kv.first.second], kv.second).first;
-    }
-
-    std::unordered_map<const FunctionNode*, int> merged_function_states;
-    for (auto kv : function_states_) {
-      merged_function_states[kv.first.second] =
-          Merge(merged_function_states[kv.first.second], kv.second).first;
-    }
-
-    CallDepthMap merged_op_depths;
-    for (auto kv : prim_func_call_depths_) {
-      merged_op_depths[kv.first.second] = Merge(merged_op_depths[kv.first.second], kv.second).first;
-    }
-
-    for (auto kv : merged_var_states) {
-      std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
-                << std::endl;
-    }
-
-    for (auto kv : merged_function_states) {
-      std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
-                << std::endl;
-    }
-
-    std::cout << "[SAI] Iterations: " << i << std::endl;
-    for (auto kv : merged_op_depths) {
-      if (kv.second < MAX_DEPTH_VALUE) {
-        std::cout << "[SAI]  Call Depths: " << PrettyPrint(GetRef<Expr>(kv.first)) << " "
-                  << kv.second << std::endl;
-      }
-    }
-
-    class AddDepthToCalls : public ExprMutator {
-     public:
-      AddDepthToCalls(const CallDepthMap& merged_op_depths) : merged_op_depths_(merged_op_depths) {}
-
-      Expr VisitExpr_(const CallNode* op) {
-        auto it = merged_op_depths_.find(op);
-        auto call = ExprMutator::VisitExpr_(op);
-        if (it != merged_op_depths_.end() && it->second < MAX_DEPTH_VALUE) {
-          auto new_op = call.as<CallNode>();
-          auto depth = it->second;
-          auto attrs = new_op->attrs.as<DictAttrsNode>();
-          ICHECK(attrs);
-          Map<String, ObjectRef> new_attrs_dict(attrs->dict);
-          new_attrs_dict.Set(tir::attr::kDBGraphDepth, Integer(depth));
-          auto new_attrs = DictAttrs(new_attrs_dict);
-          ICHECK(new_op);
-          return Call(new_op->op, new_op->args, new_attrs, new_op->type_args, new_op->span);
-        }
-        return call;
-      }
-
-      const CallDepthMap& merged_op_depths_;
-    };
-
-    AddDepthToCalls mutator(merged_op_depths);
-    Map<GlobalVar, Function> new_funcs;
-    for (const auto& it : mod_->functions) {
-      if (it.second.as<FunctionNode>()) {
-        auto func = Downcast<Function>(it.second);
-        func = Downcast<Function>(mutator(func));
-        new_funcs.Set(it.first, func);
-      }
-    }
-    for (auto pair : new_funcs) {
-      mod_->Add(pair.first, pair.second, true);
     }
 
     return mod_;
@@ -170,19 +96,19 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
 
   const FunctionNode* GetCurrentFunction() { return stack_.back(); }
 
-  std::pair<int, bool> Merge(const int& vals1, const int& vals2) {
+  std::pair<bool, bool> Merge(const bool& vals1, const bool& vals2) {
     bool changed = false;
-    int result = std::max(vals1, vals2);
+    bool result = vals1 || vals2;
     if (result != vals1) {
       changed = true;
     }
     return std::make_pair(result, changed);
   }
 
-  int Collapse(const int& vals) { return vals; }
+  bool Collapse(const bool& vals) { return vals; }
 
   template <typename T, typename MapType>
-  int Add(MapType& map, const T& key, const int& to_add) {
+  bool Add_(MapType& map, const T& key, const bool& to_add) {
     auto it = map.find(key);
     if (it == map.end()) {
       map[key] = to_add;
@@ -195,45 +121,34 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return map.at(key);
   }
 
-  int Add(const SAIVarKey& var, const int& to_add, const std::string& reason) {
-    if (to_add == MAX_DEPTH_VALUE) {
-      std::cout << "Capping " << func_name_map_[var.first] << " " << var.second->vid->name_hint
-                << " " << reason << std::endl;
-    }
-    return Add<SAIVarKey, SAIVarStateMap>(var_states_, var, to_add);
+  bool Add(const TDCOTAVarKey& var, const bool& to_add, const std::string& reason) {
+    return Add_<TDCOTAVarKey, TDCOTAVarStateMap>(var_states_, var, to_add);
   }
 
-  int Add(const SAIFunctionKey& func, const int& to_add) {
-    return Add<SAIFunctionKey, SAIFunctionStateMap>(function_states_, func, to_add);
+  bool Add(const TDCOTAFunctionKey& func, const bool& to_add) {
+    return Add_<TDCOTAFunctionKey, TDCOTAFunctionStateMap>(function_states_, func, to_add);
   }
 
-  SAIVarKey VarKey(const FunctionNode* ctx, const VarNode* var) { return std::make_pair(ctx, var); }
+  TDCOTAVarKey VarKey(const FunctionNode* ctx, const VarNode* var) {
+    return std::make_pair(ctx, var);
+  }
 
-  SAIFunctionKey FunctionKey(const FunctionNode* ctx, const FunctionNode* func) {
+  TDCOTAFunctionKey FunctionKey(const FunctionNode* ctx, const FunctionNode* func) {
     return std::make_pair(ctx, func);
   }
 
-  SAIOpKey OpKey(const FunctionNode* ctx, const CallNode* op) { return std::make_pair(ctx, op); }
+  TDCOTAOpKey OpKey(const FunctionNode* ctx, const CallNode* op) { return std::make_pair(ctx, op); }
 
-  int CappedIncr(int n) {
-    if (n >= MAX_DEPTH_VALUE) {
-      return n;
-    } else {
-      ICHECK_LE(static_cast<long>(n) + static_cast<long>(1), static_cast<long>(MAX_DEPTH_VALUE));
-      return n + 1;
-    }
-  }
-
-  int VisitBody(const Function& func) {
+  bool VisitBody(const Function& func) {
     stack_.push_back(func.get());
     auto res = VisitExpr(func->body);
     stack_.pop_back();
     return res;
   }
 
-  int VisitExpr_(const ConstantNode* op) { return 0; }
+  bool VisitExpr_(const ConstantNode* op) { return 0; }
 
-  int VisitExpr_(const TupleNode* op) {
+  bool VisitExpr_(const TupleNode* op) {
     int tuple_depth = 0;
     for (size_t i = 0; i < op->fields.size(); ++i) {
       tuple_depth = Merge(tuple_depth, VisitExpr(op->fields[i])).first;
@@ -241,7 +156,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return tuple_depth;
   }
 
-  int VisitExpr_(const VarNode* op) {
+  bool VisitExpr_(const VarNode* op) {
     if (function_environments_[GetCurrentFunction()].count(op)) {
       return function_environments_[GetCurrentFunction()][op];
     }
@@ -256,9 +171,9 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return var_states_[key];
   }
 
-  int VisitExpr_(const GlobalVarNode* op) { return 0; }
+  bool VisitExpr_(const GlobalVarNode* op) { return 0; }
 
-  int VisitExpr_(const FunctionNode* op) {
+  bool VisitExpr_(const FunctionNode* op) {
     auto free_vars = FreeVarsDedup(op->body);
     for (auto param : op->params) {
       free_vars.erase(param);
@@ -268,10 +183,10 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       auto res = VisitExpr(var);
       depth = Merge(depth, res).first;
 
-      int old_val = function_environments_[op][var.get()];
+      bool old_val = function_environments_[op][var.get()];
       auto merge_res = Merge(old_val, res);
       function_environments_[op][var.get()] = merge_res.first;
-      // std::cout << "[SAI] FuncEnv " << var->vid->name_hint << " " << var.get() << " "
+      // std::cout << "[TDCOTA] FuncEnv " << var->vid->name_hint << " " << var.get() << " "
       // << merge_res.first << " " << function_environments_[op][var.get()] << std::endl;
       changed_ = changed_ || merge_res.second;
     }
@@ -284,7 +199,8 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return node;
   }
 
-  int VisitMapBody(const int input_depth, const int lambda_depth, const FunctionNode* map_context) {
+  bool VisitMapBody(const int input_depth, const int lambda_depth,
+                    const FunctionNode* map_context) {
     auto map_fn_node = GetMapFuncNode();
     auto lambda_var = map_fn_node->params[0];
     FunctionSet lambda_callees;
@@ -336,14 +252,14 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return ret;
   }
 
-  int VisitExpr_(const CallNode* op) {
+  bool VisitExpr_(const CallNode* op) {
     auto on_device_props = GetOnDeviceProps(op);
     if (on_device_props.body.defined()) {
       return VisitExpr(on_device_props.body);
     }
 
     if (op->op == GetInvokeTVMOp()) {
-      // std::cout << "[SAI] OpDepth " << GetCurrentContext() << " "
+      // std::cout << "[TDCOTA] OpDepth " << GetCurrentContext() << " "
       // << PrettyPrint(RemoveOnDeviceCalls(GetRef<Expr>(op))) << std::endl;
       auto callee_prim_func = mod_->Lookup(Downcast<GlobalVar>(op->args[0]));
       auto access_modes_opt =
@@ -351,27 +267,13 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       ICHECK(access_modes_opt) << "No access modes found for " << op->args[0];
       auto access_modes = access_modes_opt.value();
 
-      auto inputs_tuple = op->args[1];
-      auto inputs_depth = VisitExpr(inputs_tuple);
-
-      // for (auto var : inputs_tuple.as<TupleNode>()->fields) {
-      // std::cout << "[SAI]    Input var " << var << " " << VisitExpr(var) << std::endl;
-      // }
-
-      auto max_inputs_depth = Collapse(inputs_depth);
-      auto output_depth = CappedIncr(max_inputs_depth);
       auto outputs_tuple = op->args[2].as<TupleNode>();
-      // std::cout << "[SAI]   Inputs depth " << inputs_depth << std::endl;
       for (auto output : outputs_tuple->fields) {
         ICHECK(output.as<VarNode>());
         auto var = Downcast<Var>(output);
-        auto res = Add(VarKey(GetCurrentContext(), var.get()), output_depth, "OpOutput");
-        // std::cout << "[SAI]    Outputs depth " << var->vid->name_hint << " " << res <<
-        // std::endl;
+        auto res = Add(VarKey(GetCurrentContext(), var.get()), true, "OpOutput");
       }
-      prim_func_call_depths_[OpKey(GetCurrentContext(), op)] =
-          std::max(prim_func_call_depths_[OpKey(GetCurrentContext(), op)], max_inputs_depth);
-      return output_depth;
+      return true;
     } else if (op->op.as<OpNode>()) {
       return 0;
     } else if (op->op.as<ConstructorNode>()) {
@@ -399,7 +301,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
         auto name = func_name_map_[callee];
         bool print = false;  //(name == "map");
         if (print) {
-          std::cout << "[SAI]  map call " << PrettyPrint(RemoveOnDeviceCalls(GetRef<Expr>(op)))
+          std::cout << "[TDCOTA]  map call " << PrettyPrint(RemoveOnDeviceCalls(GetRef<Expr>(op)))
                     << std::endl;
         }
         auto callee_fn = GetRef<Function>(callee);
@@ -422,15 +324,13 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
           changed_ = changed_ || old_changed;
           args_changed = args_changed || old_changed;
           if (print && i == op->args.size() - 1) {
-            std::cout << "[SAI]    map list depth " << param_state << " " << res << " "
+            std::cout << "[TDCOTA]    map list depth " << param_state << " " << res << " "
                       << op->args[i] << " " << callee->params[i] << std::endl;
           }
         }
 
         bool visited = visited_functions_.count(fn_key);
-        int path = -1;
         if (args_changed || !visited) {
-          path = 1;
           visited_functions_.insert(fn_key);
           auto res = VisitBody(callee_fn);
           res = Add(fn_key, res);
@@ -438,59 +338,55 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
         } else if (visited) {
           auto it = function_states_.find(fn_key);
           if (it != function_states_.end()) {
-            path = 2;
             ret = Merge(it->second, ret).first;
-          } else {
-            path = 3;
           }
         }
 
         if (print) {
-          std::cout << "[SAI]   treelstm call ret " << ret << " " << args_changed << " " << path
-                    << std::endl;
+          std::cout << "[TDCOTA]   treelstm call ret " << ret << " " << args_changed << std::endl;
         }
       }
       return ret;
     }
   }
 
-  int VisitExpr_(const LetNode* op) {
+  bool VisitExpr_(const LetNode* op) {
     auto value_res = VisitExpr(op->value);
     Add(VarKey(GetCurrentContext(), op->var.get()), value_res, "Let value");
     return VisitExpr(op->body);
   }
 
-  int VisitExpr_(const IfNode* op) {
-    VisitExpr(op->cond);
+  bool VisitExpr_(const IfNode* op) {
+    if (VisitExpr(op->cond)) {
+      std::cout << "[TDCOTA] Dependent control stmt " << op->cond << std::endl;
+      dependent_control_stmts_.insert(GetRef<Expr>(op));
+    }
     auto then_ret = VisitExpr(op->true_branch);
     auto else_ret = VisitExpr(op->false_branch);
     return Merge(then_ret, else_ret).first;
   }
 
-  int VisitExpr_(const OpNode* op) { return 0; }
+  bool VisitExpr_(const OpNode* op) { return 0; }
 
-  int VisitExpr_(const TupleGetItemNode* op) {
-    auto tuple_res = VisitExpr(op->tuple);
-    return tuple_res;
-  }
+  bool VisitExpr_(const TupleGetItemNode* op) { return VisitExpr(op->tuple); }
 
-  int VisitExpr_(const RefCreateNode* op) { return 0; }
+  bool VisitExpr_(const RefCreateNode* op) { return 0; }
 
-  int VisitExpr_(const RefReadNode* op) { return 0; }
+  bool VisitExpr_(const RefReadNode* op) { return 0; }
 
-  int VisitExpr_(const RefWriteNode* op) { return 0; }
+  bool VisitExpr_(const RefWriteNode* op) { return 0; }
 
-  int VisitExpr_(const ConstructorNode* op) { return 0; }
+  bool VisitExpr_(const ConstructorNode* op) { return 0; }
 
-  int VisitExpr_(const MatchNode* op) {
-    auto input_depth = Collapse(VisitExpr(op->data));
+  bool VisitExpr_(const MatchNode* op) {
+    auto input_taint = Collapse(VisitExpr(op->data));
     std::stringstream data_str;
     data_str << op->data;
     int ret = 0;
     for (auto clause : op->clauses) {
       auto pattern_vars = CollectPatternVars(clause->lhs);
       for (auto& var : pattern_vars) {
-        Add(VarKey(GetCurrentContext(), var.get()), input_depth, "Match pattern " + data_str.str());
+        Add(VarKey(GetCurrentContext(), var.get()), input_taint, "Match pattern " + data_str.str());
       }
       auto clause_ret = VisitExpr(clause->rhs);
       ret = Merge(ret, clause_ret).first;
@@ -499,37 +395,35 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
   }
 
   const IRModule& mod_;
-  const FunctionSet& recursive_functions_;
   const CalleesMap& callees_map_;
 
-  SAIVarStateMap var_states_;
-  SAIFunctionStateMap function_states_;
-  SAIInvokeTVMOpDepthMap prim_func_call_depths_;
-  std::unordered_set<SAIFunctionKey, PairHash, PairEquals> visited_functions_;
+  TDCOTAVarStateMap var_states_;
+  TDCOTAFunctionStateMap function_states_;
+  std::unordered_set<TDCOTAFunctionKey, PairHash, PairEquals> visited_functions_;
   size_t max_iterations_{20};
   bool changed_{false};
   std::unordered_map<const BaseFuncNode*, std::string> func_name_map_;
   std::vector<const FunctionNode*> stack_;
   std::unordered_map<const FunctionNode*, std::unordered_map<const VarNode*, int>>
       function_environments_;
+  std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> dependent_control_stmts_;
 };
 
-IRModule ComputeConstantDepths(IRModule& mod) {
-  auto recursive_res = GetRecursiveFunctions(mod);
-  auto recursive_functions = recursive_res.first;
-  auto callees_map = recursive_res.second;
-  SchedulingAbstractInterpreter analysis(mod, recursive_functions, callees_map);
+IRModule IdentifyTensorDependentControlOps(IRModule& mod) {
+  auto callees_map = GetCalleesMap(mod);
+  TensorDependentControlOpsTaintAnalysis analysis(mod, callees_map);
   return analysis.PerformAnalysis();
 }
 
 namespace transform {
-Pass HoistNonSequentialOps() {
+Pass TensorDependentControlIdentifierPass() {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
-      [=](IRModule m, PassContext pc) { return ComputeConstantDepths(m); };
-  return CreateModulePass(pass_func, 0, "HoistNonSequentialOps", {});
+      [=](IRModule m, PassContext pc) { return IdentifyTensorDependentControlOps(m); };
+  return CreateModulePass(pass_func, 0, "TensorDependentControlIdentifierPass", {});
 }
 
-TVM_REGISTER_GLOBAL("relay._transform.HoistNonSequentialOps").set_body_typed(HoistNonSequentialOps);
+TVM_REGISTER_GLOBAL("relay._transform.IdentifyTensorDependentControlOps")
+    .set_body_typed(TensorDependentControlIdentifierPass);
 
 }  // namespace transform
 

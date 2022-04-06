@@ -324,6 +324,7 @@ struct VMFunctionCompilerResult {
   std::unordered_map<Index, Array<Type>> invoke_type_vars;
   std::unordered_map<Index, int32_t> get_field_tags;
   std::unordered_map<Index, int32_t> call_graph_depths;
+  std::unordered_map<Index, std::array<Index, 4>> if_offsets;
 };
 
 int64_t NDToInt64(const NDArray& nd) {
@@ -404,7 +405,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
             register_types_,
             invoke_type_vars_,
             get_field_tags_,
-            call_graph_depths_};
+            call_graph_depths_,
+            if_offsets_};
   }
 
   /*! \brief Attrs objects for each op. */
@@ -602,7 +604,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     AddRegisterTypeInfo(new_register, if_node->cond->checked_type_);
     auto after_cond = instructions_.size();
     auto target_register = last_register_;
-    this->Emit(Instruction::If(test_register, target_register, 0, 0));
+    auto if_pc = this->Emit(Instruction::If(test_register, target_register, 0, 0));
+    auto before_true = this->instructions_.size();
     this->VisitExpr(if_node->true_branch);
 
     // It saves the result of If-Else expression.
@@ -614,9 +617,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // Finally store how many instructions there are in the
     // true branch.
     auto after_true = this->instructions_.size();
+    auto true_branch_instructions = after_true - 1 - before_true;
 
+    auto before_false = this->instructions_.size();
     this->VisitExpr(if_node->false_branch);
-
     size_t false_register = last_register_;
 
     // In else-branch, override the then-branch register
@@ -624,6 +628,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // Compute the total number of instructions
     // after generating false.
     auto after_false = this->instructions_.size();
+    auto false_branch_instructions = after_false - before_false;
 
     // Now we will compute the jump targets in order
     // to properly patch the instruction with the
@@ -638,6 +643,15 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
     // Patch the Goto.
     this->instructions_[after_true - 1].pc_offset = (after_false - after_true) + 1;
+
+    auto true_start_offset = true_offset;
+    auto true_end_offset = true_offset + true_branch_instructions;
+    auto false_start_offset = false_offset;
+    auto false_end_offset = false_offset + false_branch_instructions;
+
+    std::cout << "[COM] If Offsets for " << if_pc << std::endl;
+    if_offsets_[if_pc] = std::array<Index, 4>(
+        {true_start_offset, true_end_offset, false_start_offset, false_end_offset});
 
     this->last_register_ = merge_register;
   }
@@ -992,20 +1006,32 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         auto operand2 = last_register_;
         AddRegisterTypeInfo(last_register_, PrimType(DataType::Int(64)));
 
-        Emit(Instruction::If(operand1, operand2, 1, 0));
+        auto if_pc = Emit(Instruction::If(operand1, operand2, 1, 0));
         auto cond_offset = instructions_.size() - 1;
+        auto before_true = instructions_.size();
         CompileTreeNode(node->then_branch);
+        auto after_true = instructions_.size();
         auto if_reg = last_register_;
         Emit(Instruction::Goto(1));
         auto goto_offset = instructions_.size() - 1;
+        auto before_false = instructions_.size();
         CompileTreeNode(node->else_branch);
         auto else_reg = last_register_;
         Emit(Instruction::Move(else_reg, if_reg));
+        auto after_false = instructions_.size();
         last_register_ = if_reg;
         auto else_offset = instructions_.size() - 1;
         // Fixing offsets
         instructions_[cond_offset].if_op.false_offset = goto_offset - cond_offset + 1;
         instructions_[goto_offset].pc_offset = else_offset - goto_offset + 1;
+
+        auto true_start_offset = 1;
+        auto true_end_offset = true_start_offset + (after_true - before_true);
+        auto false_start_offset = goto_offset - cond_offset + 1;
+        auto false_end_offset = false_start_offset + (after_false - before_false);
+
+        if_offsets_[if_pc] = std::array<Index, 4>(
+            {true_start_offset, true_end_offset, false_start_offset, false_end_offset});
       } else {
         // For other non-branch conditions, move to then_branch directly
         auto var_bind = std::dynamic_pointer_cast<VarBinding>(node->cond);
@@ -1059,6 +1085,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   std::unordered_map<Index, int32_t> get_field_tags_;
   /*! \brief Statically computed depth information, used in AOT code generation. */
   std::unordered_map<Index, int32_t> call_graph_depths_;
+  /*! \brief If offset information, used in AOT code generation. */
+  std::unordered_map<Index, std::array<Index, 4>> if_offsets_;
 };
 
 PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
@@ -1146,6 +1174,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   std::unordered_map<std::string, Function> compiled_functions;
   std::unordered_map<std::string, std::unordered_map<Index, int32_t>> get_field_tags;
   std::unordered_map<std::string, std::unordered_map<Index, int32_t>> call_graph_depths;
+  std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>> if_offsets;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -1164,6 +1193,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       compiled_functions[vm_func.name] = result.compiled_function;
       get_field_tags[vm_func.name] = result.get_field_tags;
       call_graph_depths[vm_func.name] = result.call_graph_depths;
+      if_offsets[vm_func.name] = result.if_offsets;
 
       size_t func_index = context_.global_map.at(gvar);
       ICHECK(func_index < exec_->functions.size());
@@ -1289,7 +1319,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
                           ->GetConfig<String>("relay.db_model_name", String("model_name"))
                           .value();
     VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                  get_field_tags, call_graph_depths, output_directory, model_name)
+                  get_field_tags, call_graph_depths, if_offsets, output_directory, model_name)
         .Codegen();
   }
 }
@@ -1479,7 +1509,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (true) {
     pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
-    pass_seqs.push_back(transform::HoistNonSequentialOps());
+    // pass_seqs.push_back(transform::HoistNonSequentialOps());
+    pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
     pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   }
 

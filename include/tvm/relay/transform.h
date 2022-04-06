@@ -159,6 +159,13 @@ TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection, bool scatter
 TVM_DLL Pass ComputePrimFuncAccessModes();
 
 /*!
+ * \brief Identify tensor dependent control flow
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass TensorDependentControlIdentifierPass();
+
+/*!
  * \brief Determine and compute fixed depths for ops that are not
  * dependent on the results of any recursive functions
  *

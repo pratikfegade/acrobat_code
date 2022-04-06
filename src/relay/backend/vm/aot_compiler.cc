@@ -211,6 +211,16 @@ Function GetCompiledRelayFunction(
   }
 }
 
+template <typename T>
+void PrintArray(const T& e) {
+  std::cout << e << ' ';
+}
+
+template <typename T, std::size_t N>
+void PrintArray(const std::array<T, N>& A) {
+  for (const auto& e : A) PrintArray(e);
+}
+
 class VMAOTFunctionCompiler : SourcePrinter {
  public:
   VMAOTFunctionCompiler(const Executable& exec, const IRModule& mod, const VMFunction& vm_func,
@@ -220,6 +230,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         const std::unordered_map<std::string, Function>& compiled_functions,
                         const std::unordered_map<Index, int32_t>& get_field_tags,
                         const std::unordered_map<Index, int32_t>& call_graph_depths,
+                        const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
                         std::ostream& stream)
       : exec_(exec),
         mod_(mod),
@@ -230,6 +241,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         compiled_functions_(compiled_functions),
         get_field_tags_(get_field_tags),
         call_graph_depths_(call_graph_depths),
+        if_offsets_(if_offsets),
         stream_(stream) {}
 
   void GenerateCPPForFunction(bool definition) {
@@ -360,6 +372,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
     // std::cout << "[BT]  Visiting targets" << std::endl;
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
+
+      // std::cout << "[BT]   " << i << ": " << instr;
+      // if (instr.op == Opcode::If) {
+      //   std::cout << "|";
+      //   PrintArray(if_offsets_.at(i));
+      // }
+      // std::cout << std::endl;
+
       if (instr.op == Opcode::Goto) {
         targets[instr.pc_offset + i] = "target" + std::to_string(target_count++);
       } else if (instr.op == Opcode::If) {
@@ -368,435 +388,477 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
-    // std::cout << "[BT]  Visiting code" << std::endl;
+    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
-    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
-      auto& instr = vm_func_.instructions[i];
-      // std::cout << "[BT]   " << instr << std::endl;
 
-      if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
-        continue;
-      }
+    std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
+      // std::cout << "[BT]   Generating code section: " << start_pc << " " << end_pc << std::endl;
 
-      auto it = targets.find(i);
-      if (it != targets.end()) {
-        this->PrintIndent(stream_, -2);
-        stream_ << it->second << ":\n";
-      }
+      for (int i = start_pc; i < end_pc; ++i) {
+        auto& instr = vm_func_.instructions[i];
 
-      switch (instr.op) {
-        case Opcode::Move: {
-          auto src_var = GetVarForReg(instr.from);
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << src_var << ";\n";
-          break;
+        // std::cout << "[BT]   " << i << ": " << instr;
+        // if (instr.op == Opcode::If) {
+        //   std::cout << "|";
+        //   PrintArray(if_offsets_.at(i));
+        // }
+        // std::cout << std::endl;
+
+        if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
+          continue;
         }
-        case Opcode::Fatal: {
-          this->PrintIndent(stream_);
-          stream_ << "throw std::runtime_error(\"Fatal error\");\n";
-          break;
+
+        auto it = targets.find(i);
+        if (it != targets.end()) {
+          this->PrintIndent(stream_, -2);
+          stream_ << it->second << ":\n";
         }
-        case Opcode::LoadConst: {
-          auto dst_var = GetVarForReg(instr.dst);
-          ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = const_cast<DLTensor*>(" << GetRuntimeType()
-                  << "::Current()->GetConstant(" << instr.const_index << ").operator->());\n";
-          break;
-        }
-        case Opcode::LoadConsti: {
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
-          break;
-        }
-        case Opcode::Invoke: {
-          auto dst_var = GetVarForReg(instr.dst);
-          auto callee_name = exec_.functions[instr.func_index].name;
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
-          auto it = invoke_type_vars_.find(i);
-          if (it != invoke_type_vars_.end() && it->second.size() > 0) {
-            auto types = it->second;
-            stream_ << "<";
-            for (size_t j = 0; j < types.size(); ++j) {
-              RelayTypeToCppStr(stream_, types[j]);
-              if (j < types.size() - 1) {
+
+        switch (instr.op) {
+          case Opcode::Move: {
+            auto src_var = GetVarForReg(instr.from);
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << src_var << ";\n";
+            break;
+          }
+          case Opcode::Fatal: {
+            this->PrintIndent(stream_);
+            stream_ << "throw std::runtime_error(\"Fatal error\");\n";
+            break;
+          }
+          case Opcode::LoadConst: {
+            auto dst_var = GetVarForReg(instr.dst);
+            ICHECK(register_types_.at(instr.dst).as<TensorTypeNode>());
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = const_cast<DLTensor*>(" << GetRuntimeType()
+                    << "::Current()->GetConstant(" << instr.const_index << ").operator->());\n";
+            break;
+          }
+          case Opcode::LoadConsti: {
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
+            break;
+          }
+          case Opcode::Invoke: {
+            auto dst_var = GetVarForReg(instr.dst);
+            auto callee_name = exec_.functions[instr.func_index].name;
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
+            auto it = invoke_type_vars_.find(i);
+            if (it != invoke_type_vars_.end() && it->second.size() > 0) {
+              auto types = it->second;
+              stream_ << "<";
+              for (size_t j = 0; j < types.size(); ++j) {
+                RelayTypeToCppStr(stream_, types[j]);
+                if (j < types.size() - 1) {
+                  stream_ << ",";
+                }
+              }
+              stream_ << ">";
+            }
+            stream_ << "(";
+            for (int i = 0; i < instr.num_args; ++i) {
+              stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+              if (i < instr.num_args - 1) {
                 stream_ << ",";
               }
             }
-            stream_ << ">";
-          }
-          stream_ << "(";
-          for (int i = 0; i < instr.num_args; ++i) {
-            stream_ << GetVarForReg(instr.invoke_args_registers[i]);
-            if (i < instr.num_args - 1) {
-              stream_ << ",";
+            if (use_depth_tracking_executor()) {
+              stream_ << ", depth";
             }
+            stream_ << ");\n";
+            break;
           }
-          if (use_depth_tracking_executor()) {
-            stream_ << ", depth";
-          }
-          stream_ << ");\n";
-          break;
-        }
-        case Opcode::InvokePacked: {
-          this->PrintIndent(stream_);
-          auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
-          std::vector<std::string> flattened_args;
-          for (int j = 0; j < instr.arity; ++j) {
-            if (auto tt = register_types_.at(instr.packed_args[j]).as<TupleTypeNode>()) {
-              auto tuple_var = GetVarForReg(instr.packed_args[j]);
-              for (size_t k = 0; k < tt->fields.size(); ++k) {
-                flattened_args.push_back("std::get<" + std::to_string(k) + ">(*" + tuple_var + ")");
+          case Opcode::InvokePacked: {
+            this->PrintIndent(stream_);
+            auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
+            std::vector<std::string> flattened_args;
+            for (int j = 0; j < instr.arity; ++j) {
+              if (auto tt = register_types_.at(instr.packed_args[j]).as<TupleTypeNode>()) {
+                auto tuple_var = GetVarForReg(instr.packed_args[j]);
+                for (size_t k = 0; k < tt->fields.size(); ++k) {
+                  flattened_args.push_back("std::get<" + std::to_string(k) + ">(*" + tuple_var +
+                                           ")");
+                }
+              } else {
+                flattened_args.push_back(GetVarForReg(instr.packed_args[j]));
               }
-            } else {
-              flattened_args.push_back(GetVarForReg(instr.packed_args[j]));
             }
-          }
-          stream_ << "std::vector<" << GetTensorType() << "> " << args_vec << " = {";
+            stream_ << "std::vector<" << GetTensorType() << "> " << args_vec << " = {";
 
-          for (size_t j = 0; j < flattened_args.size(); ++j) {
-            stream_ << flattened_args[j];
-            if (j < flattened_args.size() - 1) {
-              stream_ << ", ";
+            for (size_t j = 0; j < flattened_args.size(); ++j) {
+              stream_ << flattened_args[j];
+              if (j < flattened_args.size() - 1) {
+                stream_ << ", ";
+              }
             }
-          }
 
-          stream_ << "};\n";
-          this->PrintIndent(stream_);
-          if (use_depth_tracking_executor()) {
-            std::string depth_str = ", ";
-            auto it = call_graph_depths_.find(i);
-            if (it != call_graph_depths_.end()) {
-              depth_str += std::to_string(it->second);
-            } else {
-              depth_str += "depth++";
-            }
-            stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
-                    << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
-                    << flattened_args.size() << ");\n";
-          } else {
-            if (lazy_execution()) {
-              stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                      << ", " << instr.arity << ", " << args_vec << ".data(), "
+            stream_ << "};\n";
+            this->PrintIndent(stream_);
+            if (use_depth_tracking_executor()) {
+              std::string depth_str = ", ";
+              auto it = call_graph_depths_.find(i);
+              if (it != call_graph_depths_.end()) {
+                depth_str += std::to_string(it->second);
+              } else {
+                depth_str += "depth++";
+              }
+              stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
+                      << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
                       << flattened_args.size() << ");\n";
             } else {
-              stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                      << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
-            }
-          }
-          break;
-        }
-        case Opcode::InvokeClosure: {
-          auto dst_var = GetVarForReg(instr.dst);
-          auto callee_var = GetVarForReg(instr.closure);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << callee_var;
-          stream_ << "(";
-          for (int i = 0; i < instr.num_closure_args; ++i) {
-            stream_ << GetVarForReg(instr.closure_args[i]);
-            if (i < instr.num_closure_args - 1) {
-              stream_ << ", ";
-            }
-          }
-          if (use_depth_tracking_executor()) {
-            stream_ << ", depth";
-          }
-          stream_ << ");\n";
-          break;
-        }
-        case Opcode::GetField: {
-          auto object_var = GetVarForReg(instr.object);
-          auto dst_var = GetVarForReg(instr.dst);
-
-          this->PrintIndent(stream_);
-          if (register_types_.at(instr.object).as<TupleTypeNode>()) {
-            stream_ << dst_var << " = std::get<" << instr.field_index << ">(*" << object_var
-                    << ");\n";
-          } else {
-            // auto tag = get_field_tags_.at(i);
-            // auto constructor_name = ToLowerCase(mod_->LookupTag(tag)->name_hint);
-            // stream_ << dst_var << " = " << object_var << "->" << constructor_name << "."
-            //         << this->GetFieldName(instr.field_index) << ";\n";
-
-            auto tag = get_field_tags_.at(i);
-            auto constructor_name = mod_->LookupTag(tag)->name_hint;
-            stream_ << dst_var << " = static_cast<";
-            RelayTypeToCppStr(stream_, register_types_.at(instr.object), true, constructor_name);
-            stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
-                    << ";\n";
-          }
-          break;
-        }
-        case Opcode::GetTag: {
-          auto object_var = GetVarForReg(instr.object);
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << object_var << "->tag;\n";
-          break;
-        }
-        case Opcode::Goto: {
-          Index target = i + instr.pc_offset;
-          if (!targets.count(target)) {
-            for (auto kv : targets) {
-            }
-          }
-          auto label = targets.at(target);
-          this->PrintIndent(stream_);
-          stream_ << "goto " << label << ";\n";
-          break;
-        }
-        case Opcode::If: {
-          Index true_target = i + instr.if_op.true_offset;
-          auto true_label = targets.at(true_target);
-
-          Index false_target = i + instr.if_op.false_offset;
-          auto false_label = targets.at(false_target);
-
-          auto test_var = GetVarForReg(instr.if_op.test);
-          auto target_var = GetVarForReg(instr.if_op.target);
-
-          this->PrintIndent(stream_);
-          stream_ << "if (" << test_var << " == " << target_var << ") {\n";
-          this->BeginScope();
-          this->PrintIndent(stream_);
-          stream_ << "goto " << true_label << ";\n";
-          this->EndScope();
-          this->PrintIndent(stream_);
-          stream_ << "} else {\n";
-          this->BeginScope();
-          this->PrintIndent(stream_);
-          stream_ << "goto " << false_label << ";\n";
-          this->EndScope();
-          this->PrintIndent(stream_);
-          stream_ << "}\n";
-          break;
-        }
-        case Opcode::AllocTensor: {
-          auto dst_var = GetVarForReg(instr.dst);
-          auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
-          auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
-          std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
-
-          std::string offset_var_str = offset_var;
-          if (register_types_.at(instr.alloc_tensor.offset).as<TensorTypeNode>()) {
-            this->PrintIndent(stream_);
-            offset_var_str = "NDToInt64(" + offset_var_str + ")";
-          }
-
-          std::stringstream shape_arr;
-          shape_arr << "{";
-          for (size_t j = 0; j < instr.alloc_tensor.ndim; ++j) {
-            shape_arr << instr.alloc_tensor.shape[j];
-            if (j < instr.alloc_tensor.ndim - 1) {
-              shape_arr << ", ";
-            }
-          }
-          shape_arr << "}";
-
-          if (lazy_execution()) {
-            auto it = storage_device_indices.find(instr.alloc_tensor.storage);
-            ICHECK(it != storage_device_indices.end());
-            auto device_index = it->second;
-
-            auto tmp_var = "shape_data" + std::to_string(tmp_var_counter++);
-
-            this->PrintIndent(stream_);
-            stream_ << "auto " << tmp_var << " = Arena::Current()->allocate_<int64_t>("
-                    << instr.alloc_tensor.ndim << ");\n";
-            this->PrintIndent(stream_);
-            stream_ << tmp_var << " = new(" << tmp_var << ") int64_t[" << instr.alloc_tensor.ndim
-                    << "]" << shape_arr.str() << ";\n";
-
-            this->PrintIndent(stream_);
-            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                    << "->AllocArrayWrapper(" << tmp_var << ", " << instr.alloc_tensor.ndim << ", "
-                    << dtype_str << ", " << device_index << ");\n";
-          } else {
-            this->PrintIndent(stream_);
-            stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str
-                    << ", " << shape_arr.str() << ", " << dtype_str << ");\n";
-          }
-          break;
-        }
-        case Opcode::AllocTensorReg: {
-          ICHECK(!lazy_execution());
-          auto dst_var = GetVarForReg(instr.dst);
-          auto storage_var = GetVarForReg(instr.alloc_tensor_reg.storage);
-          auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
-          std::string dtype_str = DTypeToStr(instr.alloc_tensor_reg.dtype);
-
-          std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                  << "->AllocateTensorReg(" << storage_var << ", " << offset_var << ", "
-                  << shape_var << ", " << dtype_str << ");\n";
-          break;
-        }
-        case Opcode::AllocADT: {
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          if (instr.constructor_tag == 0) {
-            std::stringstream types_str, args_str;
-            for (int j = 0; j < instr.num_fields; ++j) {
-              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
-              auto field_type = register_types_.at(instr.datatype_fields[j]);
-              auto field_var = GetVarForReg(instr.datatype_fields[j]);
-              RelayTypeToCppStr(types_str, field_type);
-              args_str << field_var;
-              if (j < instr.num_fields - 1) {
-                args_str << ", ";
-                types_str << ", ";
+              if (lazy_execution()) {
+                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                        << ", " << instr.arity << ", " << args_vec << ".data(), "
+                        << flattened_args.size() << ");\n";
+              } else {
+                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                        << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
               }
             }
-
-            stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
-                    << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str() << "));\n";
-            // stream_ << dst_var << " = new std::tuple<" << types_str.str() << ">(" <<
-            // args_str.str()
-            // << ");\n";
-          } else {
-            auto constructor = mod_->LookupTag(instr.constructor_tag);
-            auto concrete_type_without_shptr =
-                RelayTypeToCppStrString(register_types_.at(instr.dst), true);
-            auto concrete_constructor_without_shptr = RelayTypeToCppStrString(
-                register_types_.at(instr.dst), true, constructor->name_hint);
-
-            stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
-                    << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
-
-            // stream_ << dst_var << " = new " << concrete_constructor_without_shptr << "();\n";
-
-            this->PrintIndent(stream_);
-            stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";
-            for (int j = 0; j < instr.num_fields; ++j) {
-              ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
-              auto field_var = GetVarForReg(instr.datatype_fields[j]);
-              this->PrintIndent(stream_);
-              stream_ << "static_cast<" << concrete_constructor_without_shptr << "*>(" << dst_var
-                      << ".get())->" << GetFieldName(j) << " = " << field_var << ";\n";
-            }
+            break;
           }
-          break;
-        }
-        case Opcode::AllocClosure: {
-          // std::cout << "[Closure] " << exec_.functions[instr.clo_index].name << " "
-          // << exec_.functions[instr.clo_index].params.size() << " " << instr.num_freevar
-          // << std::endl;
-          auto& closure_func = exec_.functions[instr.clo_index];
-          auto closure_relay_func =
-              GetCompiledRelayFunction(compiled_functions_, mod_, closure_func.name);
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = [";
-          for (int i = 0; i < instr.num_freevar; ++i) {
-            stream_ << "&" << GetVarForReg(instr.invoke_args_registers[i]);
-            if (i < instr.num_freevar - 1) {
-              stream_ << ",";
-            }
-          }
-          stream_ << "](";
-          int closure_params_size = static_cast<int>(closure_func.params.size());
-          for (int j = instr.num_freevar; j < closure_params_size; ++j) {
-            Type arg_type = closure_relay_func->params[j]->checked_type_;
-            RelayTypeToCppStr(stream_, arg_type);
-            stream_ << " " << GetTmpVarName(j);
-            if (j < closure_params_size - 1) {
-              stream_ << ", ";
-            }
-          }
-          if (use_depth_tracking_executor()) {
-            stream_ << ", int& depth";
-          }
-          stream_ << ") {\n";
-          this->BeginScope();
-          this->PrintIndent(stream_);
-          stream_ << "return " << GetCppFunctionName(closure_func.name) << "(";
-          int j = 0;
-          for (; j < instr.num_freevar; ++j) {
-            stream_ << GetVarForReg(instr.invoke_args_registers[j]);
-            if (j < closure_params_size - 1) {
-              stream_ << ", ";
-            }
-          }
-          for (; j < closure_params_size; ++j) {
-            stream_ << GetTmpVarName(j);
-            if (j < closure_params_size - 1) {
-              stream_ << ", ";
-            }
-          }
-          if (use_depth_tracking_executor()) {
-            stream_ << ", depth";
-          }
-          stream_ << ");\n";
-          this->EndScope();
-          this->PrintIndent(stream_);
-          stream_ << "};\n";
-          break;
-        }
-        case Opcode::AllocStorage: {
-          if (lazy_execution()) {
-            storage_device_indices[instr.dst] = instr.alloc_storage.device_index;
-          } else {
+          case Opcode::InvokeClosure: {
             auto dst_var = GetVarForReg(instr.dst);
-            auto allocation_size_var = GetVarForReg(instr.alloc_storage.allocation_size);
-            auto dtype = instr.alloc_storage.dtype_hint;
-            std::string dtype_str = "{" + std::to_string(dtype.code) + ", " +
-                                    std::to_string(dtype.bits) + ", " +
-                                    std::to_string(dtype.lanes) + "}";
+            auto callee_var = GetVarForReg(instr.closure);
             this->PrintIndent(stream_);
-            std::string allocation_size_str = allocation_size_var;
-            if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
-              allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
+            stream_ << dst_var << " = " << callee_var;
+            stream_ << "(";
+            for (int i = 0; i < instr.num_closure_args; ++i) {
+              stream_ << GetVarForReg(instr.closure_args[i]);
+              if (i < instr.num_closure_args - 1) {
+                stream_ << ", ";
+              }
             }
-            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                    << "->AllocateStorage(" << allocation_size_str << ", "
-                    << instr.alloc_storage.alignment << ", " << dtype_str << ", "
-                    << instr.alloc_storage.device_index << ");\n";
+            if (use_depth_tracking_executor()) {
+              stream_ << ", depth";
+            }
+            stream_ << ");\n";
+            break;
           }
-          break;
-        }
-        case Opcode::ShapeOf: {
-          auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                  << "->ShapeOf(" << tensor_var << ");\n";
-          break;
-        }
-        case Opcode::Ret: {
-          auto result_var = GetVarForReg(instr.result);
-          this->PrintIndent(stream_);
-          stream_ << "return " << result_var << ";\n";
-          break;
-        }
-        case Opcode::ReshapeTensor: {
-          auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
-          auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
-          auto dst_var = GetVarForReg(instr.dst);
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                  << "->ReshapeTensor(" << tensor_var << ", " << shape_var << ");\n";
-          break;
-        }
-        case Opcode::DeviceCopy: {
-          auto src_var = GetVarForReg(instr.device_copy.src);
-          auto dst_var = GetVarForReg(instr.dst);
+          case Opcode::GetField: {
+            auto object_var = GetVarForReg(instr.object);
+            auto dst_var = GetVarForReg(instr.dst);
 
-          this->PrintIndent(stream_);
-          stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                  << "->DeviceCopy(" << src_var << ", " << instr.device_copy.src_device_index
-                  << ", " << instr.device_copy.dst_device_index << ");\n";
-          break;
+            this->PrintIndent(stream_);
+            if (register_types_.at(instr.object).as<TupleTypeNode>()) {
+              stream_ << dst_var << " = std::get<" << instr.field_index << ">(*" << object_var
+                      << ");\n";
+            } else {
+              // auto tag = get_field_tags_.at(i);
+              // auto constructor_name = ToLowerCase(mod_->LookupTag(tag)->name_hint);
+              // stream_ << dst_var << " = " << object_var << "->" << constructor_name << "."
+              //         << this->GetFieldName(instr.field_index) << ";\n";
+
+              auto tag = get_field_tags_.at(i);
+              auto constructor_name = mod_->LookupTag(tag)->name_hint;
+              stream_ << dst_var << " = static_cast<";
+              RelayTypeToCppStr(stream_, register_types_.at(instr.object), true, constructor_name);
+              stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
+                      << ";\n";
+            }
+            break;
+          }
+          case Opcode::GetTag: {
+            auto object_var = GetVarForReg(instr.object);
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << object_var << "->tag;\n";
+            break;
+          }
+          case Opcode::Goto: {
+            Index target = i + instr.pc_offset;
+            if (!targets.count(target)) {
+              for (auto kv : targets) {
+              }
+            }
+            auto label = targets.at(target);
+            this->PrintIndent(stream_);
+            stream_ << "goto " << label << ";\n";
+            break;
+          }
+          case Opcode::If: {
+            auto it = if_offsets_.find(i);
+            if (it != if_offsets_.end()) {
+              auto offsets = it->second;
+              auto true_start = offsets[0];
+              auto true_end = offsets[1];
+              auto false_start = offsets[2];
+              auto false_end = offsets[3];
+
+              auto test_var = GetVarForReg(instr.if_op.test);
+              auto target_var = GetVarForReg(instr.if_op.target);
+
+              this->PrintIndent(stream_);
+              stream_ << "if (" << test_var << " == " << target_var << ") {\n";
+              this->BeginScope();
+              generate_code(i + true_start, i + true_end);
+              this->EndScope();
+              this->PrintIndent(stream_);
+              stream_ << "} else {\n";
+              this->BeginScope();
+              generate_code(i + false_start, i + false_end);
+              this->PrintIndent(stream_);
+              this->EndScope();
+              stream_ << "}\n";
+
+              i = i + false_end - 1;
+            } else {
+              Index true_target = i + instr.if_op.true_offset;
+              auto true_label = targets.at(true_target);
+
+              Index false_target = i + instr.if_op.false_offset;
+              auto false_label = targets.at(false_target);
+
+              auto test_var = GetVarForReg(instr.if_op.test);
+              auto target_var = GetVarForReg(instr.if_op.target);
+
+              this->PrintIndent(stream_);
+              stream_ << "if (" << test_var << " == " << target_var << ") {\n";
+              this->BeginScope();
+              this->PrintIndent(stream_);
+              stream_ << "goto " << true_label << ";\n";
+              this->EndScope();
+              this->PrintIndent(stream_);
+              stream_ << "} else {\n";
+              this->BeginScope();
+              this->PrintIndent(stream_);
+              stream_ << "goto " << false_label << ";\n";
+              this->EndScope();
+              this->PrintIndent(stream_);
+              stream_ << "}\n";
+            }
+            break;
+          }
+          case Opcode::AllocTensor: {
+            auto dst_var = GetVarForReg(instr.dst);
+            auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
+            auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
+            std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
+
+            std::string offset_var_str = offset_var;
+            if (register_types_.at(instr.alloc_tensor.offset).as<TensorTypeNode>()) {
+              this->PrintIndent(stream_);
+              offset_var_str = "NDToInt64(" + offset_var_str + ")";
+            }
+
+            std::stringstream shape_arr;
+            shape_arr << "{";
+            for (size_t j = 0; j < instr.alloc_tensor.ndim; ++j) {
+              shape_arr << instr.alloc_tensor.shape[j];
+              if (j < instr.alloc_tensor.ndim - 1) {
+                shape_arr << ", ";
+              }
+            }
+            shape_arr << "}";
+
+            if (lazy_execution()) {
+              auto it = storage_device_indices.find(instr.alloc_tensor.storage);
+              ICHECK(it != storage_device_indices.end());
+              auto device_index = it->second;
+
+              auto tmp_var = "shape_data" + std::to_string(tmp_var_counter++);
+
+              this->PrintIndent(stream_);
+              stream_ << "auto " << tmp_var << " = Arena::Current()->allocate_<int64_t>("
+                      << instr.alloc_tensor.ndim << ");\n";
+              this->PrintIndent(stream_);
+              stream_ << tmp_var << " = new(" << tmp_var << ") int64_t[" << instr.alloc_tensor.ndim
+                      << "]" << shape_arr.str() << ";\n";
+
+              this->PrintIndent(stream_);
+              stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                      << "->AllocArrayWrapper(" << tmp_var << ", " << instr.alloc_tensor.ndim
+                      << ", " << dtype_str << ", " << device_index << ");\n";
+            } else {
+              this->PrintIndent(stream_);
+              stream_ << dst_var << " = " << storage_var << "->AllocNDArray(" << offset_var_str
+                      << ", " << shape_arr.str() << ", " << dtype_str << ");\n";
+            }
+            break;
+          }
+          case Opcode::AllocTensorReg: {
+            ICHECK(!lazy_execution());
+            auto dst_var = GetVarForReg(instr.dst);
+            auto storage_var = GetVarForReg(instr.alloc_tensor_reg.storage);
+            auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
+            std::string dtype_str = DTypeToStr(instr.alloc_tensor_reg.dtype);
+
+            std::string shape_var = GetVarForReg(instr.alloc_tensor_reg.shape_register);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->AllocateTensorReg(" << storage_var << ", " << offset_var << ", "
+                    << shape_var << ", " << dtype_str << ");\n";
+            break;
+          }
+          case Opcode::AllocADT: {
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            if (instr.constructor_tag == 0) {
+              std::stringstream types_str, args_str;
+              for (int j = 0; j < instr.num_fields; ++j) {
+                ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+                auto field_type = register_types_.at(instr.datatype_fields[j]);
+                auto field_var = GetVarForReg(instr.datatype_fields[j]);
+                RelayTypeToCppStr(types_str, field_type);
+                args_str << field_var;
+                if (j < instr.num_fields - 1) {
+                  args_str << ", ";
+                  types_str << ", ";
+                }
+              }
+
+              stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
+                      << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str()
+                      << "));\n";
+              // stream_ << dst_var << " = new std::tuple<" << types_str.str() << ">(" <<
+              // args_str.str()
+              // << ");\n";
+            } else {
+              auto constructor = mod_->LookupTag(instr.constructor_tag);
+              auto concrete_type_without_shptr =
+                  RelayTypeToCppStrString(register_types_.at(instr.dst), true);
+              auto concrete_constructor_without_shptr = RelayTypeToCppStrString(
+                  register_types_.at(instr.dst), true, constructor->name_hint);
+
+              stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
+                      << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
+
+              // stream_ << dst_var << " = new " << concrete_constructor_without_shptr << "();\n";
+
+              this->PrintIndent(stream_);
+              stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";
+              for (int j = 0; j < instr.num_fields; ++j) {
+                ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
+                auto field_var = GetVarForReg(instr.datatype_fields[j]);
+                this->PrintIndent(stream_);
+                stream_ << "static_cast<" << concrete_constructor_without_shptr << "*>(" << dst_var
+                        << ".get())->" << GetFieldName(j) << " = " << field_var << ";\n";
+              }
+            }
+            break;
+          }
+          case Opcode::AllocClosure: {
+            // std::cout << "[Closure] " << exec_.functions[instr.clo_index].name << " "
+            // << exec_.functions[instr.clo_index].params.size() << " " << instr.num_freevar
+            // << std::endl;
+            auto& closure_func = exec_.functions[instr.clo_index];
+            auto closure_relay_func =
+                GetCompiledRelayFunction(compiled_functions_, mod_, closure_func.name);
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = [";
+            for (int i = 0; i < instr.num_freevar; ++i) {
+              stream_ << "&" << GetVarForReg(instr.invoke_args_registers[i]);
+              if (i < instr.num_freevar - 1) {
+                stream_ << ",";
+              }
+            }
+            stream_ << "](";
+            int closure_params_size = static_cast<int>(closure_func.params.size());
+            for (int j = instr.num_freevar; j < closure_params_size; ++j) {
+              Type arg_type = closure_relay_func->params[j]->checked_type_;
+              RelayTypeToCppStr(stream_, arg_type);
+              stream_ << " " << GetTmpVarName(j);
+              if (j < closure_params_size - 1) {
+                stream_ << ", ";
+              }
+            }
+            if (use_depth_tracking_executor()) {
+              stream_ << ", int& depth";
+            }
+            stream_ << ") {\n";
+            this->BeginScope();
+            this->PrintIndent(stream_);
+            stream_ << "return " << GetCppFunctionName(closure_func.name) << "(";
+            int j = 0;
+            for (; j < instr.num_freevar; ++j) {
+              stream_ << GetVarForReg(instr.invoke_args_registers[j]);
+              if (j < closure_params_size - 1) {
+                stream_ << ", ";
+              }
+            }
+            for (; j < closure_params_size; ++j) {
+              stream_ << GetTmpVarName(j);
+              if (j < closure_params_size - 1) {
+                stream_ << ", ";
+              }
+            }
+            if (use_depth_tracking_executor()) {
+              stream_ << ", depth";
+            }
+            stream_ << ");\n";
+            this->EndScope();
+            this->PrintIndent(stream_);
+            stream_ << "};\n";
+            break;
+          }
+          case Opcode::AllocStorage: {
+            if (lazy_execution()) {
+              storage_device_indices[instr.dst] = instr.alloc_storage.device_index;
+            } else {
+              auto dst_var = GetVarForReg(instr.dst);
+              auto allocation_size_var = GetVarForReg(instr.alloc_storage.allocation_size);
+              auto dtype = instr.alloc_storage.dtype_hint;
+              std::string dtype_str = "{" + std::to_string(dtype.code) + ", " +
+                                      std::to_string(dtype.bits) + ", " +
+                                      std::to_string(dtype.lanes) + "}";
+              this->PrintIndent(stream_);
+              std::string allocation_size_str = allocation_size_var;
+              if (register_types_.at(instr.alloc_storage.allocation_size).as<TensorTypeNode>()) {
+                allocation_size_var = "NDToInt64(" + allocation_size_var + ")";
+              }
+              stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                      << "->AllocateStorage(" << allocation_size_str << ", "
+                      << instr.alloc_storage.alignment << ", " << dtype_str << ", "
+                      << instr.alloc_storage.device_index << ");\n";
+            }
+            break;
+          }
+          case Opcode::ShapeOf: {
+            auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->ShapeOf(" << tensor_var << ");\n";
+            break;
+          }
+          case Opcode::Ret: {
+            auto result_var = GetVarForReg(instr.result);
+            this->PrintIndent(stream_);
+            stream_ << "return " << result_var << ";\n";
+            break;
+          }
+          case Opcode::ReshapeTensor: {
+            auto tensor_var = GetVarForReg(instr.reshape_tensor.tensor);
+            auto shape_var = GetVarForReg(instr.reshape_tensor.newshape);
+            auto dst_var = GetVarForReg(instr.dst);
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->ReshapeTensor(" << tensor_var << ", " << shape_var << ");\n";
+            break;
+          }
+          case Opcode::DeviceCopy: {
+            auto src_var = GetVarForReg(instr.device_copy.src);
+            auto dst_var = GetVarForReg(instr.dst);
+
+            this->PrintIndent(stream_);
+            stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
+                    << "->DeviceCopy(" << src_var << ", " << instr.device_copy.src_device_index
+                    << ", " << instr.device_copy.dst_device_index << ");\n";
+            break;
+          }
+          default:
+            LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
+            return;
         }
-        default:
-          LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
-          return;
       }
-    }
+    };
+
+    generate_code(0, vm_func_.instructions.size());
   }
 
   void EmitPMapCPP(bool definition) {
@@ -851,6 +913,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<std::string, Function>& compiled_functions_;
   const std::unordered_map<Index, int32_t>& get_field_tags_;
   const std::unordered_map<Index, int32_t>& call_graph_depths_;
+  const std::unordered_map<Index, std::array<Index, 4>>& if_offsets_;
   std::ostream& stream_;
 };
 
@@ -988,7 +1051,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   os << "return res;\n";
   this->EndScope();
   this->PrintIndent(os);
-  os << "}\n";
+  os << "}\n\n";
 }
 
 void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
@@ -1015,7 +1078,7 @@ void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
     auto arg_type = function_type->arg_types[i];
     os << "std::vector<";
     RelayTypeToCppStr(os, arg_type);
-    if (arg_type.as<TensorTypeNode>()) {
+    if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
       os << "&";
     }
     os << "> " << GetVarForReg(i);
@@ -1057,7 +1120,7 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  }\n";
 
   os << "  return std::make_pair(cg_gen_time / a_iters, cg_exe_time / a_iters);\n";
-  os << "}\n";
+  os << "}\n\n";
 
   os << "int main(int argc, char* argv[]) {\n";
   os << "  std::string dir = argv[1];\n";
@@ -1141,9 +1204,11 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
     auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
+    auto function_if_offsets = if_offsets_.at(vm_func.name);
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, function_call_graph_depths, cpp_stream_);
+        compiled_functions_, function_get_field_tags, function_call_graph_depths,
+        function_if_offsets, cpp_stream_);
     function_compiler.GenerateCPPForFunction(true);
     cpp_stream_ << "\n";
   }
@@ -1203,9 +1268,11 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
     auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
+    auto function_if_offsets = if_offsets_.at(vm_func.name);
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, function_call_graph_depths, hpp_stream_);
+        compiled_functions_, function_get_field_tags, function_call_graph_depths,
+        function_if_offsets, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 

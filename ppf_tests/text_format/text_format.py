@@ -10,17 +10,21 @@ p = relay.Prelude(mod)
 mod._import("/home/ppf/Documents/projects/projects/dyn_batch/tvm/ppf_tests/text_format/text_format.rly")
 
 device = tvm.runtime.device("cpu")
-target = "llvm"
 
 weight = tvm.nd.array(np.zeros((256, 256)).astype("float32"), device=tvm.cpu(0))
 
-lazy_execution=False
+target = "llvm"
+batch_size = 8
+lazy_execution=True
 coarsened_execution=False
-batched_execution=False
+batched_execution=True
 scattered_kernels=False
 concurrent_execution=False
-dynamic_batch_size_estimate=64
 use_autoscheduler=False
+aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+model_name="tdc"
+generate_aot_code=True
+dynamic_batch_size_estimate=64
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
     coarsened_execution=coarsened_execution,
@@ -28,8 +32,11 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     scattered_kernels=scattered_kernels,
     concurrent_execution=concurrent_execution,
     use_autoscheduler=use_autoscheduler,
-    batch_size=1,
-    dynamic_batch_size_estimate=1,
+    dynamic_batch_size_estimate=dynamic_batch_size_estimate,
+    batch_size=batch_size,
+    aot_output_directory=aot_output_directory,
+    model_name=model_name,
+    generate_aot_code=generate_aot_code,
     opt_level=3)
 
 def execute():
