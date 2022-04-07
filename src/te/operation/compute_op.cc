@@ -59,7 +59,7 @@ TVM_REGISTER_NODE_TYPE(ComputeOpNode);
 static void VerifyComputeOp(const ComputeOpNode* op);
 
 inline bool ReduceEqual(const tir::ReduceNode* a, const tir::ReduceNode* b) {
-  return (a->combiner.same_as(b->combiner)) && (a->source.same_as(b->source)) &&
+  return (a->combiner.same_as(b->combiner)) && StructuralEqual()(a->source, b->source) &&
          (a->axis.same_as(b->axis)) && StructuralEqual()(a->condition, b->condition) &&
          ((a->init.empty() && b->init.empty()) || (a->init.same_as(b->init)));
 }
@@ -551,7 +551,8 @@ class ComputeVerifier final : protected tir::ExprVisitor {
 
       if (reduce && reduce_) {
         ICHECK(ReduceEqual(reduce, reduce_)) << "The Reduce inputs of ComputeOp should "
-                                             << "have the same attribute except value_index";
+                                             << "have the same attribute except value_index\n"
+                                             << GetRef<Operation>(compute_);
       }
 
       level_ = 0;

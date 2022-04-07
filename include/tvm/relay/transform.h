@@ -182,6 +182,13 @@ TVM_DLL Pass HoistNonSequentialOps();
 TVM_DLL Pass DefuseOps();
 
 /*!
+ * \brief Mark op calls that operate entirely on scalars
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass MarkScalarCalls();
+
+/*!
  * \brief Rewrite the annotated program.
  *
  * \param fallback_device The fallback device which is the default device for

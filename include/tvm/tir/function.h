@@ -324,6 +324,12 @@ constexpr const char* kDBArgAccessModes = "db.args_access_modes";
     functions. */
 constexpr const char* kDBGraphDepth = "db.graph_depth";
 
+/*! \brief Op call on scalar quantities. */
+constexpr const char* kDBScalarCall = "db.scalar_call";
+
+/*! \brief Op call with a scalar output. */
+constexpr const char* kDBScalarOutputOp = "db.scalar_output_op";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

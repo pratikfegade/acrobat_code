@@ -736,7 +736,6 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       call_lowered_attrs.metadata.Set(attr::kReshapeOnly, tvm::Integer(1));
     }
 
-    call_lowered_attrs.metadata.Set("relay_attrs", func->attrs);
     call_lowered_attrs.metadata.Set("all_prim_fn_vars", all_prim_fn_vars);
 
     if (IsDynamic(func->ret_type)) {
@@ -765,6 +764,43 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       }
       call_lowered_attrs.metadata.Set("all_prim_shape_fn_vars", all_prim_shape_fn_vars);
     }
+
+    std::cout << "[TC] Lowering " << cfunc->prim_fn_var << std::endl;
+
+    auto final_attrs = Downcast<DictAttrs>(func->attrs);
+    Map<String, ObjectRef> additional_attrs;
+    if (IsScalarTensorType(func->ret_type)) {
+      bool params_scalar = true;
+      for (auto param : func->params) {
+        if (!IsScalarTensorType(func->ret_type)) {
+          params_scalar = false;
+          break;
+        }
+      }
+
+      if (params_scalar) {
+        bool call_found = false;
+        Attrs orig_call_attrs = NullValue<Attrs>();
+        PostOrderVisit(func->body, [&](const Expr& expr) {
+          if (auto cn = expr.as<CallNode>()) {
+            ICHECK(!call_found) << "Multiple scalar calls in " << func;
+            call_found = true;
+            orig_call_attrs = cn->attrs;
+          }
+        });
+
+        auto dict_attrs = orig_call_attrs.as<DictAttrsNode>();
+        if (dict_attrs) {
+          for (auto kv : dict_attrs->dict) {
+            // std::cout << "[TC]  Attrs " << kv.first << " " << kv.second << std::endl;
+            additional_attrs.Set(kv.first, kv.second);
+          }
+        }
+      }
+      additional_attrs.Set(tir::attr::kDBScalarOutputOp, Bool(true));
+      final_attrs = final_attrs.WithAttrs(additional_attrs);
+    }
+    call_lowered_attrs.metadata.Set("relay_attrs", final_attrs);
 
     return CallLowered(cfunc->prim_fn_var, std::move(visited_args), std::move(call_lowered_attrs),
                        std::move(span));
@@ -889,6 +925,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     // Lower the primitive function for that target.
     Function function = Downcast<Function>(primitive_func);
     ICHECK(call_node->type_args.empty()) << "lowered functions cannot be polymorphic";
+    std::cout << "[TC] Lowering " << function << std::endl;
     return MakeLoweredCall(function, std::move(new_args), call_node->span, target);
   }
 
@@ -947,6 +984,7 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function func, IRModule module, PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
+        // std::cout << "[Lowering] Fubnc  " << func << std::endl;
         return Downcast<Function>(lower_te.Mutate(func));
       };
   return CreateFunctionPass(pass_func, 0, "LowerTensorExpr", {});

@@ -299,6 +299,22 @@ class DictAttrs : public Attrs {
     return GetAttr<Integer>(attr_key, 0) != 0;
   }
 
+  DictAttrs WithAttr(const std::string& attr_key, ObjectRef value) {
+    auto self = (*this).operator->();
+    Map<String, ObjectRef> new_attrs_dict(self->dict);
+    new_attrs_dict.Set(attr_key, value);
+    return DictAttrs(new_attrs_dict);
+  }
+
+  DictAttrs WithAttrs(const Map<String, ObjectRef>& map) {
+    auto self = (*this).operator->();
+    Map<String, ObjectRef> new_attrs_dict(self->dict);
+    for (auto kv : map) {
+      new_attrs_dict.Set(kv.first, kv.second);
+    }
+    return DictAttrs(new_attrs_dict);
+  }
+
   TVM_DEFINE_OBJECT_REF_METHODS(DictAttrs, Attrs, DictAttrsNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DictAttrsNode);
 };

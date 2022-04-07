@@ -116,7 +116,11 @@ void InferRootBound(const Stage& stage, const GraphContext& ctx,
         consumers.insert(op);
       }
     } else {
-      LOG(INFO) << "not in feed graph consumer = " << stage->op;
+      // for (auto kv : ctx.feed_graph) {
+      //   std::cout << "[FG] " << kv.first->op.get() << " " << kv.first->op->name << " "
+      //             << kv.first->value_index << " " << kv.first->op << std::endl;
+      // }
+      LOG(INFO) << "not in feed graph consumer = " << t->op->name;
     }
   }
   // storage scope.

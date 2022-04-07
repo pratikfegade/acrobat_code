@@ -323,7 +323,7 @@ struct VMFunctionCompilerResult {
   std::unordered_map<size_t, Type> register_types;
   std::unordered_map<Index, Array<Type>> invoke_type_vars;
   std::unordered_map<Index, int32_t> get_field_tags;
-  std::unordered_map<Index, int32_t> call_graph_depths;
+  std::unordered_map<Index, DictAttrs> call_attrs;
   std::unordered_map<Index, std::array<Index, 4>> if_offsets;
 };
 
@@ -405,7 +405,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
             register_types_,
             invoke_type_vars_,
             get_field_tags_,
-            call_graph_depths_,
+            call_attrs_,
             if_offsets_};
   }
 
@@ -757,12 +757,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    ICHECK_EQ(args.size(), 3);
                    auto pc = EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
                    CollectAndRegisterTIRCallees(args[0], Downcast<DictAttrs>(attrs));
-
-                   auto depth = Downcast<DictAttrs>(call_node->attrs)
-                                    .GetAttr(tir::attr::kDBGraphDepth, Integer(-1));
-                   if (depth.value()->value >= 0) {
-                     call_graph_depths_[pc] = depth.value()->value;
-                   }
+                   call_attrs_[pc] = Downcast<DictAttrs>(call_node->attrs);
                  })
           .Match("memory.alloc_tensor",
                  [this, call_node](const Array<Expr>& args, const Attrs& attrs,
@@ -1083,7 +1078,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   /*! \brief Tag information for GetField, used in AOT code generation. */
   std::unordered_map<Index, int32_t> get_field_tags_;
   /*! \brief Statically computed depth information, used in AOT code generation. */
-  std::unordered_map<Index, int32_t> call_graph_depths_;
+  std::unordered_map<Index, DictAttrs> call_attrs_;
   /*! \brief If offset information, used in AOT code generation. */
   std::unordered_map<Index, std::array<Index, 4>> if_offsets_;
 };
@@ -1172,7 +1167,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>> invoke_type_vars;
   std::unordered_map<std::string, Function> compiled_functions;
   std::unordered_map<std::string, std::unordered_map<Index, int32_t>> get_field_tags;
-  std::unordered_map<std::string, std::unordered_map<Index, int32_t>> call_graph_depths;
+  std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>> call_attrs;
   std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>> if_offsets;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
@@ -1191,7 +1186,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       invoke_type_vars[vm_func.name] = func_invoke_type_vars;
       compiled_functions[vm_func.name] = result.compiled_function;
       get_field_tags[vm_func.name] = result.get_field_tags;
-      call_graph_depths[vm_func.name] = result.call_graph_depths;
+      call_attrs[vm_func.name] = result.call_attrs;
       if_offsets[vm_func.name] = result.if_offsets;
 
       size_t func_index = context_.global_map.at(gvar);
@@ -1318,7 +1313,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
                           ->GetConfig<String>("relay.db_model_name", String("model_name"))
                           .value();
     VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                  get_field_tags, call_graph_depths, if_offsets, output_directory, model_name)
+                  get_field_tags, call_attrs, if_offsets, output_directory, model_name)
         .Codegen();
   }
 }
@@ -1339,7 +1334,6 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Fuse & lower any new shape functions and device_copies.
   pass_seqs.push_back(FuseAndLowerOperators(host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", true, false));
 
   // Manifest the allocations needed for the shape functions.
   pass_seqs.push_back(transform::ManifestAlloc(host_se_scope));
@@ -1433,6 +1427,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // so the remaining passes don't need to distinguish homogeneous vs
   // hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
+
+  pass_seqs.push_back(transform::InferType());
+  pass_seqs.push_back(transform::MarkScalarCalls());
+
   // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
 
   pass_seqs.push_back(transform::FuseOps());
@@ -1460,12 +1458,11 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::LambdaLift());
 
-  // pass_seqs.push_back(transform::LowerMapToTIR(batched_execution, scattered_kernels));
-
   // Eliminate dead-code before we lower. We don't track the purity of PrimFuncs, thus after
   // lowering all calls to lowered functions will be kept.
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
 
   // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
@@ -1475,6 +1472,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
+  pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass", true, true));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1490,9 +1488,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // and we use these ops to invoke the symbols in the module generated by
   // external codegen.
 
+  pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices1", true, true));
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("MemoryOpt", true, true));
   pass_seqs.push_back(transform::InferType());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, false));

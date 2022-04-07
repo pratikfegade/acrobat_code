@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include "../../support/utils.h"
 #include "batch_te_graph.h"
 
 namespace tvm {
@@ -47,14 +48,26 @@ class BatchifyRewriter : public te::ExprMutator {
       Array<PrimExpr> indices;
       indices.push_back(batch_iv_);
       indices.push_back_all(op->indices);
-      auto expr = tir::ProducerLoad(replaced_producer_op.output(tensor->value_index), indices);
+      auto expr = tir::ProducerLoad(GetTensor(replaced_producer_op, tensor->value_index), indices);
       return expr;
     } else {
       return tir::ExprMutator::VisitExpr_(op);
     }
   }
 
+  te::Tensor GetTensor(const te::Operation& op, size_t index) {
+    auto key = std::make_pair(op.get(), index);
+    auto it = tensor_cache_.find(key);
+    if (it == tensor_cache_.end()) {
+      tensor_cache_.insert({key, op.output(index)});
+    }
+    return tensor_cache_.at(key);
+  }
+
   const Map<te::Operation, te::Operation>& rmap_;
+  std::unordered_map<std::pair<const Object*, size_t>, te::Tensor, support::PairHash,
+                     support::PairEquals>
+      tensor_cache_;
   const te::IterVar& batch_iv_;
 };
 

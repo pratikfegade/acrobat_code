@@ -56,25 +56,42 @@ std::string DTypeToStr(const DLDataType& dtype) {
          std::to_string(dtype.lanes) + "}";
 }
 
-std::string DTypeToTypeStr(const DLDataType& dtype) {
-  std::stringstream os;
-  switch (dtype.code) {
-    case kDLInt:
-      os << "int";
-      break;
-    case kDLUInt:
-      os << "uint";
-      break;
-    case kDLFloat:
-      os << "float";
-      break;
+std::string DTypeToTypeStr(const DataType& dtype) {
+  auto bits = dtype.bits();
+  auto code = dtype.code();
+  if (code == kDLInt || code == kDLUInt) {
+    if (code == kDLUInt && bits == 1) {
+      return "bool";
+    }
+    std::stringstream os;
+    if (code == kDLUInt) {
+      os << "u";
+    }
+    os << "int";
+    switch (bits) {
+      case 8:
+      case 16:
+      case 32:
+      case 64:
+        os << bits << "_t";
+        break;
+      default:
+        std::cout << "[SFF] No type for " << dtype << std::endl;
+        return "";
+    }
+    return os.str();
+  } else if (code == kDLFloat) {
+    switch (bits) {
+      case 32:
+        return "float";
+      case 64:
+        return "double";
+      default:
+        std::cout << "[SFF] No type for " << dtype << std::endl;
+        return "";
+    }
   }
-
-  os << int(dtype.bits);
-  if (dtype.lanes != 1) {
-    os << "x" << dtype.lanes;
-  }
-  return os.str();
+  return "";
 }
 
 bool lazy_execution() {
@@ -102,13 +119,18 @@ inline std::string GetTensorType() {
 }
 
 void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = false,
-                       const std::string& replacement = "") {
+                       const std::string& replacement = "", bool scalarize = true) {
   if (auto tn = type.as<TensorTypeNode>()) {
-    if (tn->shape.size() == 0) {
-      os << DTypeToTypeStr(tn->dtype);
-    } else {
-      os << GetTensorType();
+    if (scalarize && tn->shape.size() == 0) {
+      auto dtype_str = DTypeToTypeStr(tn->dtype);
+      if (dtype_str.size() > 0) {
+        std::cout << "[AEDG] Type for " << tn->dtype << " " << dtype_str << " " << tn->dtype.bits()
+                  << std::endl;
+        os << dtype_str;
+        return;
+      }
     }
+    os << GetTensorType();
   } else if (auto pt = type.as<PrimTypeNode>()) {
     os << pt->dtype << "_t";
   } else if (auto td = type.as<TypeDataNode>()) {
@@ -194,9 +216,9 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
 }
 
 std::string RelayTypeToCppStrString(const Type& type, bool no_shared_ptr = false,
-                                    const std::string& replacement = "") {
+                                    const std::string& replacement = "", bool scalarize = true) {
   std::stringstream ss;
-  RelayTypeToCppStr(ss, type, no_shared_ptr, replacement);
+  RelayTypeToCppStr(ss, type, no_shared_ptr, replacement, scalarize);
   return ss.str();
 }
 
@@ -254,7 +276,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
                         const std::unordered_map<std::string, Function>& compiled_functions,
                         const std::unordered_map<Index, int32_t>& get_field_tags,
-                        const std::unordered_map<Index, int32_t>& call_graph_depths,
+                        const std::unordered_map<Index, DictAttrs>& call_attrs,
                         const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
                         std::ostream& stream)
       : exec_(exec),
@@ -265,9 +287,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
         invoke_type_vars_(invoke_type_vars),
         compiled_functions_(compiled_functions),
         get_field_tags_(get_field_tags),
-        call_graph_depths_(call_graph_depths),
+        call_attrs_(call_attrs),
         if_offsets_(if_offsets),
-        stream_(stream) {}
+        stream_(stream) {
+    inbuilt_ops_.insert({"equal", "=="});
+    inbuilt_ops_.insert({"greater_equal", ">="});
+  }
 
   void GenerateCPPForFunction(bool definition) {
     if (vm_func_.name == "map") {
@@ -292,6 +317,33 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
  private:
+  int32_t GetCallGraphDepth(int pc) {
+    auto it = call_attrs_.find(pc);
+    if (it != call_attrs_.end()) {
+      auto attrs = it->second;
+      return attrs.GetAttr(tir::attr::kDBGraphDepth, Integer(-1)).value()->value;
+    }
+    return -1;
+  }
+
+  std::string GetScalarOpName(int pc) {
+    auto it = call_attrs_.find(pc);
+    if (it != call_attrs_.end()) {
+      auto attrs = it->second;
+      return attrs.GetAttr(tir::attr::kDBScalarCall, String("")).value();
+    }
+    return "";
+  }
+
+  bool IsOpOutputScalar(int pc) {
+    auto it = call_attrs_.find(pc);
+    if (it != call_attrs_.end()) {
+      auto attrs = it->second;
+      return attrs.GetAttr(tir::attr::kDBScalarOutputOp, Bool(false)).value()->value;
+    }
+    return false;
+  }
+
   void CreateFunctionDeclaration(const VMFunction& vm_func, const Function& relay_func) {
     FuncType function_type = Downcast<FuncType>(relay_func->checked_type_);
     ICHECK_EQ(vm_func.params.size(), function_type->arg_types.size())
@@ -339,7 +391,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
   }
 
-  void GenerateLocalDecls(const std::vector<bool>& used_regs) {
+  void GenerateLocalDecls(const std::vector<bool>& used_regs,
+                          const std::unordered_set<Index>& scalar_op_outputs) {
     std::unordered_map<std::string, std::vector<std::string>> type2vars;
     for (int i = vm_func_.params.size(); i < vm_func_.register_file_size; ++i) {
       if (!used_regs[i]) {
@@ -348,18 +401,29 @@ class VMAOTFunctionCompiler : SourcePrinter {
       auto it = register_types_.find(i);
       ICHECK(it != register_types_.end()) << i;
       Type reg_type = it->second;
-      if (lazy_execution() && IsStorageType(reg_type)) {
-        continue;
-      }
-      if (reg_type.as<TensorTypeNode>() || reg_type.as<PrimTypeNode>() || IsStorageType(reg_type)) {
-        std::stringstream ss;
-        RelayTypeToCppStr(ss, reg_type);
-        auto type_str = ss.str();
-        type2vars[type_str].push_back(GetVarForReg(i));
+      if (scalar_op_outputs.count(i)) {
+        ICHECK(reg_type.as<TensorTypeNode>());
+        auto tensor_type = RelayTypeToCppStrString(reg_type, false, "", false);
+        auto scalar_type = RelayTypeToCppStrString(reg_type, false, "", true);
+        auto tensor_var = GetVarForReg(i);
+        auto scalar_var = GetVarForReg(i, true);
+        type2vars[tensor_type].push_back(tensor_var);
+        type2vars[scalar_type].push_back(scalar_var);
       } else {
-        auto type_str = RelayTypeToCppStrString(reg_type);
-        this->PrintIndent(stream_);
-        stream_ << type_str << " " << GetVarForReg(i) << ";\n";
+        if (lazy_execution() && IsStorageType(reg_type)) {
+          continue;
+        }
+        if (reg_type.as<TensorTypeNode>() || reg_type.as<PrimTypeNode>() ||
+            IsStorageType(reg_type)) {
+          std::stringstream ss;
+          RelayTypeToCppStr(ss, reg_type);
+          auto type_str = ss.str();
+          type2vars[type_str].push_back(GetVarForReg(i));
+        } else {
+          auto type_str = RelayTypeToCppStrString(reg_type);
+          this->PrintIndent(stream_);
+          stream_ << type_str << " " << GetVarForReg(i) << ";\n";
+        }
       }
     }
 
@@ -386,12 +450,30 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
+      if (lazy_execution() && instr.op == Opcode::AllocStorage) {
+        continue;
+      }
       for (auto reg : Instruction::ReadRegisters(instr)) {
         used_regs[reg] = true;
       }
     }
 
-    this->GenerateLocalDecls(used_regs);
+    // Registers that are scalar outputs of tensor ops
+    std::unordered_set<Index> scalar_op_outputs;
+    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
+      auto& instr = vm_func_.instructions[i];
+
+      if (instr.op == Opcode::InvokePacked && IsOpOutputScalar(i) &&
+          GetScalarOpName(i).size() == 0) {
+        for (int j = 0; j < instr.arity; ++j) {
+          if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+            scalar_op_outputs.insert(instr.packed_args[j]);
+          }
+        }
+      }
+    }
+
+    this->GenerateLocalDecls(used_regs, scalar_op_outputs);
 
     // std::cout << "[BT] Visiting BT" << std::endl;
     std::unordered_map<Index, std::string> targets;
@@ -424,22 +506,20 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
+    for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
+      auto& instr = vm_func_.instructions[i];
+      if (instr.op == Opcode::InvokePacked) {
+        auto callee_idx = instr.packed_index;
+      }
+    }
+
     std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
-      // std::cout << "[BT]   Generating code section: " << start_pc << " " << end_pc << std::endl;
-
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
-
-        // std::cout << "[BT]   " << i << ": " << instr;
-        // if (instr.op == Opcode::If) {
-        //   std::cout << "|";
-        //   PrintArray(if_offsets_.at(i));
-        // }
-        // std::cout << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
           continue;
@@ -509,8 +589,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::InvokePacked: {
-            this->PrintIndent(stream_);
-            auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
+            auto get_scalar_var_for_reg = [&](Index reg) {
+              if (scalar_op_outputs.count(reg)) {
+                return GetVarForReg(reg, true);
+              } else {
+                return GetVarForReg(reg);
+              }
+            };
+
             std::vector<std::string> flattened_args;
             for (int j = 0; j < instr.arity; ++j) {
               if (auto tt = register_types_.at(instr.packed_args[j]).as<TupleTypeNode>()) {
@@ -520,39 +606,63 @@ class VMAOTFunctionCompiler : SourcePrinter {
                                            ")");
                 }
               } else {
-                flattened_args.push_back(GetVarForReg(instr.packed_args[j]));
-              }
-            }
-            stream_ << "std::vector<" << GetTensorType() << "> " << args_vec << " = {";
-
-            for (size_t j = 0; j < flattened_args.size(); ++j) {
-              stream_ << flattened_args[j];
-              if (j < flattened_args.size() - 1) {
-                stream_ << ", ";
+                flattened_args.push_back(get_scalar_var_for_reg(instr.packed_args[j]));
               }
             }
 
-            stream_ << "};\n";
-            this->PrintIndent(stream_);
-            if (use_depth_tracking_executor()) {
-              std::string depth_str = ", ";
-              auto it = call_graph_depths_.find(i);
-              if (it != call_graph_depths_.end()) {
-                depth_str += std::to_string(it->second);
-              } else {
-                depth_str += "depth++";
-              }
-              stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
-                      << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
-                      << flattened_args.size() << ");\n";
+            auto scalar_op = GetScalarOpName(i);
+            if (scalar_op.size() > 0 && inbuilt_ops_.count(scalar_op)) {
+              ICHECK_EQ(flattened_args.size(), 3);
+              auto op_str = inbuilt_ops_.at(scalar_op);
+              auto op1 = flattened_args[0];
+              auto op2 = flattened_args[1];
+              auto dst_var = flattened_args[2];
+              this->PrintIndent(stream_);
+              stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
             } else {
-              if (lazy_execution()) {
-                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                        << ", " << instr.arity << ", " << args_vec << ".data(), "
+              auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
+              this->PrintIndent(stream_);
+              stream_ << "std::vector<" << GetTensorType() << "> " << args_vec << " = {";
+
+              for (size_t j = 0; j < flattened_args.size(); ++j) {
+                stream_ << flattened_args[j];
+                if (j < flattened_args.size() - 1) {
+                  stream_ << ", ";
+                }
+              }
+
+              stream_ << "};\n";
+              this->PrintIndent(stream_);
+              if (use_depth_tracking_executor()) {
+                std::string depth_str = ", ";
+                auto depth = GetCallGraphDepth(i);
+                if (depth >= 0) {
+                  depth_str += std::to_string(depth);
+                } else {
+                  depth_str += "depth++";
+                }
+                stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
+                        << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
                         << flattened_args.size() << ");\n";
               } else {
-                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                        << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
+                if (lazy_execution()) {
+                  stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                          << ", " << instr.arity << ", " << args_vec << ".data(), "
+                          << flattened_args.size() << ");\n";
+                } else {
+                  stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                          << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
+                }
+              }
+
+              if (IsOpOutputScalar(i) && GetScalarOpName(i).size() == 0) {
+                for (int j = 0; j < instr.arity; ++j) {
+                  if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+                    this->PrintIndent(stream_);
+                    stream_ << GetVarForReg(instr.packed_args[j], true) << " = Scalarize("
+                            << GetVarForReg(instr.packed_args[j]) << ");\n";
+                  }
+                }
               }
             }
             break;
@@ -948,8 +1058,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<Index, Array<Type>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
   const std::unordered_map<Index, int32_t>& get_field_tags_;
-  const std::unordered_map<Index, int32_t>& call_graph_depths_;
+  const std::unordered_map<Index, DictAttrs>& call_attrs_;
   const std::unordered_map<Index, std::array<Index, 4>>& if_offsets_;
+  std::unordered_map<std::string, std::string> inbuilt_ops_;
   std::ostream& stream_;
 };
 
@@ -1041,6 +1152,7 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
 
 void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   // Emit a batched main function, first
+
   auto main_relay_func = Downcast<Function>(mod_->Lookup("main"));
   FuncType function_type = Downcast<FuncType>(main_relay_func->checked_type_);
 
@@ -1239,12 +1351,12 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
-    auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
+    auto function_call_attrs = call_attrs_.at(vm_func.name);
     auto function_if_offsets = if_offsets_.at(vm_func.name);
-    VMAOTFunctionCompiler function_compiler(
-        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, function_call_graph_depths,
-        function_if_offsets, cpp_stream_);
+    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
+                                            function_register_types, function_invoke_type_vars,
+                                            compiled_functions_, function_get_field_tags,
+                                            function_call_attrs, function_if_offsets, cpp_stream_);
     function_compiler.GenerateCPPForFunction(true);
     cpp_stream_ << "\n";
   }
@@ -1256,6 +1368,7 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
 void VMAOTCompiler::EmitMacros(std::ostream& os) {}
 
 void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
+  os << "#include <cstdint>\n";
   os << "#include <dlpack/dlpack.h>\n";
   os << "#include <tvm/runtime/vm/vm_profiling.h>\n";
   os << "#include <tvm/runtime/vm/db_runtime.h>\n";
@@ -1303,12 +1416,12 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     auto function_register_types = register_types_.at(vm_func.name);
     auto function_invoke_type_vars = invoke_type_vars_.at(vm_func.name);
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
-    auto function_call_graph_depths = call_graph_depths_.at(vm_func.name);
+    auto function_call_attrs = call_attrs_.at(vm_func.name);
     auto function_if_offsets = if_offsets_.at(vm_func.name);
-    VMAOTFunctionCompiler function_compiler(
-        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
-        compiled_functions_, function_get_field_tags, function_call_graph_depths,
-        function_if_offsets, hpp_stream_);
+    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
+                                            function_register_types, function_invoke_type_vars,
+                                            compiled_functions_, function_get_field_tags,
+                                            function_call_attrs, function_if_offsets, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 

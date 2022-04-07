@@ -135,12 +135,9 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
         if (it != merged_op_depths_.end() && it->second < MAX_DEPTH_VALUE) {
           auto new_op = call.as<CallNode>();
           auto depth = it->second;
-          auto attrs = new_op->attrs.as<DictAttrsNode>();
-          ICHECK(attrs);
-          Map<String, ObjectRef> new_attrs_dict(attrs->dict);
-          new_attrs_dict.Set(tir::attr::kDBGraphDepth, Integer(depth));
-          auto new_attrs = DictAttrs(new_attrs_dict);
-          ICHECK(new_op);
+          ICHECK(new_op->attrs.defined() && new_op->attrs.as<DictAttrsNode>());
+          auto attrs = Downcast<DictAttrs>(new_op->attrs);
+          auto new_attrs = attrs.WithAttr(tir::attr::kDBGraphDepth, Integer(depth));
           return Call(new_op->op, new_op->args, new_attrs, new_op->type_args, new_op->span);
         }
         return call;

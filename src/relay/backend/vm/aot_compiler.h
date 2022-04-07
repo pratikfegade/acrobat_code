@@ -68,7 +68,13 @@ class SourcePrinter {
     }
   }
 
-  inline std::string GetVarForReg(RegName reg) { return "local_" + std::to_string(reg); }
+  inline std::string GetVarForReg(RegName reg, bool scalarize = false) {
+    if (scalarize) {
+      return "scalar_local_" + std::to_string(reg);
+    } else {
+      return "local_" + std::to_string(reg);
+    }
+  }
 
   inline std::string GetFieldName(size_t index) { return "field_" + std::to_string(index); }
 
@@ -86,7 +92,7 @@ class VMAOTCompiler : SourcePrinter {
           invoke_type_vars,
       const std::unordered_map<std::string, Function>& compiled_functions,
       const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags,
-      const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& call_graph_depths,
+      const std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>>& call_attrs,
       const std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>>&
           if_offsets,
       const std::string& output_directory, const std::string& model_name)
@@ -96,7 +102,7 @@ class VMAOTCompiler : SourcePrinter {
         invoke_type_vars_(invoke_type_vars),
         compiled_functions_(compiled_functions),
         get_field_tags_(get_field_tags),
-        call_graph_depths_(call_graph_depths),
+        call_attrs_(call_attrs),
         if_offsets_(if_offsets),
         output_directory_(output_directory),
         model_name_(model_name) {}
@@ -130,7 +136,7 @@ class VMAOTCompiler : SourcePrinter {
   const std::unordered_map<std::string, std::unordered_map<Index, Array<Type>>>& invoke_type_vars_;
   const std::unordered_map<std::string, Function>& compiled_functions_;
   const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& get_field_tags_;
-  const std::unordered_map<std::string, std::unordered_map<Index, int32_t>>& call_graph_depths_;
+  const std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>>& call_attrs_;
   const std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>>&
       if_offsets_;
   const std::string& output_directory_;

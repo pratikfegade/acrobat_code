@@ -959,7 +959,7 @@ class Coarsener : public ExprMutator {
       } else if (cleaned_value.as<FunctionNode>()) {
         end_group(i);
       } else if (auto vn = cleaned_value.as<CallNode>()) {
-        if (vn->op == GetInvokeTVMOp()) {
+        if (vn->op == GetInvokeTVMOp() && !IsOpOnScalars(vn)) {
           start_or_continue_group(i, true);
         } else {
           end_group(i);

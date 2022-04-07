@@ -34,6 +34,8 @@
 #include <tvm/tir/expr.h>
 #include <tvm/tir/stmt.h>
 
+#include "../../support/utils.h"
+
 namespace tvm {
 namespace relay {
 
@@ -41,19 +43,8 @@ using FPAVarKey = std::pair<const FunctionNode*, const VarNode*>;
 using FPAFunctionKey = std::pair<const FunctionNode*, const FunctionNode*>;
 using FPAOpKey = std::pair<const FunctionNode*, const CallNode*>;
 
-struct PairHash {
-  template <class T1, class T2>
-  std::size_t operator()(const std::pair<T1, T2>& pair) const {
-    return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
-  }
-};
-
-struct PairEquals {
-  template <class T1, class T2>
-  bool operator()(const std::pair<T1, T2>& p1, const std::pair<T1, T2>& p2) const {
-    return p1.first == p2.first && p1.second == p2.second;
-  }
-};
+using PairHash = support::PairHash;
+using PairEquals = support::PairEquals;
 
 using FunctionSet = std::set<const FunctionNode*>;
 using FPAVarStateMap = std::unordered_map<FPAVarKey, FunctionSet, PairHash, PairEquals>;

@@ -157,6 +157,34 @@ inline const Op& GetInvokeTVMOp() {
   return op;
 }
 
+inline bool IsScalarTensorType(const Type& type) {
+  if (auto tn = type.as<TensorTypeNode>()) {
+    return (tn->shape.size() == 0);
+  }
+  return false;
+}
+
+/*!
+ * \brief Check if all the inputs and outputs to a call are scalars
+ * \param op Call to check
+ * \return bool If all inputs and outputs are scalars
+ */
+inline bool IsOpOnScalars(const CallNode* op) {
+  if (!IsScalarTensorType(op->checked_type())) {
+    return false;
+  }
+  size_t start = 0;
+  if (op->op == GetInvokeTVMOp()) {
+    start = 1;
+  }
+  for (size_t i = start; i < op->args.size(); ++i) {
+    if (!IsScalarTensorType(op->args[i]->checked_type())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 template <typename ConditionObjectPtr>
 struct TreeNode {
   typedef std::shared_ptr<TreeNode<ConditionObjectPtr>> pointer;

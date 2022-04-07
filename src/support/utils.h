@@ -239,6 +239,26 @@ inline bool BoolEnvironmentVar(const char* varname) {
   return *var;
 }
 
+/*!
+ * \brief Hash function for std::pair.
+ */
+struct PairHash {
+  template <class T1, class T2>
+  std::size_t operator()(const std::pair<T1, T2>& pair) const {
+    return std::hash<T1>()(pair.first) ^ std::hash<T2>()(pair.second);
+  }
+};
+
+/*!
+ * \brief Equality function for std::pair.
+ */
+struct PairEquals {
+  template <class T1, class T2>
+  bool operator()(const std::pair<T1, T2>& p1, const std::pair<T1, T2>& p2) const {
+    return p1.first == p2.first && p1.second == p2.second;
+  }
+};
+
 }  // namespace support
 }  // namespace tvm
 #endif  // TVM_SUPPORT_UTILS_H_
