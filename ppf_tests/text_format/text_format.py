@@ -7,13 +7,13 @@ from tvm import auto_scheduler
 
 mod = tvm.IRModule()
 p = relay.Prelude(mod)
-mod._import("/home/ppf/Documents/projects/projects/dyn_batch/tvm/ppf_tests/text_format/text_format.rly")
+mod._import("/home/ppf/dyn_batch/tvm/ppf_tests/text_format/text_format.rly")
 
-device = tvm.runtime.device("cpu")
+device = tvm.runtime.device("cuda")
 
-weight = tvm.nd.array(np.zeros((256, 256)).astype("float32"), device=tvm.cpu(0))
+weight = tvm.nd.array(np.zeros((256, 256)).astype("float32"), device=tvm.cuda(0))
 
-target = "llvm"
+target = "cuda"
 batch_size = 8
 lazy_execution=True
 coarsened_execution=False
@@ -21,7 +21,7 @@ batched_execution=True
 scattered_kernels=False
 concurrent_execution=False
 use_autoscheduler=False
-aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test/"
 model_name="tdc"
 generate_aot_code=True
 dynamic_batch_size_estimate=64

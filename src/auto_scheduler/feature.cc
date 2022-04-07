@@ -1317,6 +1317,7 @@ void GetPerStoreFeaturesWorkerFunc(const SearchTask& task, const State& state, i
                        feature);
   } catch (Error& e) {
     // std::cout << "[FEAT] Scheduling error " << e.what() << std::endl;
+    // exit(0);
     (*error_ct)++;
   }
 }

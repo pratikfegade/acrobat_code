@@ -90,15 +90,15 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
 
   std::unordered_map<const VarNode*, Var> scatter_buffer_vars;
   for (auto it : f->scatter_buffer_map) {
-    std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint
-              << " " << it.first << std::endl;
+    // std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint
+    // << " " << it.first << std::endl;
     scatter_buffer_vars[it.second->data.get()] = it.first;
   }
 
   for (size_t i = 0; i < f->params.size(); ++i) {
     tir::Var v = f->params[i];
-    std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " "
-              << scatter_buffer_vars.count(v.get()) << std::endl;
+    // std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " "
+    // << scatter_buffer_vars.count(v.get()) << std::endl;
     std::string vid = AllocVarID(v.get());
     if (i != 0) stream << ", ";
     if (v.dtype().is_handle()) {
@@ -749,7 +749,7 @@ void CodeGenC::PrintVecBinaryOp(const std::string& op, DataType t, PrimExpr lhs,
 void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
   bool has_scatter = op->scatter_buffer_var.defined();
   if (has_scatter) {
-    std::cout << "[CC] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+    // std::cout << "[CC] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
   }
   int lanes = op->dtype.lanes();
   // declare type.
@@ -816,7 +816,7 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
 void CodeGenC::VisitStmt_(const StoreNode* op) {
   bool has_scatter = op->scatter_buffer_var.defined();
   if (has_scatter) {
-    std::cout << "[CC] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
+    // std::cout << "[CC] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
   }
   DataType t = op->value.dtype();
   if (t.lanes() == 1) {

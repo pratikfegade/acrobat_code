@@ -208,7 +208,7 @@ void InferRootBound(const Stage& stage, const GraphContext& ctx,
   stage->op->GatherBound(stage->op, tmap, rmap);
 }
 
-Map<IterVar, Range> InferBound(const Schedule& sch) {
+InferBoundsResult InferBound(const Schedule& sch) {
   // Prepare context
   GraphContext ctx;
   Array<Operation> roots;
@@ -254,10 +254,22 @@ Map<IterVar, Range> InferBound(const Schedule& sch) {
     ret[p.first] =
         Range::FromMinExtent(analyzer.Simplify(p.second->min), analyzer.Simplify(p.second->extent));
   }
-  return Map<IterVar, Range>(ret.begin(), ret.end());
+
+  return InferBoundsResult(Map<IterVar, Range>(ret.begin(), ret.end()), ctx.attach_path,
+                           Map<IterVar, IterVar>(ctx.bind_map.begin(), ctx.bind_map.end()));
 }
 
 TVM_REGISTER_GLOBAL("schedule.InferBound").set_body_typed(InferBound);
+
+InferBoundsResult::InferBoundsResult(Map<IterVar, Range> bounds,
+                                     Map<Operation, Array<IterVar>> attach_map,
+                                     Map<IterVar, IterVar> bind_map) {
+  ObjectPtr<InferBoundsResultNode> n = make_object<InferBoundsResultNode>();
+  n->bounds = std::move(bounds);
+  n->attach_map = std::move(attach_map);
+  n->bind_map = std::move(bind_map);
+  data_ = std::move(n);
+}
 
 }  // namespace te
 }  // namespace tvm

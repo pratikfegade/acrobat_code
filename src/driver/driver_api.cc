@@ -468,7 +468,7 @@ TVM_REGISTER_GLOBAL("driver.lower_schedule")
     .set_body_typed([](te::Schedule sch, const Array<ObjectRef>& args, const String& name,
                        const Map<te::Tensor, tir::Buffer>& binds, bool simple_mode,
                        const Map<te::Tensor, tir::Buffer>& scatter_buffers,
-                       const Map<tir::Var, Range> user_constraints,
+                       const Map<tir::Var, Range>& user_constraints,
                        const Array<String>& print_after_passes) {
       std::unordered_map<te::Tensor, tir::Buffer> c_binds;
       // Check to make sure binds is not null before doing the conversion;
@@ -692,7 +692,7 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
 
   mixed_pass_list.push_back(BindTarget(target));
 
-  mixed_pass_list.push_back(tir::transform::VerifyMemory());
+  // mixed_pass_list.push_back(tir::transform::VerifyMemory());
 
   if (ShouldAnnotateEntryFunc(mixed_mod)) {
     mixed_pass_list.push_back(AnnotateEntryFunc(true));

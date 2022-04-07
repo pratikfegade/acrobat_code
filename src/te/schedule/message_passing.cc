@@ -569,8 +569,10 @@ std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stag
     analyzer.Bind(entry.first->var, entry.second);
   }
 
-  for (auto entry : user_constraints) {
-    analyzer.Bind(entry.first, entry.second);
+  if (user_constraints.defined()) {
+    for (auto entry : user_constraints) {
+      analyzer.Bind(entry.first, entry.second);
+    }
   }
 
   // record the iteration variables with predicates

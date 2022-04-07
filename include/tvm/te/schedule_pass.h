@@ -62,9 +62,9 @@ TVM_DLL void AutoInlineInjective(Schedule sch);
  * \brief Infer the bound of all iteration variables relates to the schedule.
  *
  * \param sch The root schedule to infer all the bounds.
- * \return the result bound of the iteration Variable
+ * \return the result bound of the iteration Variable, along with some additional information
  */
-Map<IterVar, Range> InferBound(const Schedule& sch);
+InferBoundsResult InferBound(const Schedule& sch);
 
 /*!
  * \brief Verify if there is any argument bound to compact buffer.
@@ -79,7 +79,7 @@ bool VerifyCompactBuffer(const Stmt& stmt);
  * \brief Schedule's dependent operations.
  *
  * \param s The schedule to be realized
- * \param dom_map The domain of each iter vars.
+ * \param dom_map The results of bound inference.
  * \param user_constraints A set of range constraints on variables
  *                         provided by the user, especially for
  *                         variables used as extents of loops.
@@ -89,7 +89,7 @@ bool VerifyCompactBuffer(const Stmt& stmt);
  *                                because we will also delete the init part of reduction
  * \return the result Stmt
  */
-Stmt ScheduleOps(Schedule s, Map<IterVar, Range> dom_map, Map<Var, Range> user_contraints,
+Stmt ScheduleOps(Schedule s, InferBoundsResult infer_bounds_result, Map<Var, Range> user_contraints,
                  bool debug_keep_trivial_loop);
 
 /*!
