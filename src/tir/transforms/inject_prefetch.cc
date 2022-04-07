@@ -84,6 +84,8 @@ class PrefetchInjector : public StmtMutator {
     return ret;
   }
 
+  Stmt VisitStmt_(const BufferRealizeNode* op) final { return StmtMutator::VisitStmt_(op); }
+
  private:
   std::vector<Var> loop_nest_;
   std::unordered_map<const VarNode*, IntSet> vectorized_;

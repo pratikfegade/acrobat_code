@@ -31,6 +31,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "../../runtime/thread_storage_scope.h"
 #include "../../tir/transforms/ir_utils.h"
 #include "../operation/op_utils.h"
 #include "graph.h"
@@ -202,7 +203,7 @@ class SchedulePostProc : public StmtExprMutator {
         }
       }
     } else if (op->attr_key == tir::attr::buffer_bind_scope) {
-      Array<ObjectRef> tuple = Downcast<Array<ObjectRef> >(op->node);
+      Array<ObjectRef> tuple = Downcast<Array<ObjectRef>>(op->node);
       Tensor tensor = Downcast<Tensor>(tuple[1]);
       auto it = replace_op_.find(tensor->op.get());
       if (it != replace_op_.end()) {
@@ -331,8 +332,9 @@ class SchedulePostProc : public StmtExprMutator {
   arith::Analyzer analyzer_;
 };
 
-Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, Map<Var, Range> user_contraints,
-                 bool debug_keep_trivial_loop) {
+Stmt ScheduleOps(Schedule sch, InferBoundsResult infer_bounds_result,
+                 Map<Var, Range> user_contraints, bool debug_keep_trivial_loop) {
+  Map<IterVar, Range> dom_map_ = infer_bounds_result->bounds;
   Stmt body = Stmt();
   std::unordered_map<IterVar, Range> dom_map = as_unordered_map(dom_map_);
   // scan init and scan updates
@@ -354,6 +356,41 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, Map<Var, Range> use
     ICHECK(!g->op.defined());
     ICHECK_EQ(g->leaf_iter_vars.size(), 0U);
   }
+
+  // Set scopes for stages that don't have set scopes yet. We
+  // replicate the logic implemented in the tir.StorageFlatten pass
+  // here to ensure that all stages all scopes as this is required to
+  // implement local padding as described in DietCode and as
+  // implemented in MakeBoundCheck
+
+  sch->InitCache();
+  auto attach_path = infer_bounds_result->attach_map;
+  auto bind_map = infer_bounds_result->bind_map;
+  for (auto kv : attach_path) {
+    auto op = kv.first;
+    auto stage = sch->op2stage_cache_.at(op.get());
+    if (stage->scope.size() > 0) {
+      continue;
+    }
+    auto path = kv.second;
+    // std::cout << "[BI] Op attach: " << op->name << std::endl;
+    for (auto iv : path) {
+      if (bind_map.count(iv)) {
+        // std::cout << "[BI]   IV: " << iv->var->name_hint << " " << iv->thread_tag;
+        auto bind_iv = bind_map.at(iv);
+        // std::cout << bind_iv->var->name_hint << " " << bind_iv->thread_tag;
+        auto ts = runtime::ThreadScope::Create(bind_iv->thread_tag);
+
+        runtime::StorageScope skey;
+        skey.rank = runtime::DefaultStorageRank(ts.rank);
+        stage.set_scope(skey.to_string());
+        // std::cout << skey.to_string();
+        break;
+      }
+      // std::cout << std::endl;
+    }
+  }
+
   // reverse the post DFS order.
   for (size_t i = sch->stages.size(); i != 0; --i) {
     Stage s = sch->stages[i - 1];
@@ -396,7 +433,6 @@ Stmt ScheduleOps(Schedule sch, Map<IterVar, Range> dom_map_, Map<Var, Range> use
   SchedulePostProc post_proc;
   post_proc.Init(sch);
   ICHECK(body.defined());
-  // std::cout << "[SCH] " << body << std::endl;
   return post_proc(std::move(body));
 }
 

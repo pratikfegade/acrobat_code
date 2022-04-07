@@ -1020,7 +1020,7 @@ PopulationGenerationRule::ResultKind MutateTileSize::Apply(SketchPolicyNode* pol
                            ps->inner_to_outer));
     return ResultKind::kValid;
   }
-  std::cout << "[SPR] Invalid 6" << std::endl;
+  // std::cout << "[SPR] Invalid 6" << std::endl;
   return ResultKind::kInvalid;
 }
 

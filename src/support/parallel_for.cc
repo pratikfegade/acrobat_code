@@ -51,10 +51,10 @@ void parallel_for(int begin, int end, const std::function<void(int)>& f, int ste
                   const PartitionerFuncType partitioner)
 
 {
-  // for (int i = begin; i < end; i += step) {
-  // f(i);
-  // }
-  // return;
+  for (int i = begin; i < end; i += step) {
+    f(i);
+  }
+  return;
 
   static bool GLOBAL_PARALLEL_FOR_FLAG{false};
   static std::mutex M_GLOBAL_PARALLEL_FOR_FLAG;

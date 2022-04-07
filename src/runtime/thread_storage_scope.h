@@ -174,7 +174,7 @@ struct ThreadScope {
       r.rank = 1;
       r.dim_index = static_cast<int>(s[10] - 'x');
     } else {
-      LOG(FATAL) << "Unknown threadscope " << s;
+      LOG(FATAL) << "Unknown threadscope " << s << " " << s.compare(0, 10, "threadIdx.");
     }
     return r;
   }

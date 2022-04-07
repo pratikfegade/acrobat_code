@@ -614,6 +614,7 @@ def _local_build_worker(inp_serialized, build_func, verbose):
         )
     # pylint: disable=broad-except
     except Exception:
+        print("Error 1")
         error_no = MeasureErrorNo.INSTANTIATION_ERROR
         error_msg = make_traceback_info()
 
@@ -627,6 +628,7 @@ def _local_build_worker(inp_serialized, build_func, verbose):
             func.export_library(filename, build_func)
         # pylint: disable=broad-except
         except Exception:
+            print("Error 2")
             error_no = MeasureErrorNo.COMPILE_HOST
             error_msg = make_traceback_info()
     else:
@@ -637,8 +639,6 @@ def _local_build_worker(inp_serialized, build_func, verbose):
             print(".", end="", flush=True)
         else:
             print(".E", end="", flush=True)  # Build error
-            print(error_no, error_msg, flush=True)
-            exit(0)
 
     return filename, args, error_no, error_msg, time.time() - tic
 
@@ -659,7 +659,8 @@ def local_build_worker(args):
     """
     inp, build_func, verbose = args
 
-    return _local_build_worker(inp, build_func, verbose)
+    res = _local_build_worker(inp, build_func, verbose)
+    return res
 
 
 @tvm._ffi.register_func("auto_scheduler.local_builder.build")
@@ -704,6 +705,10 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
         ],
     )
 
+    # tuple_res  = []
+    # for i in inputs:
+        # tuple_res.append(local_build_worker((i.serialize(), BuildFunc.build_func, verbose)))
+
     results = []
     for res in tuple_res:
         if res.status == StatusKind.COMPLETE:
@@ -715,6 +720,8 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
         elif res.status == StatusKind.EXCEPTION:
             if verbose >= 1:
                 print(".E", end="", flush=True)  # Build error
+                print("YOLO", res, flush=True)
+                # exit(0)
             results.append(
                 BuildResult(None, [], MeasureErrorNo.COMPILE_HOST, repr(res.value), timeout)
             )
@@ -1003,11 +1010,7 @@ def local_run(
     worker = PopenWorker()
     for inp, build_res in zip(inputs, build_results):
         if build_res.error_no != 0:
-
             print("Build error!!")
-            import traceback
-            import sys
-            traceback.print_stack(file=sys.stdout)
 
             res = (
                 (MAX_FLOAT,),

@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 /*!
  * \file storage_flatten.cc
  * \brief Flattens storage from multi-dimensional array to 1D buffer access
@@ -966,7 +965,6 @@ class BufferBindUnwrapper : public StmtExprMutator {
     ICHECK(remap.target.defined());
     const CallNode* tuple = op->value.as<CallNode>();
     ICHECK(tuple && tuple->op.same_as(builtin::tvm_tuple()));
-
     for (size_t i = 0; i < tuple->args.size(); i += 2) {
       remap.begins.push_back(tuple->args[i]);
       remap.extents.push_back(tuple->args[i + 1]);

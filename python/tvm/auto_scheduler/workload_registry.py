@@ -92,7 +92,6 @@ def register_workload(func_name, f=None, override=False):
         if func_name in WORKLOAD_FUNC_REGISTRY and not override:
             raise RuntimeError("%s has been registered already" % func_name)
         WORKLOAD_FUNC_REGISTRY[func_name] = myf
-        # print(" Inserting in registry", func_name, myf)
         return myf
 
     if f:
@@ -158,7 +157,8 @@ def make_workload_key(func, args):
         )
 
     args = serialize_args(args)
-    return json.dumps((func_name,) + args)
+    key = json.dumps((func_name,) + args)
+    return key
 
 
 @tvm._ffi.register_func("auto_scheduler.workload_key_to_tensors")
@@ -196,7 +196,6 @@ def workload_key_to_tensors(workload_key):
     assert callable(value)
 
     args = deserialize_args(workload[1:])
-    # print("   Deserialized", str(workload[1:], "to", str(args)))
     return value(*args)
 
 
@@ -227,7 +226,6 @@ def serialize_workload_registry_entry(workload_key):
 
     if sname not in WORKLOAD_FUNC_REGISTRY:
         print(sname, WORKLOAD_FUNC_REGISTRY)
-        exit(0)
     svalue = WORKLOAD_FUNC_REGISTRY[sname]
     if not callable(svalue):
         # pylint: disable=assignment-from-no-return
