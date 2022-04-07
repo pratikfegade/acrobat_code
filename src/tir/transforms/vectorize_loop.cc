@@ -35,6 +35,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "ir_utils.h"
+
 namespace tvm {
 namespace tir {
 
@@ -96,6 +98,32 @@ class VecAllocAccess : public StmtExprMutator {
 //
 // The class that performs local padding.
 namespace {
+
+/**
+ * @brief Check whether can perform local padding on the if-condition. This is
+ *        done by testing whether the condition's only dependency is
+ *        threadIdx.x. If tested true, then local padding is NOT allowed.
+ */
+bool CanLocalPad(const PrimExpr& cond) {
+  class Visitor : public ExprVisitor {
+   public:
+    void VisitExpr_(const VarNode* op) final {
+      if (IsCUDAThreadIdx(op->name_hint)) {
+        cuda_thread_visited_ = true;
+      } else if (IsCUDABlockIdx(op->name_hint)) {
+        cuda_block_visited_ = false;
+      }
+    }
+
+    bool cuda_thread_visited_{false};
+    bool cuda_block_visited_{false};
+  };
+
+  Visitor visitor;
+  visitor(cond);
+  return !(visitor.cuda_thread_visited_ && !visitor.cuda_block_visited_);
+}
+
 class LocalPadder : public StmtExprMutator {
  private:
   // As is commented in the `MakeBoundCheck` function call, we have to *inline*
@@ -144,25 +172,7 @@ class LocalPadder : public StmtExprMutator {
     return Store(op->buffer_var, Select(merged_predicate, op->value, PrimExpr(0.f)), op->index,
                  op->predicate);
   }
-  PrimExpr VisitExpr_(const VarNode* op) final {
-    if (!substitute_mode_ || op->name_hint != "threadIdx.x") {
-      return StmtExprMutator::VisitExpr_(op);
-    }
-    return Integer(0);
-  }
-
- public:
-  /**
-   * @brief Check whether can perform local padding on the if-condition. This is
-   *        done by testing whether the condition's only dependency is
-   *        threadIdx.x. If tested true, then local padding is NOT allowed.
-   */
-  bool CanLocalPad(const PrimExpr& cond) {
-    substitute_mode_ = true;
-    PrimExpr subsituted_cond = analyzer.Simplify(VisitExpr(cond));
-    substitute_mode_ = false;
-    return !subsituted_cond.as<IntImmNode>();
-  }
+  PrimExpr VisitExpr_(const VarNode* op) final { return StmtExprMutator::VisitExpr_(op); }
 
  private:
   bool substitute_mode_ = false;
@@ -299,6 +309,7 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
       return Select(cond, BroadcastTo(t, lanes), BroadcastTo(f, lanes));
     }
   }
+
   PrimExpr VisitExpr_(const CastNode* op) final {
     PrimExpr value = this->VisitExpr(op->value);
     if (value.same_as(op->value)) {
@@ -523,7 +534,7 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
     // (i.e., transform the vectorized loop into the equivalent serial version).
     LocalPadder local_padder;
     if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) && dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1) &&
-        local_padder.CanLocalPad(condition)) {
+        CanLocalPad(condition)) {
       return local_padder(Scalarize(GetRef<Stmt>(op)));
     }
 

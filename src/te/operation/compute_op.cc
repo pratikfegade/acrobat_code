@@ -201,12 +201,15 @@ Operation ComputeOpNode::ReplaceInputs(const Operation& self,
   }
 }
 
-void ComputeOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
+// Update if, no opts or if not shared
+// (!dmlc::GetEnv("DIETCODE_SCHED_OPT", 0) || t->op->name.find(".shared") == std::string::npos);
+
+void ComputeOpNode::PropBoundToInputs(const Schedule& schedule, const Operation& self,
                                       arith::Analyzer* analyzer,
                                       const std::unordered_map<const VarNode*, IntSet>& dom_map,
                                       std::unordered_map<Tensor, TensorDom>* out_dom_map) const {
   ICHECK_EQ(self.operator->(), this);
-  auto fvisit = [&dom_map, out_dom_map, analyzer, &stage](const ObjectRef& n) {
+  auto fvisit = [&dom_map, out_dom_map, analyzer, &schedule, self](const ObjectRef& n) {
     if (auto* pload = n.as<tir::ProducerLoadNode>()) {
       Tensor t = Downcast<Tensor>(pload->producer);
       if (t->op.defined() && out_dom_map->count(t)) {
@@ -223,6 +226,9 @@ void ComputeOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
             PrimExpr shape_i_max_value = t->shape[i] - 1;
             PrimExpr min_value = arg_interval->min_value;
             PrimExpr max_value = arg_interval->max_value;
+
+            std::cout << "[PBC] " << self->name << " " << t << " " << min_value << " " << max_value
+                      << " " << shape_i_min_value << " " << shape_i_max_value << std::endl;
             // Prefer the shape bounds only when we can prove they are tighter.
             // We must update bound's ends in pairs.  Here is an counter example: shape_i is
             // [0, 0] and arg_interval is [threadIdx.y, threadIdx.y], where threadIdx.y's range is
@@ -237,11 +243,12 @@ void ComputeOpNode::PropBoundToInputs(const Stage& stage, const Operation& self,
               // shrink its bounds. Because to support local padding, the size
               // of the local workspace must be preserved in FULL.
               // if ((!dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) ||
-              //      !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
-              //     std::regex_match(std::string(t->op->name), std::regex("(.*)[.]shared"))) {
+              // !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
+              // std::regex_match(std::string(t->op->name), std::regex("(.*)[.]shared"))) {
+              auto t_stage = schedule->op2stage_cache_.at(t->op.get());
               if ((!dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) ||
-                   !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) &&
-                  support::IsShared(stage->scope)) {
+                   !dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) ||
+                  !support::IsShared(t_stage->scope)) {
                 min_value = shape_i_min_value;
                 max_value = shape_i_max_value;
               }

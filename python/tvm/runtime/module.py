@@ -164,7 +164,7 @@ class Module(object):
 
     def __getitem__(self, name):
         if not isinstance(name, string_types):
-            raise ValueError("Can only take string as function name")
+            raise ValueError("Can only take string as function name:", name)
         return self.get_function(name)
 
     def __eq__(self, other):

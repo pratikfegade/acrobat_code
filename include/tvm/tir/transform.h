@@ -363,6 +363,13 @@ TVM_DLL Pass PointerValueTypeRewrite();
 TVM_DLL Pass HoistIfThenElse();
 
 /*!
+ * \brief an improved version of the above pass.
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass BetterHoistIfThenElse();
+
+/*!
  * \brief Lower cross-thread reduction from thread
  * bindings to intrinsic function calls.
  * \return The pass.

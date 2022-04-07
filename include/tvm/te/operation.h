@@ -106,7 +106,7 @@ class TVM_DLL OperationNode : public Object {
    *  The function is only asked to fill the bounds for Tensors that
    *  is already in the out_dom_map
    */
-  virtual void PropBoundToInputs(const Stage& stage, const Operation& self,
+  virtual void PropBoundToInputs(const Schedule& schedule, const Operation& self,
                                  arith::Analyzer* analyzer,
                                  const std::unordered_map<const VarNode*, IntSet>& dom_map,
                                  std::unordered_map<Tensor, TensorDom>* out_dom_map) const = 0;
@@ -171,7 +171,7 @@ class PlaceholderOpNode : public OperationNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   void GatherBound(const Operation& self, const std::unordered_map<Tensor, TensorDom>& tensor_dom,
@@ -245,7 +245,7 @@ class TVM_DLL ComputeOpNode : public BaseComputeOpNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
@@ -302,7 +302,7 @@ class TensorComputeOpNode : public BaseComputeOpNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   Stmt BuildProvide(const Schedule& schedule, const Stage& stage,
@@ -379,7 +379,7 @@ class ScanOpNode : public OperationNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   void GatherBound(const Operation& self, const std::unordered_map<Tensor, TensorDom>& tensor_dom,
@@ -444,7 +444,7 @@ class ExternOpNode : public OperationNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   void GatherBound(const Operation& self, const std::unordered_map<Tensor, TensorDom>& tensor_dom,
@@ -511,7 +511,7 @@ class HybridOpNode : public OperationNode {
   Array<Tensor> InputTensors() const final;
   Operation ReplaceInputs(const Operation& self,
                           const std::unordered_map<Tensor, Tensor>& rmap) const final;
-  void PropBoundToInputs(const Stage& stage, const Operation& self, arith::Analyzer* analyzer,
+  void PropBoundToInputs(const Schedule& schedule, const Operation& self, arith::Analyzer* analyzer,
                          const std::unordered_map<const VarNode*, IntSet>& dom_map,
                          std::unordered_map<Tensor, TensorDom>* out_dom_map) const final;
   void GatherBound(const Operation& self, const std::unordered_map<Tensor, TensorDom>& tensor_dom,

@@ -228,6 +228,26 @@ Region ConvertRegion(const MatchBufferRegion& match_buffer, const Region& region
 Bool IsFromLegacyTESchedule(PrimFunc f);
 
 /*!
+ * \brief Check if a given var name is a CUDA thread
+ *
+ * \param thread_name var name to check
+ * \return Whether or not the given var name is a CUDA thread
+ */
+inline bool IsCUDAThreadIdx(const std::string& var_name) {
+  return (var_name.compare(0, 10, "threadIdx.") == 0);
+}
+
+/*!
+ * \brief Check if a given var name is a CUDA block
+ *
+ * \param block_name var name to check
+ * \return Whether or not the given var name is a CUDA block
+ */
+inline bool IsCUDABlockIdx(const std::string& var_name) {
+  return (var_name.compare(0, 9, "blockIdx.") == 0);
+}
+
+/*!
  *\brief Context helper to update domain map within conditional scope.
  *
  * Assume the condition is `0 <= i && i < 9` and global domain of i is [0, 20], thus `bounds[i]` is

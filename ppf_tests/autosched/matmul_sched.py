@@ -3,6 +3,11 @@ os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
 os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
 
+os.environ["DIETCODE_SCHED_OPT_PARTITION_BLOCKIDX"] = "1"
+os.environ["DIETCODE_SCHED_OPT_PARTITION_CONST_LOOPS"] = "1"
+os.environ["DIETCODE_SCHED_OPT"] = "1"
+
+
 import numpy as np
 import tvm
 from tvm import te, auto_scheduler
@@ -70,15 +75,30 @@ A_shared_ax0_ax1_fused_o, A_shared_ax0_ax1_fused_i = s[A_shared].split(A_shared_
 s[A_shared].vectorize(A_shared_ax0_ax1_fused_i)
 A_shared_ax0_ax1_fused_o_o, A_shared_ax0_ax1_fused_o_i = s[A_shared].split(A_shared_ax0_ax1_fused_o, factor=898)
 s[A_shared].bind(A_shared_ax0_ax1_fused_o_i, te.thread_axis("threadIdx.x"))
-s[matmul].pragma(matmul_i_o_o_o_o, "auto_unroll_max_step", 1024)
-s[matmul].pragma(matmul_i_o_o_o_o, "unroll_explicit", True)
+# s[matmul].pragma(matmul_i_o_o_o_o, "auto_unroll_max_step", 1024)
+# s[matmul].pragma(matmul_i_o_o_o_o, "unroll_explicit", True)
 
 print_after_passes = [
-    # "tir.InjectPrefetch",
-    # "tir.LoopPartition",
+    # "tir.HoistIfThenElse",
+    # "tir.RewriteUnsafeSelect",
 ]
 
 args = [N, A, B, C, out]
-lowered = tvm.lower(s, args, simple_mode=True, print_after_passes=print_after_passes)
+# lowered = tvm.lower(s, args, simple_mode=True, print_after_passes=print_after_passes)
 # print(lowered)
-fadd, _ = tvm.build(lowered, args, target)
+built = tvm.build(s, args=args, target=target)
+print(built.imported_modules[0].get_source())
+
+N = 449
+
+ctx = tvm.gpu(0)
+Ai = tvm.nd.empty((N, L), dtype="float32", device=ctx)
+Bi = tvm.nd.empty((L, M), dtype="float32", device=ctx)
+Ci = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+outi = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+inputs = [N, Ai, Bi, Ci, outi]
+
+evaluator = built.time_evaluator(built.entry_name, ctx, repeat=5, number=100)
+eval_result = evaluator(*inputs)
+def mean(l): return sum(l) / len(l)
+print(mean(list(eval_result.results)[1:]) * 1000)

@@ -507,7 +507,8 @@ class LoopPartitioner : public StmtMutator {
     auto as = GetRef<Stmt>(op);
     if (selector.candidates.count(as)) {
       // try optimizing for the inner body first
-      Stmt new_as_body = Downcast<AttrStmt>(StmtMutator::VisitStmt(op->body));
+      auto inner_body = StmtMutator::VisitStmt(op->body);
+      Stmt new_as_body = Downcast<AttrStmt>(inner_body);
       AttrStmt new_as = AttrStmt(op->node, op->attr_key, op->value, new_as_body);
       Stmt s = TryPartition(new_as, var, 0, op->value - 1, new_as_body, true);
       if (s.defined()) {

@@ -39,7 +39,7 @@ using namespace tir;
 // out_dom: the domain of root iter vars in output op
 // in_region: region of each input tensor.
 // return The location of the tensorized scope start.
-size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
+size_t InferTensorizeRegion(const ComputeOpNode* self, const Schedule& schedule, const Stage& stage,
                             const std::unordered_map<IterVar, Range>& dom_map,
                             std::unordered_map<IterVar, Range>* out_dom,
                             std::unordered_map<Tensor, Array<Range> >* in_region) {
@@ -94,7 +94,7 @@ size_t InferTensorizeRegion(const ComputeOpNode* self, const Stage& stage,
     temp_dmap[iv->var.get()] = iset;
   }
   // Input domains
-  self->PropBoundToInputs(stage, stage->op, &analyzer, temp_dmap, &in_dom);
+  self->PropBoundToInputs(schedule, stage->op, &analyzer, temp_dmap, &in_dom);
   Range none;
   for (const auto& kv : in_dom) {
     Array<Range> vec;
@@ -347,7 +347,7 @@ Stmt MakeTensorize(const ComputeOpNode* self, const Schedule& schedule, const St
                    const Map<Var, Range>& user_contraints, bool debug_keep_trivial_loop) {
   std::unordered_map<IterVar, Range> out_dom;
   std::unordered_map<Tensor, Array<Range> > in_region;
-  size_t tloc = InferTensorizeRegion(self, stage, dom_map, &out_dom, &in_region);
+  size_t tloc = InferTensorizeRegion(self, schedule, stage, dom_map, &out_dom, &in_region);
   TensorIntrin intrin = stage->iter_var_attrs.at(stage->leaf_iter_vars[tloc])->tensor_intrin;
   ICHECK(intrin.defined());
   ComputeLoopNest n = ComputeLoopNest::Create(self, schedule, stage, dom_map, user_contraints,
@@ -474,13 +474,14 @@ Stmt MakeTensorize(const ComputeOpNode* self, const Schedule& schedule, const St
 
 // Register functions for unittests
 TVM_REGISTER_GLOBAL("test.op.InferTensorizeRegion").set_body([](TVMArgs args, TVMRetValue* ret) {
-  Stage stage = args[0];
-  Map<IterVar, Range> dmap = args[1];
+  Schedule schedule = args[0];
+  Stage stage = args[1];
+  Map<IterVar, Range> dmap = args[2];
   std::unordered_map<IterVar, Range> out_dom;
   std::unordered_map<Tensor, Array<Range> > in_region;
   ICHECK(stage->op.as<ComputeOpNode>());
-  InferTensorizeRegion(stage->op.as<ComputeOpNode>(), stage, as_unordered_map(dmap), &out_dom,
-                       &in_region);
+  InferTensorizeRegion(stage->op.as<ComputeOpNode>(), schedule, stage, as_unordered_map(dmap),
+                       &out_dom, &in_region);
   *ret = Array<ObjectRef>{Map<IterVar, Range>(out_dom), Map<Tensor, Array<Range> >(in_region)};
 });
 

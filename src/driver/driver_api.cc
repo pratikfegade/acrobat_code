@@ -711,6 +711,7 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
   mixed_pass_list.push_back(tir::transform::InferFragment());
   mixed_pass_list.push_back(tir::transform::LowerThreadAllreduce());
   mixed_pass_list.push_back(tir::transform::LowerScatterLoadsAndStores());
+  mixed_pass_list.push_back(tir::transform::BetterHoistIfThenElse());
 
   bool module_unpacked_api = mixed_mod->GetAttr<relay::Executor>(tvm::attr::kExecutor)
                                  .value_or(relay::Executor::Create("graph", {}))

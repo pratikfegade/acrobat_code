@@ -10,6 +10,7 @@ from tvm import te, auto_scheduler
 N = te.var("N")
 M = 1024
 dtype = "float32"
+target = "cuda"
 
 scale = 0.125
 A = te.placeholder((N, M), name='A')
@@ -44,4 +45,17 @@ s[Asum].pragma(Asum_b_o, "auto_unroll_max_step", 64)
 s[Asum].pragma(Asum_b_o, "unroll_explicit", True)
 
 args = [N, A, O]
-print(tvm.lower(s, args, simple_mode=True))
+# print(tvm.lower(s, args, simple_mode=True))
+built = tvm.build(s, args=args, target=target)
+
+N = 449
+
+ctx = tvm.gpu(0)
+Ai = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+Oi = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+inputs = [N, Ai, Oi]
+
+evaluator = built.time_evaluator(built.entry_name, ctx, repeat=5, number=100)
+eval_result = evaluator(*inputs)
+def mean(l): return sum(l) / len(l)
+print(mean(list(eval_result.results)[1:]) * 1000)

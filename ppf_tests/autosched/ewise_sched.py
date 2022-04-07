@@ -10,6 +10,7 @@ from tvm import te, auto_scheduler
 M = 1024
 N = te.var("N")
 dtype = "float32"
+target = "cuda"
 
 A = te.placeholder((N, M), name="A", dtype=dtype)
 B = te.placeholder((N, M), name="B", dtype=dtype)
@@ -26,3 +27,17 @@ s[C].bind(C_i_j_fused_i, te.thread_axis("threadIdx.x"))
 
 args = [N, A, B, C]
 print(tvm.lower(s, args, simple_mode=True))
+built = tvm.build(s, args=args, target=target)
+
+N = 449
+
+ctx = tvm.gpu(0)
+Ai = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+Bi = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+Ci = tvm.nd.empty((N, M), dtype="float32", device=ctx)
+inputs = [N, Ai, Bi, Ci]
+
+evaluator = built.time_evaluator(built.entry_name, ctx, repeat=5, number=100)
+eval_result = evaluator(*inputs)
+def mean(l): return sum(l) / len(l)
+print(mean(list(eval_result.results)[1:]) * 1000)

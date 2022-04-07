@@ -87,7 +87,7 @@ StorageScope InferStorageScope(const Stage& stage, const GraphContext& ctx) {
   return s;
 }
 
-void InferRootBound(const Stage& stage, const GraphContext& ctx,
+void InferRootBound(const Schedule& sch, const Stage& stage, const GraphContext& ctx,
                     std::unordered_map<IterVar, Range>* rmap) {
   ICHECK_NE(stage->attach_type, kInline) << "call schedule.normalize before scheduleops";
   if (stage->attach_type == kInlinedAlready) return;
@@ -203,7 +203,7 @@ void InferRootBound(const Stage& stage, const GraphContext& ctx,
       }
       analyzer.Bind(iv->var, r, true);
     }
-    op->PropBoundToInputs(op_stage, op, &analyzer, dom_map, &tmap);
+    op->PropBoundToInputs(sch, op, &analyzer, dom_map, &tmap);
   }
   stage->op->GatherBound(stage->op, tmap, rmap);
 }
@@ -229,11 +229,13 @@ InferBoundsResult InferBound(const Schedule& sch) {
     ctx.op2stage_[stage->op.get()] = stage;
   }
   ctx.attach_path = CreateAttachPath(sch);
+
+  static_cast<ScheduleNode*>(const_cast<Object*>(sch.get()))->InitCache();
   // Run inference.
   std::unordered_map<IterVar, Range> ret;
   for (size_t i = sch->stages.size(); i != 0; --i) {
     const Stage& stage = sch->stages[i - 1];
-    InferRootBound(stage, ctx, &ret);
+    InferRootBound(sch, stage, ctx, &ret);
 
     // bind bound of root iter vars.
     for (auto iv : stage->op->root_iter_vars()) {
