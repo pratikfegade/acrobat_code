@@ -146,7 +146,6 @@ void DynBatchRuntime<ExecutorType, TensorType>::InvokePacked(int64_t packed_inde
   if (concurrent_execution_ || lazy_execution_) {
     shared_state_.lazy_executor_.AddPackedCallUnrolled(packed_index, args, num_args);
   } else {
-    // std::cout << "Invoking " << packed_index << std::endl;
     InvokePackedFnUnrolled(packed_index, shared_state_.packed_funcs_[packed_index], args, num_args);
   }
 }

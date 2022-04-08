@@ -227,8 +227,9 @@ void ComputeOpNode::PropBoundToInputs(const Schedule& schedule, const Operation&
             PrimExpr min_value = arg_interval->min_value;
             PrimExpr max_value = arg_interval->max_value;
 
-            std::cout << "[PBC] " << self->name << " " << t << " " << min_value << " " << max_value
-                      << " " << shape_i_min_value << " " << shape_i_max_value << std::endl;
+            // std::cout << "[PBC] " << self->name << " " << t << " " << min_value << " " <<
+            // max_value
+            //           << " " << shape_i_min_value << " " << shape_i_max_value << std::endl;
             // Prefer the shape bounds only when we can prove they are tighter.
             // We must update bound's ends in pairs.  Here is an counter example: shape_i is
             // [0, 0] and arg_interval is [threadIdx.y, threadIdx.y], where threadIdx.y's range is

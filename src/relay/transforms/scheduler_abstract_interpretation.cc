@@ -66,7 +66,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       : mod_(mod), recursive_functions_(recursive_functions), callees_map_(callees_map) {
     for (auto kv : mod_->functions) {
       func_name_map_[kv.second.get()] = kv.first->name_hint;
-      std::cout << "[FUNC_NAME] " << kv.second.get() << " " << kv.first->name_hint << std::endl;
+      // std::cout << "[FUNC_NAME] " << kv.second.get() << " " << kv.first->name_hint << std::endl;
     }
     stack_.push_back(nullptr);
   }
@@ -80,7 +80,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     auto call_graph = CallGraph(mod_);
     size_t i = 0;
     for (; i < max_iterations_; ++i) {
-      std::cout << "[SAI] ITERATION " << i << std::endl;
+      // std::cout << "[SAI] ITERATION " << i << std::endl;
       visited_functions_.clear();
       changed_ = false;
       auto entry_func = Downcast<Function>(mod_->Lookup("main"));
@@ -107,21 +107,23 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       merged_op_depths[kv.first.second] = Merge(merged_op_depths[kv.first.second], kv.second).first;
     }
 
-    for (auto kv : merged_var_states) {
-      std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
-                << std::endl;
-    }
+    if (false) {
+      for (auto kv : merged_var_states) {
+        std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
+                  << std::endl;
+      }
 
-    for (auto kv : merged_function_states) {
-      std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
-                << std::endl;
-    }
+      for (auto kv : merged_function_states) {
+        std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
+                  << std::endl;
+      }
 
-    std::cout << "[SAI] Iterations: " << i << std::endl;
-    for (auto kv : merged_op_depths) {
-      if (kv.second < MAX_DEPTH_VALUE) {
-        std::cout << "[SAI]  Call Depths: " << PrettyPrint(GetRef<Expr>(kv.first)) << " "
-                  << kv.second << std::endl;
+      std::cout << "[SAI] Iterations: " << i << std::endl;
+      for (auto kv : merged_op_depths) {
+        if (kv.second < MAX_DEPTH_VALUE) {
+          std::cout << "[SAI]  Call Depths: " << PrettyPrint(GetRef<Expr>(kv.first)) << " "
+                    << kv.second << std::endl;
+        }
       }
     }
 
@@ -193,10 +195,10 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
   }
 
   int Add(const SAIVarKey& var, const int& to_add, const std::string& reason) {
-    if (to_add == MAX_DEPTH_VALUE) {
-      std::cout << "Capping " << func_name_map_[var.first] << " " << var.second->vid->name_hint
-                << " " << reason << std::endl;
-    }
+    // if (to_add == MAX_DEPTH_VALUE) {
+    // std::cout << "Capping " << func_name_map_[var.first] << " " << var.second->vid->name_hint
+    // << " " << reason << std::endl;
+    // }
     return Add<SAIVarKey, SAIVarStateMap>(var_states_, var, to_add);
   }
 
@@ -340,31 +342,17 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     }
 
     if (op->op == GetInvokeTVMOp()) {
-      // std::cout << "[SAI] OpDepth " << GetCurrentContext() << " "
-      // << PrettyPrint(RemoveOnDeviceCalls(GetRef<Expr>(op))) << std::endl;
       auto callee_prim_func = mod_->Lookup(Downcast<GlobalVar>(op->args[0]));
-      auto access_modes_opt =
-          callee_prim_func->GetAttr<Array<Integer>>(tir::attr::kDBArgAccessModes);
-      ICHECK(access_modes_opt) << "No access modes found for " << op->args[0];
-      auto access_modes = access_modes_opt.value();
 
-      auto inputs_tuple = op->args[1];
-      auto inputs_depth = VisitExpr(inputs_tuple);
-
-      // for (auto var : inputs_tuple.as<TupleNode>()->fields) {
-      // std::cout << "[SAI]    Input var " << var << " " << VisitExpr(var) << std::endl;
-      // }
+      auto inputs_depth = VisitExpr(op->args[1]);
 
       auto max_inputs_depth = Collapse(inputs_depth);
       auto output_depth = CappedIncr(max_inputs_depth);
       auto outputs_tuple = op->args[2].as<TupleNode>();
-      // std::cout << "[SAI]   Inputs depth " << inputs_depth << std::endl;
       for (auto output : outputs_tuple->fields) {
         ICHECK(output.as<VarNode>());
         auto var = Downcast<Var>(output);
         auto res = Add(VarKey(GetCurrentContext(), var.get()), output_depth, "OpOutput");
-        // std::cout << "[SAI]    Outputs depth " << var->vid->name_hint << " " << res <<
-        // std::endl;
       }
       prim_func_call_depths_[OpKey(GetCurrentContext(), op)] =
           std::max(prim_func_call_depths_[OpKey(GetCurrentContext(), op)], max_inputs_depth);

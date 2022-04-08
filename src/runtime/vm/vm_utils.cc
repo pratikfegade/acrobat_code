@@ -121,16 +121,20 @@ void TestNDArray(DLTensor* array) {
 
 void TestNDArray(const NDArray& array) { TestNDArray(const_cast<DLTensor*>(array.operator->())); }
 
-void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t batch_size) {
-  size_t total_nums = 1;
-  for (auto d : sample.Shape()) {
-    total_nums *= d;
-  }
+void TestPointerNDArray(const NDArray& ptr_array, int64_t total_nums, int64_t batch_size) {
   for (size_t i = 0; i < batch_size; ++i) {
     for (size_t j = 0; j < total_nums; ++j) {
       static_cast<float**>(ptr_array->data)[i][j] = 1.0;
     }
   }
+}
+
+void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t batch_size) {
+  size_t total_nums = 1;
+  for (auto d : sample.Shape()) {
+    total_nums *= d;
+  }
+  TestPointerNDArray(ptr_array, total_nums, batch_size);
 }
 
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num) {
@@ -176,7 +180,7 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
   auto data_size = GetDataSize(*first_arg);
   if (first_arg->data != nullptr) {
     for (size_t j = 0; j < size; ++j) {
-      // ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+      ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
       raw_data[j] = nodes[j]->args_[arg_num]->data;
     }
   } else {
@@ -186,6 +190,8 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
       nodes[j]->args_[arg_num]->data = start + j * data_size;
     }
   }
+
+  // TestPointerNDArray(result, data_size / sizeof(float), size);
 
   return result;
 }

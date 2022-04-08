@@ -114,7 +114,7 @@ class VMAOTCompiler : SourcePrinter {
 
   void EmitUtilFunctions(std::ostream& os);
 
-  void EmitBatchedMainFunction(std::ostream& os);
+  void EmitBatchedMainFunction(std::ostream& os, int start_depth);
 
   void EmitBatchedMainFunctionHeader(std::ostream& os);
 

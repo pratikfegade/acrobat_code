@@ -124,8 +124,6 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     if (scalarize && tn->shape.size() == 0) {
       auto dtype_str = DTypeToTypeStr(tn->dtype);
       if (dtype_str.size() > 0) {
-        std::cout << "[AEDG] Type for " << tn->dtype << " " << dtype_str << " " << tn->dtype.bits()
-                  << std::endl;
         os << dtype_str;
         return;
       }
@@ -294,26 +292,28 @@ class VMAOTFunctionCompiler : SourcePrinter {
     inbuilt_ops_.insert({"greater_equal", ">="});
   }
 
-  void GenerateCPPForFunction(bool definition) {
+  int GenerateCPPForFunction(bool definition) {
+    int max_static_depth = -1;
     if (vm_func_.name == "map") {
       EmitPMapCPP(definition);
-      return;
-    }
-    // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
-    Type function_type = relay_func_->checked_type_;
-    CreateFunctionDeclaration(vm_func_, relay_func_);
-
-    if (definition) {
-      stream_ << " {\n";
-      this->BeginScope();
-
-      this->VisitBytecode();
-
-      this->EndScope();
-      stream_ << "}\n";
     } else {
-      stream_ << ";\n";
+      // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
+      Type function_type = relay_func_->checked_type_;
+      CreateFunctionDeclaration(vm_func_, relay_func_);
+
+      if (definition) {
+        stream_ << " {\n";
+        this->BeginScope();
+
+        max_static_depth = this->VisitBytecode();
+
+        this->EndScope();
+        stream_ << "}\n";
+      } else {
+        stream_ << ";\n";
+      }
     }
+    return max_static_depth;
   }
 
  private:
@@ -446,7 +446,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     stream_ << "\n";
   }
 
-  void VisitBytecode() {
+  int VisitBytecode() {
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
@@ -513,10 +513,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
-    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
+    int max_static_depth = -1;
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
@@ -637,6 +638,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 std::string depth_str = ", ";
                 auto depth = GetCallGraphDepth(i);
                 if (depth >= 0) {
+                  max_static_depth = std::max(depth, max_static_depth);
                   depth_str += std::to_string(depth);
                 } else {
                   depth_str += "depth++";
@@ -1005,6 +1007,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     };
 
     generate_code(0, vm_func_.instructions.size());
+    return max_static_depth;
   }
 
   void EmitPMapCPP(bool definition) {
@@ -1150,7 +1153,7 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
   os << nd_to_int64_func << "\n\n" << std::endl;
 }
 
-void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
+void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   // Emit a batched main function, first
 
   auto main_relay_func = Downcast<Function>(mod_->Lookup("main"));
@@ -1172,7 +1175,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os) {
   this->BeginScope();
   this->PrintIndent(os);
   if (use_depth_tracking_executor()) {
-    os << "int depth = 0;\n";
+    os << "int depth = " << start_depth << ";\n";
   }
   this->PrintIndent(os);
   os << "res.push_back(" << GetCppFunctionName("main") << "(";
@@ -1345,6 +1348,7 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
 
   EmitUtilFunctions(cpp_stream_);
 
+  int max_static_depth = -1;
   for (auto vm_func : exec_.functions) {
     Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
     ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
@@ -1357,11 +1361,11 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
                                             function_register_types, function_invoke_type_vars,
                                             compiled_functions_, function_get_field_tags,
                                             function_call_attrs, function_if_offsets, cpp_stream_);
-    function_compiler.GenerateCPPForFunction(true);
+    max_static_depth = std::max(max_static_depth, function_compiler.GenerateCPPForFunction(true));
     cpp_stream_ << "\n";
   }
 
-  EmitBatchedMainFunction(cpp_stream_);
+  EmitBatchedMainFunction(cpp_stream_, max_static_depth + 1);
   EmitHarnessFunctions(cpp_stream_);
 }
 

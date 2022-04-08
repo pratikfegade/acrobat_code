@@ -310,9 +310,9 @@ Stmt BetterHoistIfThenElseStmt(Stmt stmt, std::string target = "cuda",
     // stmt = DuplicateNestedIfsRemover()(stmt);
     // std::cout << "[STMT1] " << stmt << std::endl;
     // stmt = ConsecutiveIfFuser()(stmt);
-    std::cout << "[STMT2] " << stmt << std::endl;
+    // std::cout << "[STMT2] " << stmt << std::endl;
     stmt = IfHoister()(stmt);
-    std::cout << "[STMT3] " << stmt << std::endl;
+    // std::cout << "[STMT3] " << stmt << std::endl;
     // stmt = RedundantIfRemover(constraints)(stmt);
     // std::cout << "[STMT4] " << stmt << std::endl;
   }

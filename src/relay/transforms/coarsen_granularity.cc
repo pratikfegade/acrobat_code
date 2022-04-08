@@ -883,6 +883,14 @@ class Coarsener : public ExprMutator {
     return WithAttrs(std::move(func), attrs);
   }
 
+  int GetStaticGraphDepth(const CallNode* op) {
+    if (op->attrs.defined() && op->attrs->IsInstance<DictAttrsNode>()) {
+      auto dict_attrs = Downcast<DictAttrs>(op->attrs);
+      return dict_attrs.GetAttr(tir::attr::kDBGraphDepth, Integer(-1)).value()->value;
+    }
+    return -1;
+  }
+
   Expr VisitExpr_(const LetNode* op) final {
     std::vector<std::pair<Var, Expr>> flattened;
     auto body = FlattenLets(GetRef<Expr>(op), &flattened);
@@ -891,13 +899,17 @@ class Coarsener : public ExprMutator {
     bool in_group = false;
     int op_calls_in_group = 0;
     int last_call_id = -1;
+    bool in_static_group = false;
+    int static_group_depth = std::numeric_limits<int>::max();
     // end --> begin index mapping for groups
     std::unordered_map<size_t, size_t> groups;
+    std::unordered_map<size_t, int> group_static_depths;
 
-    auto start_or_continue_group = [&](size_t i, bool op_call = false) {
+    auto start_or_continue_group = [&](size_t i, bool op_call = false, bool static_call = false) {
       if (!in_group) {
         start = i;
         in_group = true;
+        in_static_group = static_call;
         if (print_) {
           std::cout << "\n\n[CG] GROUPSTART" << std::endl;
         }
@@ -921,6 +933,9 @@ class Coarsener : public ExprMutator {
         if (op_calls_in_group > 0) {
           ICHECK_GE(last_call_id, 0);
           groups[last_call_id] = start;
+          if (in_static_group) {
+            group_static_depths[last_call_id] = static_group_depth;
+          }
         }
         if (print_) {
           std::cout << "[CG] GROUPEND " << (op_calls_in_group > 0) << std::endl;
@@ -928,6 +943,8 @@ class Coarsener : public ExprMutator {
         start = -1;
         op_calls_in_group = 0;
         in_group = false;
+        static_group_depth = std::numeric_limits<int>::max();
+        in_static_group = false;
       }
       ICHECK_EQ(start, -1);
       if (print_) {
@@ -959,7 +976,19 @@ class Coarsener : public ExprMutator {
       } else if (cleaned_value.as<FunctionNode>()) {
         end_group(i);
       } else if (auto vn = cleaned_value.as<CallNode>()) {
-        if (vn->op == GetInvokeTVMOp() && !IsOpOnScalars(vn)) {
+        auto static_depth = GetStaticGraphDepth(vn);
+        if (vn->op == GetInvokeTVMOp() && static_depth >= 0) {
+          if (in_group && !in_static_group) {
+            end_group(i);
+          }
+          start_or_continue_group(i, true, true);
+          if (in_group && in_static_group) {
+            static_group_depth = std::min(static_group_depth, static_depth);
+          }
+        } else if (vn->op == GetInvokeTVMOp() && !IsOpOnScalars(vn)) {
+          if (in_static_group) {
+            end_group(i);
+          }
           start_or_continue_group(i, true);
         } else {
           end_group(i);
@@ -986,6 +1015,7 @@ class Coarsener : public ExprMutator {
         end_group(i);
       }
     }
+
     if (in_group) {
       end_group(flattened.size() - 1);
     }
@@ -1021,9 +1051,14 @@ class Coarsener : public ExprMutator {
         GlobalVar prim_func_var(name, prim_func->checked_type_);
         auto input_args_tuple = Tuple(call_args);
         auto output_args_tuple = Tuple(Array<Expr>());
-        auto call = InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple,
-                                DictAttrs({{attr::kPrimitive, tvm::Integer(1)},
-                                           {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}}));
+        Map<String, ObjectRef> attrs_map = {{attr::kPrimitive, tvm::Integer(1)},
+                                            {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}};
+        auto it = group_static_depths.find(i);
+        if (it != group_static_depths.end()) {
+          attrs_map.Set(tir::attr::kDBGraphDepth, Integer(it->second));
+        }
+        auto call =
+            InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple, DictAttrs(attrs_map));
         prim_func = AddAttrsToWrapperFunc(prim_func, name, false);
         prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
@@ -1141,13 +1176,13 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       auto func = Downcast<tir::PrimFunc>(it.second);
       auto access_modes_map = prim_funcs_access_modes.at(it.first);
       Array<tir::Var> used_params;
-      size_t tensor_args_start = 0;
+      size_t scalar_args_start = 0;
       if (func->HasNonzeroAttr(tir::attr::kDBBatchedPrimFunc)) {
-        tensor_args_start = 1;
+        scalar_args_start = 1;
         used_params.push_back(func->params[0]);
       }
       // std::cout << "[CG] Func " << it.first << std::endl;
-      for (size_t i = tensor_args_start; i < func->params.size(); ++i) {
+      for (size_t i = scalar_args_start; i < func->params.size(); ++i) {
         auto& var = func->params[i];
         if (access_modes_map.count(var)) {
           used_params.push_back(var);
@@ -1159,7 +1194,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
         auto batched_func_gv = mod->batched_prim_funcs.at(func_gv);
         auto batched_arg_modes = mod->batched_arg_modes.at(batched_func_gv);
         Array<Integer> updated_arg_modes;
-        for (size_t i = tensor_args_start; i < func->params.size(); ++i) {
+        for (size_t i = scalar_args_start; i < func->params.size(); ++i) {
           auto& var = func->params[i];
           if (access_modes_map.count(var)) {
             updated_arg_modes.push_back(batched_arg_modes[i]);

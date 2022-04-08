@@ -765,7 +765,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       call_lowered_attrs.metadata.Set("all_prim_shape_fn_vars", all_prim_shape_fn_vars);
     }
 
-    std::cout << "[TC] Lowering " << cfunc->prim_fn_var << std::endl;
+    // std::cout << "[TC] Lowering " << cfunc->prim_fn_var << std::endl;
 
     auto final_attrs = Downcast<DictAttrs>(func->attrs);
     Map<String, ObjectRef> additional_attrs;
@@ -925,7 +925,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     // Lower the primitive function for that target.
     Function function = Downcast<Function>(primitive_func);
     ICHECK(call_node->type_args.empty()) << "lowered functions cannot be polymorphic";
-    std::cout << "[TC] Lowering " << function << std::endl;
+    // std::cout << "[TC] Lowering " << function << std::endl;
     return MakeLoweredCall(function, std::move(new_args), call_node->span, target);
   }
 

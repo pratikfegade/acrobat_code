@@ -88,7 +88,7 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     auto call_graph = CallGraph(mod_);
     size_t i = 0;
     for (; i < max_iterations_; ++i) {
-      std::cout << "[FPA] ITERATION " << i << std::endl;
+      // std::cout << "[FPA] ITERATION " << i << std::endl;
       visited_functions_.clear();
       changed_ = false;
       VisitBody(Downcast<Function>(mod_->Lookup("main")));
@@ -140,14 +140,14 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
   }
 
   CalleesMap GetCalleesMap() {
-    for (auto kv : callees_map_) {
-      std::cout << "[FPA] Callees " << func_name_map_[kv.first.first] << " "
-                << func_name_map_[callsite_to_function_[kv.first.second]] << " "
-                << kv.first.second->op << std::endl;
-      for (auto f : kv.second) {
-        std::cout << "[FPA]    " << func_name_map_[f] << std::endl;
-      }
-    }
+    // for (auto kv : callees_map_) {
+    // std::cout << "[FPA] Callees " << func_name_map_[kv.first.first] << " "
+    // << func_name_map_[callsite_to_function_[kv.first.second]] << " "
+    // << kv.first.second->op << std::endl;
+    // for (auto f : kv.second) {
+    // std::cout << "[FPA]    " << func_name_map_[f] << std::endl;
+    // }
+    // }
 
     return callees_map_;
   }
