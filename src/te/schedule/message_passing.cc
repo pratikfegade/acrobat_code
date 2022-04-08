@@ -578,8 +578,10 @@ std::vector<PrimExpr> MakeBoundCheck(const Schedule& schedule, const Stage& stag
   // record the iteration variables with predicates
   std::unordered_set<IterVar> ivs_w_pred;
   bool stage_is_local_padded = IsLocalOpPadded(schedule, stage);
-  if (std::regex_match(std::string(stage->op->name), std::regex("(.*)[.]local"))) {
-    ICHECK(stage_is_local_padded);
+  if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) && dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)) {
+    if (std::regex_match(std::string(stage->op->name), std::regex("(.*)[.]local"))) {
+      ICHECK(stage_is_local_padded);
+    }
   }
 
   for (const IterVar& iv : stage->all_iter_vars) {

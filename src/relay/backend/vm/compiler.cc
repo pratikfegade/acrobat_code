@@ -644,10 +644,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // Patch the Goto.
     this->instructions_[after_true - 1].pc_offset = (after_false - after_true) + 1;
 
-    auto true_start_offset = true_offset;
-    auto true_end_offset = true_offset + true_branch_instructions;
-    auto false_start_offset = false_offset;
-    auto false_end_offset = false_offset + false_branch_instructions;
+    Index true_start_offset = true_offset;
+    Index true_end_offset = true_offset + true_branch_instructions;
+    Index false_start_offset = false_offset;
+    Index false_end_offset = false_offset + false_branch_instructions;
 
     if_offsets_[if_pc] = std::array<Index, 4>(
         {true_start_offset, true_end_offset, false_start_offset, false_end_offset});
@@ -1511,9 +1511,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   //   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   //   pass_seqs.push_back(transform::InferType());
   //   pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
-  //   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", false, false));
   // }
 
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

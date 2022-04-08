@@ -6,22 +6,26 @@ from tvm import relay
 from tvm import auto_scheduler
 from utils import get_ansor_log_file
 
-device = tvm.runtime.device("cpu")
-target = "llvm"
+device = tvm.runtime.device("cuda")
+target = "cuda"
 
-hidden_size = 256
+hidden_size = 32
 iterations = 1
-batch_size = 20
+batch_size = 2
 
 mod, params = relay.testing.lstm.get_workload(iterations, hidden_size)
 
-lazy_execution=False
-coarsened_execution=True
-batched_execution=False
-scattered_kernels=False
+lazy_execution=True
+coarsened_execution=False
+batched_execution=True
+scattered_kernels=True
 concurrent_execution=False
+use_autoscheduler=True
+aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
+# aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+model_name="treelstm"
+generate_aot_code=True
 dynamic_batch_size_estimate=64
-use_autoscheduler=False
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
     coarsened_execution=coarsened_execution,
@@ -29,8 +33,11 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     scattered_kernels=scattered_kernels,
     concurrent_execution=concurrent_execution,
     use_autoscheduler=use_autoscheduler,
-    batch_size=batch_size,
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
+    batch_size=batch_size,
+    aot_output_directory=aot_output_directory,
+    model_name=model_name,
+    generate_aot_code=generate_aot_code,
     opt_level=3)
 
 model_name = "lstm"
@@ -50,7 +57,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20000,  # change this to 20000 to achieve the best performance
+                num_measure_trials=2,  # change this to 20000 to achieve the best performance
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
@@ -78,6 +85,6 @@ def execute():
             iters = 1000
             print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule(True)
+auto_schedule(True)
 print("===============================================================================", flush=True)
 execute()

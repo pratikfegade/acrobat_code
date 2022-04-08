@@ -692,7 +692,7 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
 
   mixed_pass_list.push_back(BindTarget(target));
 
-  // mixed_pass_list.push_back(tir::transform::VerifyMemory());
+  mixed_pass_list.push_back(tir::transform::VerifyMemory());
 
   if (ShouldAnnotateEntryFunc(mixed_mod)) {
     mixed_pass_list.push_back(AnnotateEntryFunc(true));

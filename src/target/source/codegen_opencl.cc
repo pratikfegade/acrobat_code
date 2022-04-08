@@ -270,7 +270,9 @@ void CodeGenOpenCL::PrintVecAddr(const VarNode* buffer, DataType t, PrimExpr bas
   os << GetVarID(buffer) << " + ";
   PrintExpr(base, os);
 }
-std::string CodeGenOpenCL::GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base) {
+std::string CodeGenOpenCL::GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base,
+                                      const VarNode* scatter_buffer, PrimExpr scatter_batch_index,
+                                      PrimExpr scatter_elem_index) {
   std::ostringstream os;
   os << "vload" << t.lanes() << "(0, ";
   PrintVecAddr(buffer, t, base, os);

@@ -68,6 +68,10 @@ inline bool IsBatchedName(std::string name) {
   return false;
 }
 
+// Device index during execution
+#define CPU_INDEX 0
+#define GPU_INDEX 0
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

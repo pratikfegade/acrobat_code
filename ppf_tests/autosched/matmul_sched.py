@@ -75,7 +75,7 @@ A_shared_ax0_ax1_fused_o, A_shared_ax0_ax1_fused_i = s[A_shared].split(A_shared_
 s[A_shared].vectorize(A_shared_ax0_ax1_fused_i)
 A_shared_ax0_ax1_fused_o_o, A_shared_ax0_ax1_fused_o_i = s[A_shared].split(A_shared_ax0_ax1_fused_o, factor=898)
 s[A_shared].bind(A_shared_ax0_ax1_fused_o_i, te.thread_axis("threadIdx.x"))
-# s[matmul].pragma(matmul_i_o_o_o_o, "auto_unroll_max_step", 1024)
+# s[matmul].pragma(matmul_i_o_o_o_o, "auto_unroll_max_step", 256)
 # s[matmul].pragma(matmul_i_o_o_o_o, "unroll_explicit", True)
 
 print_after_passes = [

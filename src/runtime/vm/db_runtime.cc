@@ -51,8 +51,7 @@ template class DynBatchRuntime<DepthTrackingExecutor, DLTensor*>;
 
 template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::CacheConstants() {
-  for (int64_t const_index = 0; const_index < shared_state_.exec_->constants.size();
-       ++const_index) {
+  for (size_t const_index = 0; const_index < shared_state_.exec_->constants.size(); ++const_index) {
     auto constant_obj = shared_state_.exec_->constants[const_index];
     // We cache the allocated object in the constant pool. To measure, the
     // first iteration will set the pool up. The other iterations will
@@ -137,6 +136,7 @@ DLTensor* DynBatchRuntime<ExecutorType, TensorType>::AllocArrayWrapper(int64_t* 
   wrapper->ndim = ndim;
   wrapper->dtype = std::move(dtype);
   wrapper->shape = shape_data;
+  ICHECK_GT(wrapper->ndim, 0);
   return wrapper;
 }
 
@@ -318,7 +318,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
     ordered_packed_fn_names[packed_index] = packed_name;
   }
 
-  for (size_t packed_index; packed_index < num_packed_funs; ++packed_index) {
+  for (size_t packed_index = 0; packed_index < num_packed_funs; ++packed_index) {
     const auto& packed_name = ordered_packed_fn_names[packed_index];
     if (shared_state_.packed_funcs_.size() <= packed_index) {
       shared_state_.packed_funcs_.resize(packed_index + 1);
@@ -357,11 +357,25 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
     shared_state_.inouts_start[packed_index] = num_inputs + num_outputs;
     shared_state_.args_end[packed_index] = arg_access_modes.size();
 
+    ICHECK(pf != nullptr) << packed_name;
+    auto& registry = ::tvm::runtime::Registry::Register(packed_name);
+    registry.set_body(pf);
+
+    if (batched_execution_) {
+      auto bit = shared_state_.exec_->primitive_map.find(GetBatchedName(packed_name));
+      if (bit != shared_state_.exec_->primitive_map.end()) {
+        if (shared_state_.batched_funcs_.size() <= packed_index) {
+          shared_state_.batched_funcs_.resize(packed_index + 1, -1);
+        }
+        shared_state_.batched_funcs_[packed_index] = bit->second;
+      }
+    }
+
     bool print = true;
     if (print) {
       if (batched_execution_) {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                  << shared_state_.exec_->batched_func_arg_mode[packed_index].size();
+                  << shared_state_.batched_funcs_[packed_index];
       } else {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;
       }
@@ -380,20 +394,6 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
       std::cout << "] " << shared_state_.outputs_start[packed_index] << " "
                 << shared_state_.inouts_start[packed_index] << std::endl;
     }
-
-    ICHECK(pf != nullptr) << packed_name;
-    auto& registry = ::tvm::runtime::Registry::Register(packed_name);
-    registry.set_body(pf);
-
-    if (batched_execution_) {
-      auto bit = shared_state_.exec_->primitive_map.find(GetBatchedName(packed_name));
-      if (bit != shared_state_.exec_->primitive_map.end()) {
-        if (shared_state_.batched_funcs_.size() <= packed_index) {
-          shared_state_.batched_funcs_.resize(packed_index + 1, -1);
-        }
-        shared_state_.batched_funcs_[packed_index] = bit->second;
-      }
-    }
   }
 
   for (size_t i = 0; i < shared_state_.packed_funcs_.size(); ++i) {
@@ -411,6 +411,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
   // (Recall the VM instructions refer to devices by "device index" into this vector of
   // virtual devices.)
   const size_t num_virtual_devices = shared_state_.exec_->virtual_devices.size();
+  std::cout << "[VM] Virtual devices " << num_virtual_devices << std::endl;
   shared_state_.devices_.reserve(num_virtual_devices);
   shared_state_.allocators_.reserve(num_virtual_devices);
 

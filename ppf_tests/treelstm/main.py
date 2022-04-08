@@ -9,20 +9,23 @@ from converter import initialize_tlstm, generate_random_trees, get_random_tensor
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file
 
-device = tvm.runtime.device("cpu")
+device = tvm.runtime.device("cuda")
 
-hidden_size = 1
+hidden_size = 32
 batch_size = 8
 num_nodes = 6
 
-target = "llvm -mcpu=core-avx2"
+# target = "llvm -mcpu=core-avx2"
+target = "cuda"
+
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=False
-aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+use_autoscheduler=True
+aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
+# aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
 dynamic_batch_size_estimate=64
@@ -77,7 +80,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20000,
+                num_measure_trials=17,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
@@ -106,6 +109,6 @@ def execute():
                 timeit.timeit(fin_executor, number=50)
                 print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule((not os.path.exists(log_file)))
+auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

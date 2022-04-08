@@ -43,8 +43,8 @@ if args.target == "cuda":
     block_y = lambda: te.thread_axis("blockIdx.y")
 
     ############# Scheduling for internal nodes #############
-    # hS = s.cache_read(I, 'shared', [O])
-    # wS = s.cache_read(W, 'shared', [O])
+    hS = s.cache_read(I, 'shared', [O])
+    wS = s.cache_read(W, 'shared', [O])
 
     Ol = s.cache_write(O, 'local')
 
@@ -67,15 +67,19 @@ if args.target == "cuda":
     k = s[Ol].op.reduce_axis[0]
     ko, ki = s[Ol].split(k, nparts = 16)
     s[Ol].reorder(ko, x, y, ki)
-    # s[hS].compute_at(s[Ol], ko)
-    # s[wS].compute_at(s[Ol], ko)
+    s[hS].compute_at(s[Ol], ko)
+    s[wS].compute_at(s[Ol], ko)
 
-    # s[hS].bind(s[hS].leaf_iter_vars[0], thread_y())
-    # s[hS].bind(s[hS].leaf_iter_vars[1], thread_y())
+    s[hS].bind(s[hS].leaf_iter_vars[0], thread_y())
+    xo, xi = s[hS].split(s[hS].leaf_iter_vars[1], factor = 4)
+    s[hS].bind(xo, thread_x())
+    s[hS].vectorize(xi)
 
-    # xo, xi = s[wS].split(s[wS].leaf_iter_vars[0], factor = 4)
-    # s[wS].bind(xi, thread_y())
-    # s[wS].bind(s[wS].leaf_iter_vars[2], thread_x())
+    xo, xi = s[wS].split(s[wS].leaf_iter_vars[0], factor = 4)
+    s[wS].bind(xi, thread_y())
+    xo, xi = s[wS].split(s[wS].leaf_iter_vars[2], factor = 4)
+    s[wS].bind(xo, thread_x())
+    s[wS].vectorize(xi)
 else:
     x, y = s[O].leaf_iter_vars[0:2]
     s[O].parallel(x)
@@ -102,7 +106,9 @@ def create_pointers_buffer(tensor, storage_type="float32"):
 
 Iptr = create_pointers_buffer(I)
 Optr = create_pointers_buffer(O)
-scatter_buffers_map = { I: Iptr, O: Optr }
+# scatter_buffers_map = { I: Iptr, O: Optr }
+scatter_buffers_map = { I: Iptr }
+# scatter_buffers_map = {  }
 print_after_passes = [
     "tir.VectorizeLoop",
     # "tir.VerifyMemory",
@@ -117,7 +123,9 @@ Wb = tvm.tir.decl_buffer(W.shape, name="Wb")
 binds = { W: Wb }
 
 with tvm.transform.PassContext(config={ "tir.detect_global_barrier": False }):
-    inputs = [Wb, I, Iptr, O, Optr]
+    # inputs = [Wb, I, Iptr, O, Optr]
+    inputs = [Wb, I, Iptr, O]
+    # inputs = [Wb, I, O]
 
     if args.debug_code == "ir":
         lowered = tvm.lower(s, inputs, simple_mode=False, scatter_buffers=scatter_buffers_map,

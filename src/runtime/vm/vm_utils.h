@@ -80,12 +80,13 @@ void TestNDArray(DLTensor* array);
  * \param nodes The OpNodes that contain the scattered tensors.
  * \param arg_num The index of the scattered argument tensors.
  * \param allocator The allocator to allocate from.
+ * \param gpu_execution Whether or not we're executing on the GPU.
  *
  * \return The created gathered array
  */
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num);
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                             Allocator* allocator);
+                             Allocator* allocator, bool gpu_execution);
 
 /*!
  * \brief A simple procedure to write to all locations of an gathered

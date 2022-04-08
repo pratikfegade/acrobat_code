@@ -28,6 +28,7 @@
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/vm/arena.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/runtime/vm/lazy_executor.h>
 #include <tvm/runtime/vm/vm.h>
 #include <tvm/runtime/vm/vm_profiling.h>
@@ -148,9 +149,9 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
   setter(0, batch_size);
   int ctr = 1;
 
-  // std::cout << "[LZ]  Executing " << batched_func_idx << " " << arity << " " << func_nodes.size()
-  // << std::endl;
-  for (Index i = 0; i < arity; ++i) {
+  std::cout << "[LZ]  Executing " << batched_func_idx << " " << arity << " " << func_nodes.size()
+            << std::endl;
+  for (size_t i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
       case kIgnore: {
         break;
@@ -158,19 +159,26 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
       case kReuse: {
         auto& arg = func_nodes[0]->args_[i];
         if (arg->data == nullptr) {
-          auto ptr =
-              vm_shared_state.allocators_[0]->ArenaAlloc(GetDataSize(*arg), 256, arg->dtype).data;
-          for (size_t j = 0; j < batch_size; ++j) {
+          auto ptr = vm_shared_state.allocators_[executor.accelerator_device_]
+                         ->ArenaAlloc(GetDataSize(*arg), 256, arg->dtype)
+                         .data;
+          for (int j = 0; j < batch_size; ++j) {
             func_nodes[j]->args_[i]->data = ptr;
           }
         }
         setter(ctr, func_nodes[0]->args_[i]);
+
+        std::cout << "[LZ]   Arg1 " << ctr << " " << func_nodes[0]->args_[i]->ndim << std::endl;
+
         ctr += 1;
         break;
       }
       case kScatter: {
-        arg_holder[i] = CreatePointerNDArray(func_nodes, i, vm_shared_state.allocators_[0]);
+        arg_holder[i] = CreatePointerNDArray(
+            func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
+            (executor.accelerator_device_ == GPU_INDEX));
         setter(ctr, arg_holder[i]);
+        std::cout << "[LZ]   Arg2 " << ctr << " " << arg_holder[i].operator->()->ndim << std::endl;
         ctr += 1;
         break;
       }
@@ -271,7 +279,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
     for (size_t i = 0; i < num_nodes; ++i) {
       OpNode<TensorType>& node = executor->nodes_[i];
       int max_depth = -1;
-      for (Index j = executor->InputStart(node.func_idx_); j < executor->InputEnd(node.func_idx_);
+      for (size_t j = executor->InputStart(node.func_idx_); j < executor->InputEnd(node.func_idx_);
            ++j) {
         auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
         if (it != output_tensor_to_node.end()) {
@@ -279,7 +287,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
           max_depth = std::max(max_depth, node_to_depth[input_node_id]);
         }
       }
-      for (Index j = executor->OutputStart(node.func_idx_); j < executor->InoutEnd(node.func_idx_);
+      for (size_t j = executor->OutputStart(node.func_idx_); j < executor->InoutEnd(node.func_idx_);
            ++j) {
         output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_[j])] = node.id_;
       }
@@ -441,7 +449,7 @@ void DepthTrackingExecutor::Execute() {
 }
 
 void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
-  for (int j = 0; j < nodes_.size(); ++j) {
+  for (size_t j = 0; j < nodes_.size(); ++j) {
     auto& depth_nodes = nodes_[j];
     std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
     for (auto& node : depth_nodes) {

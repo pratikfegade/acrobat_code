@@ -61,7 +61,7 @@ class OpNode {
   OpNode(const int id, const Index func_idx, TensorType* args, int num_args)
       : id_(id), func_idx_(func_idx) {
     args_.reserve(num_args);
-    for (size_t i = 0; i < num_args; ++i) {
+    for (int i = 0; i < num_args; ++i) {
       args_.push_back(args[i]);
     }
   }
@@ -106,6 +106,9 @@ class AbstractExecutor {
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
   VMSharedState<ConcreteExecutorType>* vm_shared_state_;
+  /*! \brief The index of the primary execution device. We support the host CPU or a GPU for this
+   * field. The host CPU is always 0, while a GPU is 1 */
+  int accelerator_device_{0};
   /*! \brief Profiling */
   runtime::profiling::Profiler* profiler_{nullptr};
 };

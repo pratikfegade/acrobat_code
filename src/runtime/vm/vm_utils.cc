@@ -27,6 +27,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
+#include <tvm/runtime/vm/arena.h>
 #include <tvm/runtime/vm/vm.h>
 #include <tvm/runtime/vm/vm_profiling.h>
 
@@ -110,7 +111,7 @@ ObjectRef CopyTo(ObjectRef src, const DLDevice& dev) {
 /* Utilities for invoking packed functions */
 void TestNDArray(DLTensor* array) {
   size_t total_nums = 1;
-  for (size_t i = 0; i < array->ndim; ++i) {
+  for (int i = 0; i < array->ndim; ++i) {
     total_nums *= array->shape[i];
   }
 
@@ -122,8 +123,8 @@ void TestNDArray(DLTensor* array) {
 void TestNDArray(const NDArray& array) { TestNDArray(const_cast<DLTensor*>(array.operator->())); }
 
 void TestPointerNDArray(const NDArray& ptr_array, int64_t total_nums, int64_t batch_size) {
-  for (size_t i = 0; i < batch_size; ++i) {
-    for (size_t j = 0; j < total_nums; ++j) {
+  for (int i = 0; i < batch_size; ++i) {
+    for (int j = 0; j < total_nums; ++j) {
       static_cast<float**>(ptr_array->data)[i][j] = 1.0;
     }
   }
@@ -144,8 +145,8 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg
                                   nodes[0]->args_[arg_num]->device);
   void** raw_data = static_cast<void**>(result->data);
 
-  constexpr size_t unroll_factor = 16;
-  size_t preloop_bound = size / unroll_factor;
+  // constexpr size_t unroll_factor = 16;
+  // size_t preloop_bound = size / unroll_factor;
 
   // #pragma omp parallel for
   //   for (size_t jo = 0; jo < preloop_bound; ++jo) {
@@ -165,34 +166,43 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg
   return result;
 }
 
-NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                             Allocator* allocator) {
-  size_t size = nodes.size();
-  NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
-                                  DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
-                                  nodes[0]->args_[arg_num]->device);
-  void** raw_data = static_cast<void**>(result->data);
-
-  constexpr size_t unroll_factor = 16;
-  size_t preloop_bound = size / unroll_factor;
+inline void FillInPointers(void** host_raw_ptrs, size_t size,
+                           const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                           Allocator* allocator) {
+  // constexpr size_t unroll_factor = 16;
+  // size_t preloop_bound = size / unroll_factor;
 
   auto first_arg = nodes[0]->args_[arg_num];
   auto data_size = GetDataSize(*first_arg);
   if (first_arg->data != nullptr) {
     for (size_t j = 0; j < size; ++j) {
-      ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
-      raw_data[j] = nodes[j]->args_[arg_num]->data;
+      // ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+      host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
   } else {
     void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
     for (size_t j = 0; j < size; ++j) {
-      raw_data[j] = start + j * data_size;
-      nodes[j]->args_[arg_num]->data = start + j * data_size;
+      host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data = static_cast<char*>(start) + j * data_size;
     }
   }
+}
 
-  // TestPointerNDArray(result, data_size / sizeof(float), size);
-
+NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                             Allocator* allocator, bool gpu_execution) {
+  int64_t size = nodes.size();
+  auto& accelerator_device = nodes[0]->args_[arg_num]->device;
+  NDArray result =
+      NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
+                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
+  if (gpu_execution) {
+    void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
+    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    result.CopyFromBytes(raw_data, size * sizeof(void*));
+  } else {
+    void** raw_data = static_cast<void**>(result->data);
+    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    // TestPointerNDArray(result, data_size / sizeof(float), size);
+  }
   return result;
 }
 
@@ -233,7 +243,7 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Tenso
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
   runtime::TVMArgsSetter setter(values.data(), codes.data());
-  for (size_t i = 0; i < arity; i++) {
+  for (int i = 0; i < arity; i++) {
     setter(i, args[i]);
   }
 

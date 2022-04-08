@@ -189,6 +189,16 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
   } else {
     vid = GetVarID(buffer);
   }
+  std::string buffer_base = vid;
+  if (scatter_buffer) {
+    std::stringstream ss;
+    ss << scatter_vid;
+    ss << "[";
+    PrintExpr(scatter_batch_index, ss);
+    ss << "]";
+    buffer_base = ss.str();
+    index = scatter_elem_index;
+  }
   std::string scope;
   if (alloc_storage_scope_.count(buffer)) {
     scope = alloc_storage_scope_.at(buffer);
@@ -208,30 +218,18 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
         PrintStorageScope(scope, os);
       }
       PrintType(t, os);
-      os << "*)" << vid << ')';
+      os << "*)" << buffer_base << ')';
     } else {
-      if (scatter_buffer) {
-        os << scatter_vid;
-        os << "[(";
-        PrintExpr(scatter_batch_index, os);
-        os << ")]";
-      } else {
-        os << vid;
-      }
+      os << buffer_base;
     }
     os << "[(";
-    if (scatter_buffer) {
-      PrintExpr(scatter_elem_index, os);
-    } else {
-      PrintExpr(index, os);
-    }
+    PrintExpr(index, os);
     os << ")";
     if (t.bits() == 4 || (t.bits() == 1 && t.is_int())) {
       os << " / " << (32 / t.bits());
     }
     os << ']';
   } else {
-    ICHECK(!scatter_buffer) << "Vectorized gather loads not supported yet";
     // Buffer declared as vector type.
     // optimize for case where it is in register,
     if (HandleTypeMatch(buffer, t) && !is_vol) {
@@ -239,7 +237,7 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
       if (auto* ptr = index.as<tir::IntImmNode>()) {
         int64_t offset = ptr->value;
         ICHECK_EQ(offset % t.lanes(), 0) << "Find unaligned vector load to a vector type";
-        os << vid << '[' << (offset / t.lanes()) << ']';
+        os << buffer_base << '[' << (offset / t.lanes()) << ']';
         return os.str();
       }
     }
@@ -261,13 +259,15 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
       os << "*)";
     }
     if (t.bits() == 4 || (t.bits() == 1 && t.is_int())) {
-      os << vid << ") + (";
+      os << buffer_base << ") + (";
+      std::cout << "[CGC]   Printing index1 " << index << std::endl;
       PrintExpr(index, os);
       os << ")";
       os << " / " << t.lanes();
       os << ")[0]";
     } else {
-      os << vid << " + (";
+      os << buffer_base << " + (";
+      std::cout << "[CGC]   Printing index2 " << index << std::endl;
       PrintExpr(index, os);
       os << ")";
       os << "))[0]";
@@ -376,8 +376,10 @@ void CodeGenC::PrintVecElemStore(const std::string& vec, DataType t, int i,
   stream << vec << ".s" << std::hex << i << " = " << value << ";\n" << std::dec;
 }
 
-std::string CodeGenC::GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base) {
-  return GetBufferRef(t, buffer, base);
+std::string CodeGenC::GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base,
+                                 const VarNode* scatter_buffer, PrimExpr scatter_batch_index,
+                                 PrimExpr scatter_elem_index) {
+  return GetBufferRef(t, buffer, base, scatter_buffer, scatter_batch_index, scatter_elem_index);
 }
 
 void CodeGenC::PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
@@ -746,54 +748,56 @@ void CodeGenC::PrintVecBinaryOp(const std::string& op, DataType t, PrimExpr lhs,
   }
 }
 
-void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
-  bool has_scatter = op->scatter_buffer_var.defined();
+void CodeGenC::HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch_index,
+                          DataType dtype, PrimExpr predicate, std::ostream& os) {
+  bool has_scatter = scatter_batch_index.defined();
+  const VarNode* scatter_buffer_var_ptr = nullptr;
   if (has_scatter) {
-    // std::cout << "[CC] Scattered LoadNode " << GetRef<PrimExpr>(op) << std::endl;
+    scatter_buffer_var_ptr = buffer_var.get();
   }
-  int lanes = op->dtype.lanes();
+  PrimExpr scatter_elem_index = index;
+  int lanes = dtype.lanes();
   // declare type.
-  if (op->dtype.lanes() == 1) {
-    const VarNode* scatter_buffer_var_ptr = nullptr;
-    PrimExpr scatter_batch_index = op->scatter_batch_index;
-    PrimExpr scatter_elem_index = op->scatter_elem_index;
-    if (has_scatter) {
-      scatter_buffer_var_ptr = op->scatter_buffer_var.get();
-    }
-
-    std::string ref = GetBufferRef(op->dtype, op->buffer_var.get(), op->index,
-                                   scatter_buffer_var_ptr, scatter_batch_index, scatter_elem_index);
-    HandleVolatileLoads(ref, op, os);
+  if (dtype.lanes() == 1) {
+    std::string ref = GetBufferRef(dtype, buffer_var.get(), index, scatter_buffer_var_ptr,
+                                   scatter_batch_index, scatter_elem_index);
+    HandleVolatileLoads(ref, dtype, buffer_var, os);
   } else {
-    ICHECK(is_one(op->predicate)) << "predicated vectorized load is not supported";
-    ICHECK(!has_scatter) << "scatter vectorized load is not supported";
+    ICHECK(is_one(predicate)) << "predicated vectorized load is not supported";
 
     bool can_vector_load = false;
     arith::PVar<PrimExpr> base;
-    if (arith::ramp(base, 1, op->dtype.lanes()).Match(op->index)) {
-      const RampNode* ramp = op->index.as<RampNode>();
+    PrimExpr inner_index = index;
+    if (has_scatter) {
+      inner_index = scatter_elem_index;
+    }
+    if (arith::ramp(base, 1, dtype.lanes()).Match(inner_index)) {
+      const RampNode* ramp = index.as<RampNode>();
       ICHECK(ramp);
       arith::ModularSet me = arith::Analyzer().modular_set(ramp->base);
       // The condition: {k * coeff + base} divisible by the alignment for any k
-      if (me->coeff % op->dtype.lanes() == 0 && me->base % op->dtype.lanes() == 0) {
+      if (me->coeff % dtype.lanes() == 0 && me->base % dtype.lanes() == 0) {
         can_vector_load = true;
       }
     }
 
     if (can_vector_load) {
-      std::string ref = GetVecLoad(op->dtype, op->buffer_var.get(), base.Eval());
-      HandleVolatileLoads(ref, op, os);
+      std::cout << "[CGC]  Can vector load " << base.Eval() << std::endl;
+      std::string ref = GetVecLoad(dtype, buffer_var.get(), base.Eval(), scatter_buffer_var_ptr,
+                                   scatter_batch_index, base.Eval());
+      HandleVolatileLoads(ref, dtype, buffer_var, os);
     } else {
+      ICHECK(!has_scatter) << "scatter vectorized load is not supported";
       std::ostringstream svalue_expr;
-      std::string sindex = SSAGetID(PrintExpr(op->index), op->index.dtype());
-      std::string vid = GetVarID(op->buffer_var.get());
-      DataType elem_type = op->dtype.element_of();
+      std::string sindex = SSAGetID(PrintExpr(index), index.dtype());
+      std::string vid = GetVarID(buffer_var.get());
+      DataType elem_type = dtype.element_of();
       for (int i = 0; i < lanes; ++i) {
         std::ostringstream value_temp;
-        if (!HandleTypeMatch(op->buffer_var.get(), elem_type)) {
+        if (!HandleTypeMatch(buffer_var.get(), elem_type)) {
           value_temp << "((";
-          if (op->buffer_var.get()->dtype.is_handle()) {
-            auto it = alloc_storage_scope_.find(op->buffer_var.get());
+          if (buffer_var.get()->dtype.is_handle()) {
+            auto it = alloc_storage_scope_.find(buffer_var.get());
             if (it != alloc_storage_scope_.end()) {
               PrintStorageScope(it->second, value_temp);
             }
@@ -804,13 +808,23 @@ void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
           value_temp << vid;
         }
         value_temp << '[';
-        PrintVecElemLoad(sindex, op->index.dtype(), i, value_temp);
+        PrintVecElemLoad(sindex, index.dtype(), i, value_temp);
         value_temp << ']';
-        PrintVecElemLoadExpr(op->dtype, i, value_temp.str(), svalue_expr);
+        PrintVecElemLoadExpr(dtype, i, value_temp.str(), svalue_expr);
       }
       os << svalue_expr.str();
     }
   }
+}
+
+void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
+  std::cout << "[CGC] Load " << GetRef<PrimExpr>(op) << std::endl;
+  HandleLoad(op->buffer_var, op->index, NullValue<PrimExpr>(), op->dtype, op->predicate, os);
+}
+
+void CodeGenC::VisitExpr_(const ScatterLoadNode* op, std::ostream& os) {  // NOLINT(*)
+  std::cout << "[CGC] ScatterLoad " << GetRef<PrimExpr>(op) << std::endl;
+  HandleLoad(op->buffer_var, op->elem_index, op->batch_index, op->dtype, op->predicate, os);
 }
 
 void CodeGenC::VisitStmt_(const StoreNode* op) {

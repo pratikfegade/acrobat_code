@@ -47,7 +47,10 @@ class CodeGenOpenCL final : public CodeGenC {
   void PrintStorageSync(const CallNode* op) final;                           // NOLINT(*)
   void PrintType(DataType t, std::ostream& os) final;                        // NOLINT(*)
   void PrintType(const Type& type, std::ostream& os) final;                  // NOLINT(*)
-  std::string GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base) final;
+  std::string GetVecLoad(DataType t, const VarNode* buffer, PrimExpr base,
+                         const VarNode* scatter_buffer = nullptr,
+                         PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
+                         PrimExpr scatter_elem_index = NullValue<PrimExpr>()) final;
   void PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
                      const std::string& value) final;  // NOLINT(*)
   // the address of load/store
