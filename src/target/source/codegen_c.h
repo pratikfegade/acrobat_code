@@ -156,7 +156,7 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
   // statment
   void VisitStmt_(const LetStmtNode* op) override;
   void VisitStmt_(const StoreNode* op) override;
-  // void VisitStmt_(const ScatterStoreNode* op) override;
+  void VisitStmt_(const ScatterStoreNode* op) override;
   void VisitStmt_(const ForNode* op) override;
   void VisitStmt_(const WhileNode* op) override;
   void VisitStmt_(const IfThenElseNode* op) override;
@@ -171,6 +171,11 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
    */
   void HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch_index, DataType dtype,
                   PrimExpr predicate, std::ostream& os);
+  /*!
+   * Internal function to handle code generation for stores and scatter stores
+   */
+  void HandleStore(Var buffer_var, PrimExpr index, PrimExpr scatter_batch_index, PrimExpr value,
+                   PrimExpr predicate);
   /*!
    * Print Type represetnation of type t.
    * \param t The type representation.
@@ -200,7 +205,9 @@ class CodeGenC : public ExprFunctor<void(const PrimExpr&, std::ostream&)>,
                                  PrimExpr scatter_elem_index = NullValue<PrimExpr>());
   // print vector store
   virtual void PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
-                             const std::string& value);  // NOLINT(*)
+                             const std::string& value, const VarNode* scatter_buffer = nullptr,
+                             PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
+                             PrimExpr scatter_elem_index = NullValue<PrimExpr>());  // NOLINT(*)
   // print load of single element
   virtual void PrintVecElemLoad(const std::string& vec, DataType t, int i,
                                 std::ostream& os);  // NOLINT(*)

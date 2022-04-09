@@ -206,9 +206,6 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
   bool is_vol = IsVolatile(buffer);
   if (t.lanes() == 1) {
     if (!HandleTypeMatch(buffer, t) || is_vol) {
-      ICHECK(!scatter_buffer) << "Volatile gather loads or gather loads with "
-                              << "type mismatch not supported yet";
-
       os << "((";
       if (is_vol) {
         os << "volatile ";
@@ -383,8 +380,10 @@ std::string CodeGenC::GetVecLoad(DataType t, const VarNode* buffer, PrimExpr bas
 }
 
 void CodeGenC::PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
-                             const std::string& value) {
-  std::string ref = GetBufferRef(t, buffer, base);
+                             const std::string& value, const VarNode* scatter_buffer,
+                             PrimExpr scatter_batch_index, PrimExpr scatter_elem_index) {
+  std::string ref =
+      GetBufferRef(t, buffer, base, scatter_buffer, scatter_batch_index, scatter_elem_index);
   this->PrintIndent();
   stream << ref << " = " << value << ";\n";
 }
@@ -827,49 +826,47 @@ void CodeGenC::VisitExpr_(const ScatterLoadNode* op, std::ostream& os) {  // NOL
   HandleLoad(op->buffer_var, op->elem_index, op->batch_index, op->dtype, op->predicate, os);
 }
 
-void CodeGenC::VisitStmt_(const StoreNode* op) {
-  bool has_scatter = op->scatter_buffer_var.defined();
+void CodeGenC::HandleStore(Var buffer_var, PrimExpr index, PrimExpr scatter_batch_index,
+                           PrimExpr value, PrimExpr predicate) {
+  bool has_scatter = scatter_batch_index.defined();
+  const VarNode* scatter_buffer_var_ptr = nullptr;
+  PrimExpr scatter_elem_index = index;
   if (has_scatter) {
-    // std::cout << "[CC] Scattered StoreNode " << GetRef<Stmt>(op) << std::endl;
+    scatter_buffer_var_ptr = buffer_var.get();
   }
-  DataType t = op->value.dtype();
-  if (t.lanes() == 1) {
-    const VarNode* scatter_buffer_var_ptr = nullptr;
-    PrimExpr scatter_batch_index = op->scatter_batch_index;
-    PrimExpr scatter_elem_index = op->scatter_elem_index;
-    if (has_scatter) {
-      scatter_buffer_var_ptr = op->scatter_buffer_var.get();
-    }
 
-    std::string value = this->PrintExpr(op->value);
-    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index, scatter_buffer_var_ptr,
+  DataType t = value.dtype();
+  if (t.lanes() == 1) {
+    std::string value_str = this->PrintExpr(value);
+    std::string ref = this->GetBufferRef(t, buffer_var.get(), index, scatter_buffer_var_ptr,
                                          scatter_batch_index, scatter_elem_index);
     this->PrintIndent();
-    stream << ref << " = " << value << ";\n";
+    stream << ref << " = " << value_str << ";\n";
   } else {
-    ICHECK(is_one(op->predicate)) << "Predicated store is not supported";
-    ICHECK(!has_scatter) << "scatter vectorized store is not supported";
+    ICHECK(is_one(predicate)) << "Predicated store is not supported";
     arith::PVar<PrimExpr> base;
 
-    if (arith::ramp(base, 1, t.lanes()).Match(op->index)) {
-      std::string value = this->PrintExpr(op->value);
-      this->PrintVecStore(op->buffer_var.get(), t, base.Eval(), value);
+    if (arith::ramp(base, 1, t.lanes()).Match(index)) {
+      std::string value_str = this->PrintExpr(value);
+      this->PrintVecStore(buffer_var.get(), t, base.Eval(), value_str, scatter_buffer_var_ptr,
+                          scatter_batch_index, base.Eval());
     } else {
+      ICHECK(!has_scatter) << "scatter vectorized store is not supported";
       // The assignment below introduces side-effect, and the resulting value cannot
       // be reused across multiple expression, thus a new scope is needed
       int vec_scope = BeginScope();
 
       // store elements seperately
-      std::string index = SSAGetID(PrintExpr(op->index), op->index.dtype());
-      std::string value = SSAGetID(PrintExpr(op->value), op->value.dtype());
-      std::string vid = GetVarID(op->buffer_var.get());
+      std::string index_str = SSAGetID(PrintExpr(index), index.dtype());
+      std::string value_str = SSAGetID(PrintExpr(value), value.dtype());
+      std::string vid = GetVarID(buffer_var.get());
       for (int i = 0; i < t.lanes(); ++i) {
         this->PrintIndent();
         DataType elem_type = t.element_of();
-        if (!HandleTypeMatch(op->buffer_var.get(), elem_type)) {
+        if (!HandleTypeMatch(buffer_var.get(), elem_type)) {
           stream << "((";
-          if (op->buffer_var.get()->dtype.is_handle()) {
-            auto it = alloc_storage_scope_.find(op->buffer_var.get());
+          if (buffer_var.get()->dtype.is_handle()) {
+            auto it = alloc_storage_scope_.find(buffer_var.get());
             if (it != alloc_storage_scope_.end()) {
               PrintStorageScope(it->second, stream);
             }
@@ -880,14 +877,22 @@ void CodeGenC::VisitStmt_(const StoreNode* op) {
           stream << vid;
         }
         stream << '[';
-        PrintVecElemLoad(index, op->index.dtype(), i, stream);
+        PrintVecElemLoad(index_str, index.dtype(), i, stream);
         stream << "] = ";
-        PrintVecElemLoad(value, op->value.dtype(), i, stream);
+        PrintVecElemLoad(value_str, value.dtype(), i, stream);
         stream << ";\n";
       }
       EndScope(vec_scope);
     }
   }
+}
+
+void CodeGenC::VisitStmt_(const StoreNode* op) {
+  HandleStore(op->buffer_var, op->index, NullValue<PrimExpr>(), op->value, op->predicate);
+}
+
+void CodeGenC::VisitStmt_(const ScatterStoreNode* op) {
+  HandleStore(op->buffer_var, op->elem_index, op->batch_index, op->value, op->predicate);
 }
 
 void CodeGenC::VisitExpr_(const LetNode* op, std::ostream& os) {  // NOLINT(*)

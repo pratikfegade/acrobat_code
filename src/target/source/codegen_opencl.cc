@@ -281,7 +281,8 @@ std::string CodeGenOpenCL::GetVecLoad(DataType t, const VarNode* buffer, PrimExp
 }
 
 void CodeGenOpenCL::PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
-                                  const std::string& value) {
+                                  const std::string& value, const VarNode* scatter_buffer,
+                                  PrimExpr scatter_batch_index, PrimExpr scatter_elem_index) {
   this->PrintIndent();
   stream << "vstore" << t.lanes() << "(" << value << ", 0, ";
   PrintVecAddr(buffer, t, base, stream);

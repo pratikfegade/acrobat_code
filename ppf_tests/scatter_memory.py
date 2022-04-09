@@ -106,8 +106,8 @@ def create_pointers_buffer(tensor, storage_type="float32"):
 
 Iptr = create_pointers_buffer(I)
 Optr = create_pointers_buffer(O)
-# scatter_buffers_map = { I: Iptr, O: Optr }
-scatter_buffers_map = { I: Iptr }
+scatter_buffers_map = { I: Iptr, O: Optr }
+# scatter_buffers_map = { I: Iptr }
 # scatter_buffers_map = {  }
 print_after_passes = [
     "tir.VectorizeLoop",
@@ -123,8 +123,8 @@ Wb = tvm.tir.decl_buffer(W.shape, name="Wb")
 binds = { W: Wb }
 
 with tvm.transform.PassContext(config={ "tir.detect_global_barrier": False }):
-    # inputs = [Wb, I, Iptr, O, Optr]
-    inputs = [Wb, I, Iptr, O]
+    inputs = [Wb, I, Iptr, O, Optr]
+    # inputs = [Wb, I, Iptr, O]
     # inputs = [Wb, I, O]
 
     if args.debug_code == "ir":

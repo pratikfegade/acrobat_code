@@ -51,8 +51,10 @@ class CodeGenOpenCL final : public CodeGenC {
                          const VarNode* scatter_buffer = nullptr,
                          PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
                          PrimExpr scatter_elem_index = NullValue<PrimExpr>()) final;
-  void PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base,
-                     const std::string& value) final;  // NOLINT(*)
+  void PrintVecStore(const VarNode* buffer, DataType t, PrimExpr base, const std::string& value,
+                     const VarNode* scatter_buffer = nullptr,
+                     PrimExpr scatter_batch_index = NullValue<PrimExpr>(),
+                     PrimExpr scatter_elem_index = NullValue<PrimExpr>()) final;  // NOLINT(*)
   // the address of load/store
   void PrintVecAddr(const VarNode* buffer, DataType t, PrimExpr base,
                     std::ostream& os);                                           // NOLINT(*)
