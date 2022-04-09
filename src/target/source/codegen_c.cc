@@ -786,10 +786,18 @@ void CodeGenC::HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch
                                    scatter_batch_index, base.Eval());
       HandleVolatileLoads(ref, dtype, buffer_var, os);
     } else {
-      ICHECK(!has_scatter) << "scatter vectorized load is not supported";
       std::ostringstream svalue_expr;
       std::string sindex = SSAGetID(PrintExpr(index), index.dtype());
       std::string vid = GetVarID(buffer_var.get());
+      std::string buffer_base = vid;
+      if (has_scatter) {
+        std::stringstream ss;
+        ss << vid;
+        ss << "[";
+        PrintExpr(scatter_batch_index, ss);
+        ss << "]";
+        buffer_base = ss.str();
+      }
       DataType elem_type = dtype.element_of();
       for (int i = 0; i < lanes; ++i) {
         std::ostringstream value_temp;
@@ -802,9 +810,9 @@ void CodeGenC::HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch
             }
           }
           PrintType(elem_type, value_temp);
-          value_temp << "*)" << vid << ')';
+          value_temp << "*)" << buffer_base << ')';
         } else {
-          value_temp << vid;
+          value_temp << buffer_base;
         }
         value_temp << '[';
         PrintVecElemLoad(sindex, index.dtype(), i, value_temp);
@@ -860,6 +868,15 @@ void CodeGenC::HandleStore(Var buffer_var, PrimExpr index, PrimExpr scatter_batc
       std::string index_str = SSAGetID(PrintExpr(index), index.dtype());
       std::string value_str = SSAGetID(PrintExpr(value), value.dtype());
       std::string vid = GetVarID(buffer_var.get());
+      std::string buffer_base = vid;
+      if (has_scatter) {
+        std::stringstream ss;
+        ss << vid;
+        ss << "[";
+        PrintExpr(scatter_batch_index, ss);
+        ss << "]";
+        buffer_base = ss.str();
+      }
       for (int i = 0; i < t.lanes(); ++i) {
         this->PrintIndent();
         DataType elem_type = t.element_of();
@@ -872,9 +889,9 @@ void CodeGenC::HandleStore(Var buffer_var, PrimExpr index, PrimExpr scatter_batc
             }
           }
           PrintType(elem_type, stream);
-          stream << "*)" << vid << ')';
+          stream << "*)" << buffer_base << ')';
         } else {
-          stream << vid;
+          stream << buffer_base;
         }
         stream << '[';
         PrintVecElemLoad(index_str, index.dtype(), i, stream);
