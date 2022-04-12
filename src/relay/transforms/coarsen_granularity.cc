@@ -970,14 +970,9 @@ class Coarsener : public ExprMutator {
           auto batched_func = batched_res.func;
           GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
           batched_func = AddAttrsToWrapperFunc(batched_func, batched_name, true);
-          // std::cout << "batched_func " << batched_func << std::endl;
           prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
           batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
           batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
-
-          std::cout << "[XCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCX] " << std::endl;
-          std::cout << "[XCX] PrimFuncParams: " << prim_func->params << std::endl;
-          std::cout << "[XCX] BtchFuncParams: " << batched_func->params << std::endl;
         }
 
         for (int j = static_cast<int>(bindings.size()) - 1; j >= 0; --j) {

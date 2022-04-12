@@ -68,7 +68,12 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       func_name_map_[kv.second.get()] = kv.first->name_hint;
       // std::cout << "[FUNC_NAME] " << kv.second.get() << " " << kv.first->name_hint << std::endl;
     }
+    func_name_map_[nullptr] = "START";
     stack_.push_back(nullptr);
+
+    if (mod->ContainGlobalVar("map")) {
+      map_fun_node_ = mod->Lookup("map").as<FunctionNode>();
+    }
   }
 
   IRModule PerformAnalysis() {
@@ -107,16 +112,16 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       merged_op_depths[kv.first.second] = Merge(merged_op_depths[kv.first.second], kv.second).first;
     }
 
-    if (false) {
-      for (auto kv : merged_var_states) {
-        std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
-                  << std::endl;
-      }
+    if (true) {
+      // for (auto kv : merged_var_states) {
+      //   std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
+      //             << std::endl;
+      // }
 
-      for (auto kv : merged_function_states) {
-        std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
-                  << std::endl;
-      }
+      // for (auto kv : merged_function_states) {
+      //   std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
+      //             << std::endl;
+      // }
 
       std::cout << "[SAI] Iterations: " << i << std::endl;
       for (auto kv : merged_op_depths) {
@@ -277,13 +282,9 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return depth;
   }
 
-  const FunctionNode* GetMapFuncNode() {
-    static const FunctionNode* node = mod_->Lookup("map").as<FunctionNode>();
-    ICHECK(node);
-    return node;
-  }
+  bool IsMapFuncInModule() { return map_fun_node_ != nullptr; }
 
-  bool IsMapFuncInModule() { return mod_->ContainGlobalVar("map"); }
+  const FunctionNode* GetMapFuncNode() { return map_fun_node_; }
 
   int VisitMapBody(const int input_depth, const int lambda_depth, const FunctionNode* map_context) {
     auto map_fn_node = GetMapFuncNode();
@@ -499,6 +500,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
   std::vector<const FunctionNode*> stack_;
   std::unordered_map<const FunctionNode*, std::unordered_map<const VarNode*, int>>
       function_environments_;
+  const FunctionNode* map_fun_node_{nullptr};
 };
 
 IRModule ComputeConstantDepths(IRModule& mod) {

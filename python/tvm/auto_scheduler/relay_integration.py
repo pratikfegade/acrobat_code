@@ -60,8 +60,8 @@ def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None):
     if pass_context is not None:
         pass_context = pass_context.combine_with(opt_level=opt_level,
                                                  disabled_pass={"AutoSchedulerLayoutRewrite"},
-                                                 config={"relay.backend.use_auto_scheduler":
-                                                         True})
+                                                 config={"relay.backend.use_auto_scheduler": True,
+                                                         "relay.db_autoscheduler_pass": True})
 
     with pass_context:
         compiler = relay.vm.VMCompiler()

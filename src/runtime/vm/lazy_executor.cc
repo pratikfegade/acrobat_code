@@ -95,7 +95,8 @@ void EagerAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Inde
 
   if (!is_empty_output) {
     // nodes_.emplace_back(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
-    //                     unrolled_output_size, args_copy);
+    // unrolled_output_size, args_copy);
+    nodes_.emplace_back(nodes_.size(), func_idx, args_copy);
   }
 }
 
@@ -162,8 +163,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
   setter(0, batch_size);
   int ctr = 1;
 
-  std::cout << "[LZ]  Executing " << batched_func_idx << " " << arity << " " << func_nodes.size()
-            << std::endl;
+  // std::cout << "[LZ]  Executing " << batched_func_idx << " " << arity << " " << func_nodes.size()
+  // << std::endl;
   for (size_t i = 0; i < arity; ++i) {
     switch (arg_modes[i]) {
       case kIgnore: {
@@ -181,8 +182,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         }
         setter(ctr, func_nodes[0]->args_[i]);
 
-        std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
-                  << std::endl;
+        // std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
+        // << std::endl;
 
         ctr += 1;
         break;
@@ -193,8 +194,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
             (executor.accelerator_device_ == GPU_INDEX));
         setter(ctr, arg_holder[i]);
 
-        std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(arg_holder[i].operator->())
-                  << " " << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+        // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(arg_holder[i].operator->())
+        // << " " << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
         ctr += 1;
         break;
       }
@@ -316,12 +317,12 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       graph_depth = std::max(graph_depth, node_depth);
     }
 
-    std::cout << "[LZ] Graph depth " << graph_depth << std::endl;
+    // std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
     std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
     for (int j = 0; j <= graph_depth; ++j) {
       auto& depth_nodes = depth_to_node[j];
       std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-      std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
+      // std::cout << "[LZ]  Depth " << depth_nodes.size() << std::endl;
       for (auto& node : depth_nodes) {
         func_to_node[node->func_idx_].push_back(node);
       }
@@ -443,18 +444,30 @@ template <>
 void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                  bool all_nodes_same_depth) {
   BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
+  if (accelerator_device_ == GPU_INDEX) {
+    auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
+    DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+  }
 }
 
 template <>
 void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                 bool all_nodes_same_depth) {
   BatchedExecuteImpl<DLTensor*, DLTensor*>(this, coarsened_execution, all_nodes_same_depth);
+  if (accelerator_device_ == GPU_INDEX) {
+    auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
+    DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+  }
 }
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
-  nodes_.resize(std::max(static_cast<int>(nodes_.size()), depth + 1));
-  nodes_[depth].emplace_back(nodes_.size(), func_idx, args, num_args);
+  auto size = nodes_.size();
+  auto depthp1 = depth + 1;
+  if (size < depthp1) {
+    nodes_.resize(depthp1);
+  }
+  nodes_[depth].emplace_back(size, func_idx, args, num_args);
 }
 
 void DepthTrackingExecutor::ExecuteOpNodeBatch(const Index func_idx,
@@ -472,7 +485,7 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     VMDBProfiler::ProfileHostStartCall("scheduling");
   }
   for (size_t j = 0; j < nodes_.size(); ++j) {
-    std::cout << "[LZ] Depth " << j << std::endl;
+    // std::cout << "[LZ] Depth " << j << std::endl;
     auto& depth_nodes = nodes_[j];
     std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
 
@@ -485,6 +498,10 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     }
   }
   nodes_.clear();
+  if (accelerator_device_ == GPU_INDEX) {
+    auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
+    DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+  }
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();
   }

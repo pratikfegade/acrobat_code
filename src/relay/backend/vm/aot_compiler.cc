@@ -108,6 +108,7 @@ bool use_depth_tracking_executor() {
   // .value();
   // return use_depth_tracking_executor_;
   return true;
+  // return false;
 }
 
 inline std::string GetTensorType() {
@@ -227,7 +228,7 @@ std::string GetDepthTrackingMapFunctionName() { return "pmap"; }
 std::string GetCppFunctionName(const std::string& name) {
   if (name == "main") {
     return GetModelMainFunctionName();
-  } else if (name == "map") {
+  } else if (use_depth_tracking_executor() && name == "map") {
     return GetDepthTrackingMapFunctionName();
   }
   return name;
@@ -294,7 +295,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
   int GenerateCPPForFunction(bool definition) {
     int max_static_depth = -1;
-    if (vm_func_.name == "map") {
+    if (use_depth_tracking_executor() && vm_func_.name == "map") {
       EmitPMapCPP(definition);
     } else {
       // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
@@ -649,8 +650,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
               } else {
                 if (lazy_execution()) {
                   stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                          << ", " << instr.arity << ", " << args_vec << ".data(), "
-                          << flattened_args.size() << ");\n";
+                          << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
                 } else {
                   stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
                           << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";

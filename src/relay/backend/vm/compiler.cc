@@ -69,6 +69,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_concurrent_execution", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_generate_aot_code", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_dynamic_batch_size_estimate", Integer);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_aot_output_directory", String);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_autoscheduler_pass", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_model_name", String);
 
 namespace relay {
@@ -1491,10 +1492,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (true) {
     pass_seqs.push_back(transform::InferType());
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before HoistNonSequentialOps", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
   }
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, false));
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
     // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
@@ -1513,7 +1514,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   //   pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   // }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {
