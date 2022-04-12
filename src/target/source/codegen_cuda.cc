@@ -40,7 +40,6 @@ namespace codegen {
 CodeGenCUDA::CodeGenCUDA() { restrict_keyword_ = "__restrict__"; }
 
 void CodeGenCUDA::Init(bool output_ssa) {
-  std::cout << "[CUDA] Code genning" << std::endl;
   CodeGenC::Init(output_ssa);
   vid_global_barrier_state_ = GetUniqueName(runtime::symbol::tvm_global_barrier_state);
   vid_global_barrier_expect_ = GetUniqueName("__barrier_expect");

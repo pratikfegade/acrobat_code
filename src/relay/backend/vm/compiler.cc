@@ -1500,7 +1500,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
-    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
+    // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
     pass_seqs.push_back(transform::InferType());
   } else {
     // Compute prim func access modes for all prim funcs
@@ -1567,12 +1567,6 @@ void VMCompiler::Codegen() {
     LOG(INFO) << "All lowered functions have been build by BYOC -- generating an empty TVM module";
     lib = codegen::CSourceModuleCreate(";", "", Array<String>{});
   } else {
-    for (auto it : per_tvm_target_modules) {
-      // std::cout << "[CO] Target: " << it.first << std::endl;
-      // for (auto iit : it.second->functions) {
-      //   std::cout << "[CO]   Function: " << iit.first->name_hint << std::endl;
-      // }
-    }
     lib = tvm::build(per_tvm_target_modules, config_->host_target, true);
   }
 

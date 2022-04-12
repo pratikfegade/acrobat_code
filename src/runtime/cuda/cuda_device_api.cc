@@ -120,6 +120,9 @@ class CUDADeviceAPI final : public DeviceAPI {
       CUDA_CALL(cudaMemGetInfo(&free_mem, &total_mem));
       VLOG(1) << "allocating " << nbytes << " bytes on device, with " << free_mem
               << " bytes currently free out of " << total_mem << " bytes available";
+      // std::cout << "allocating " << nbytes << " bytes on device, with " << free_mem
+      // << " bytes currently free out of " << total_mem << " bytes available on device "
+      // << dev.device_id << std::endl;
       CUDA_CALL(cudaMalloc(&ret, nbytes));
     }
     return ret;

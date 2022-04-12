@@ -70,7 +70,9 @@ inline bool IsBatchedName(std::string name) {
 
 // Device index during execution
 #define CPU_INDEX 0
-#define GPU_INDEX 0
+#define GPU_INDEX 1
+
+#define DEBUG_CHECKS
 
 }  // namespace vm
 }  // namespace runtime

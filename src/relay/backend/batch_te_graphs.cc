@@ -75,41 +75,51 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
     const std::vector<bool>& reuse_taints, const std::string& unbatched_name) {
   bool print = false;
-  // bool print = (unbatched_name == "vm_mod_fused_zeros");
+  // bool print = (unbatched_name == "vm_mod_fused_ones");
   if (print) {
     std::cout << "[BR] Batchifying " << unbatched_name << std::endl;
   }
   Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
-  if (inputs.size() == 0) {
+
+  std::unordered_set<const Object*> no_batchify;
+  if (inputs.size() > 0) {
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (print) {
+        std::cout << "[BR]  Input " << inputs[i] << " " << reuse_taints[i] << std::endl;
+      }
+      if (reuse_taints[i]) {
+        no_batchify.insert(inputs[i]->op.get());
+      }
+    }
+
+    for (auto op : graph_ops) {
+      if (auto cop = op.as<te::ComputeOpNode>()) {
+        bool reuse = true;
+        for (auto tensor : cop->InputTensors()) {
+          if (!no_batchify.count(tensor->op.get())) {
+            reuse = false;
+            break;
+          }
+        }
+        if (reuse) {
+          no_batchify.insert(cop);
+          if (print) {
+            std::cout << "[BR]    NoBatchD " << op << std::endl;
+          }
+        }
+      }
+    }
+  } else {
     for (auto tensor : outputs) {
       graph_ops.push_back(tensor->op);
     }
-  }
 
-  std::unordered_set<const Object*> no_batchify;
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    if (print) {
-      std::cout << "[BR]  Input " << inputs[i] << " " << reuse_taints[i] << std::endl;
-    }
-    if (reuse_taints[i]) {
-      no_batchify.insert(inputs[i]->op.get());
-    }
-  }
-
-  for (auto op : graph_ops) {
-    if (auto cop = op.as<te::ComputeOpNode>()) {
-      bool reuse = true;
-      for (auto tensor : cop->InputTensors()) {
-        if (!no_batchify.count(tensor->op.get())) {
-          reuse = false;
-          break;
-        }
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      if (print) {
+        std::cout << "[BR]  Output " << outputs[i] << " " << reuse_taints[i] << std::endl;
       }
-      if (reuse) {
-        no_batchify.insert(cop);
-        if (print) {
-          std::cout << "[BR]    NoBatchD " << op << std::endl;
-        }
+      if (reuse_taints[i]) {
+        no_batchify.insert(outputs[i]->op.get());
       }
     }
   }

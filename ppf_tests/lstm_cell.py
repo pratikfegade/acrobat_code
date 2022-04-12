@@ -1,3 +1,4 @@
+import os
 import timeit
 import numpy as np
 import tvm
@@ -23,7 +24,7 @@ concurrent_execution=False
 use_autoscheduler=True
 aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
 # aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
-model_name="treelstm"
+model_name="lstm_cell"
 generate_aot_code=True
 dynamic_batch_size_estimate=64
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
@@ -57,7 +58,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=2,  # change this to 20000 to achieve the best performance
+                num_measure_trials=12,  # change this to 20000 to achieve the best performance
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
                 # layout_rewrite_option=auto_scheduler.LayoutRewriteOption.NO_REWRITE,
@@ -75,16 +76,16 @@ def execute():
                 datas = []
                 for i in range(iterations):
                     datas.append(tvm.nd.array(np.zeros((1, hidden_size)).astype("float32"), device=tvm.cpu(0)))
-                params_list += [params["i2h_weight"], params["i2h_bias"], params["h2h_weight"], params["h2h_bias"]]
+                # params_list += [params["i2h_weight"], params["i2h_bias"], params["h2h_weight"], params["h2h_bias"]]
                 params_list += datas
 
             executor.vm.set_input("main", batch_size, *params_list)
-            # exit(0)
+            exit(0)
+            fin_executor()
+            # iters = 1000
             # print("Executing")
-            # fin_executor()
-            iters = 1000
-            print(timeit.timeit(fin_executor, number=iters)*1000/iters)
+            # print(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule(True)
+auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

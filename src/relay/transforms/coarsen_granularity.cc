@@ -26,7 +26,6 @@
  */
 #include <tvm/relay/analysis.h>
 #include <tvm/relay/expr_functor.h>
-#include <tvm/relay/op_attr_types.h>
 #include <tvm/relay/transform.h>
 #include <tvm/runtime/vm/dynamic_batching.h>
 #include <tvm/tir/builtin.h>
@@ -35,9 +34,6 @@
 #include <tvm/tir/stmt.h>
 
 #include "../../printer/text_printer.h"
-#include "../../support/arena.h"
-#include "../op/annotation/annotation.h"
-#include "../op/memory/memory.h"
 #include "../op/vm/vm.h"
 #include "./expr_subst.h"
 #include "./pass_utils.h"
@@ -86,7 +82,6 @@ Expr RemoveOnDeviceCalls(const Expr& expr) {
 }
 
 typedef std::unordered_set<relay::Var, ObjectPtrHash, ObjectPtrEqual> RelayVarSet;
-
 typedef std::unordered_map<tir::Var, runtime::vm::DBArgAccessMode, ObjectPtrHash, ObjectPtrEqual>
     AccessModesMap;
 typedef std::unordered_map<GlobalVar, AccessModesMap, ObjectPtrHash, ObjectPtrEqual>
@@ -180,7 +175,6 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
   }
 
   void VisitExpr_(const tir::CallNode* op) {
-    // std::cout << "[CTAMC] Visiting Call " << GetRef<PrimExpr>(op) << std::endl;
     ICHECK_EQ(op->op, tir::builtin::tvm_call_unpacked_from_packed());
     auto base_leaf_callee = mod_->Lookup(Downcast<tir::StringImm>(op->args[0])->value);
     ICHECK(base_leaf_callee.as<tir::PrimFuncNode>());
@@ -188,7 +182,6 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
     auto func_access_modes = LeafTensorAccessModeCalculator(leaf_callee).Compute();
 
-    // std::cout << "[CTAMC]  Function " << leaf_callee << std::endl;
     size_t ctr = 1;
     for (size_t i = 1; i <= leaf_callee->params.size(); ++i) {
       auto arg = op->args[ctr];
@@ -196,59 +189,15 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
       auto it = func_access_modes.find(param);
       if (it != func_access_modes.end()) {
         auto mode = it->second;
-        // std::cout << "[CTAMC]   " << arg << " " << param << " " << mode << std::endl;
         MergeAndSet(Downcast<tir::Var>(arg), mode);
         ctr++;
-      } else {
-        // std::cout << "[CTAMC]   " << arg << " " << param << " Unused " << std::endl;
       }
     }
-    // std::cout << std::endl;
   }
 
   const IRModule mod_;
   AccessModesMap access_modes_map_;
   tir::Stmt body_;
-};
-
-class Serializer : public ExprVisitor {
- public:
-  void Serialize(const Expr& expr) {
-    VisitExpr(expr);
-    if (!body_.as<VarNode>()) {
-      auto var = relay::Var("dummy_body", body_->checked_type());
-      bindings_.push_back(std::make_pair(var, body_));
-      body_ = var;
-    }
-  }
-
-  void VisitExpr_(const LetNode* op) override {
-    Expr let = GetRef<Expr>(op);
-    while (auto let_node = let.as<LetNode>()) {
-      bindings_.push_back(std::make_pair(let_node->var, let_node->value));
-      let = let_node->body;
-    }
-    body_ = let;
-  }
-
-  void VisitExpr_(const relay::TupleGetItemNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const VarNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const IfNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const ConstantNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const TupleNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const relay::CallNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const GlobalVarNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const FunctionNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const OpNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const RefCreateNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const RefReadNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const RefWriteNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const ConstructorNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void VisitExpr_(const MatchNode* op) override { HandleNotLet(GetRef<Expr>(op)); }
-  void HandleNotLet(const Expr& expr) { body_ = expr; }
-
-  std::vector<std::pair<Var, Expr>> bindings_;
-  Expr body_;
 };
 
 Type GetVarType(relay::Var var) {
@@ -291,59 +240,28 @@ void FlattenVar(const relay::Var& var, Map<relay::Var, Array<Expr>>* p_tuple_var
 
 struct TIRLowererResult {
   tir::PrimFunc func;
-  std::vector<Expr> call_args;
-  Expr replacement;
   Array<Integer> arg_modes;
+  std::vector<int> param_positions;
 };
 
 class AbstractTIRLowerer {
  public:
   AbstractTIRLowerer(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
-                     const std::string& name, bool scattered_kernels)
+                     Map<relay::Var, Array<Expr>> tuple_var_values, const std::string& name,
+                     bool scattered_kernels)
       : mod_(mod),
         prim_funcs_access_modes_(prim_funcs_access_modes),
+        tuple_var_values_(tuple_var_values),
         name_(name),
         scattered_kernels_(scattered_kernels) {}
 
   ~AbstractTIRLowerer() {}
 
-  virtual TIRLowererResult LowerToTIR(const RelayVarSet& free_vars, const Expr& body,
-                                      const std::vector<std::pair<relay::Var, Expr>> bindings) = 0;
+  virtual TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
+                                      const std::vector<std::pair<relay::Var, Expr>>& bindings) = 0;
 
  protected:
   virtual PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) = 0;
-
-  Expr ExpressBodyWithFreeVars(const Expr& body, const RelayVarSet& free_vars,
-                               const Map<relay::Var, Expr>& bindings_map) {
-    class Visitor : public ExprMutator {
-     public:
-      Visitor(const RelayVarSet& free_vars, const Map<relay::Var, Expr>& bindings_map)
-          : free_vars_(free_vars), bindings_map_(bindings_map) {}
-      Expr VisitExpr_(const VarNode* op) {
-        // std::cout << "[TL]  Var " << op->vid->name_hint << std::endl;
-        auto var = GetRef<relay::Var>(op);
-        if (free_vars_.count(var)) {
-          // std::cout << "[TL]   FreeVar" << std::endl;
-          return var;
-        } else {
-          auto it = bindings_map_.find(var);
-          // if (it == bindings_map_.end()) {
-          //   for (auto var : free_vars_) {
-          //     std::cout << "[FREEVAR]  " << var->vid->name_hint << " " << var.get() << std::endl;
-          //   }
-          // }
-          ICHECK(it != bindings_map_.end()) << var;
-          // std::cout << "[TL]   Value " << (*it).second << std::endl;
-          return VisitExpr((*it).second);
-        }
-      }
-
-      const RelayVarSet& free_vars_;
-      const Map<relay::Var, Expr>& bindings_map_;
-    };
-    // std::cout << "[TL] Expressing " << body << std::endl;
-    return Visitor(free_vars, bindings_map)(body);
-  }
 
   Array<Expr> FlattenTuple(const Expr& expr) {
     Array<Expr> tir_fields;
@@ -406,35 +324,22 @@ class AbstractTIRLowerer {
 
   const IRModule& mod_;
   const FunctionsAccessModesMap& prim_funcs_access_modes_;
+  Map<relay::Var, Array<Expr>> tuple_var_values_;
   const std::string& name_;
   bool scattered_kernels_;
   Map<relay::Var, tir::Var> var_to_var_mapping_;
-  Map<relay::Var, Array<Expr>> tuple_var_values_;
 };
 
 class TIRLowererUnbatched : public AbstractTIRLowerer {
  public:
   TIRLowererUnbatched(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
-                      const std::string& name, bool scattered_kernels)
-      : AbstractTIRLowerer(mod, prim_funcs_access_modes, name, scattered_kernels) {}
+                      Map<relay::Var, Array<Expr>> tuple_var_values, const std::string& name,
+                      bool scattered_kernels)
+      : AbstractTIRLowerer(mod, prim_funcs_access_modes, tuple_var_values, name,
+                           scattered_kernels) {}
 
-  TIRLowererResult LowerToTIR(const RelayVarSet& free_vars_set, const Expr& body,
-                              const std::vector<std::pair<relay::Var, Expr>> bindings) final {
-    // std::cout << "[CG] Creating coarsened function " << name_ << std::endl;
-    std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
-    std::vector<Var> flattened_free_vars;
-    std::vector<Expr> flattened_call_args_unsorted;
-
-    for (auto var : free_vars) {
-      // std::cout << "[CG]   FreeVar " << var << std::endl;
-      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args_unsorted);
-    }
-
-    // for (size_t i = 0; i < flattened_free_vars.size(); ++i) {
-    // std::cout << "[CG]   FlattenedFreeVar " << flattened_free_vars[i] << " "
-    // << flattened_call_args_unsorted[i] << std::endl;
-    // }
-
+  TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
+                              const std::vector<std::pair<relay::Var, Expr>>& bindings) final {
     std::vector<tir::Var> prim_func_params_vec;
     std::vector<Type> prim_func_param_types_vec;
     std::vector<int> param_poses;
@@ -452,7 +357,6 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
       auto rvalue = pair.second;
       bindings_map.Set(rvar, rvalue);
 
-      // std::cout << "[TL] Pair " << rvar->vid->name_hint << " " << rvalue << std::endl;
       if (auto call = rvalue.as<CallNode>()) {
         ICHECK(call->op == GetInvokeTVMOp()) << rvalue;
         tir_stmts.push_back(tir::Evaluate(ConvertTVMOpInvoke(call)));
@@ -483,13 +387,6 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
       }
     }
 
-    Expr body_in_free_vars;
-    if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
-      body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
-    } else {
-      body_in_free_vars = Tuple(Array<Expr>());
-    }
-
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     AccessModesMap access_modes_map =
@@ -509,7 +406,13 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
       const tir::Var& var2 = prim_func_params_vec[idx2];
       auto mode1 = get_access_mode(var1);
       auto mode2 = get_access_mode(var2);
-      return (static_cast<int>(mode1) < static_cast<int>(mode2));
+      if (mode1 == mode2) {
+        auto name1 = var1->name_hint;
+        auto name2 = var2->name_hint;
+        return (name1.compare(name2) < 0);
+      } else {
+        return (static_cast<int>(mode1) < static_cast<int>(mode2));
+      }
     };
 
     std::sort(param_poses.begin(), param_poses.end(), sorting_lambda);
@@ -517,28 +420,23 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     Array<tir::Var> prim_func_params;
     Array<Type> prim_func_param_types;
     Array<Integer> prim_func_arg_access_modes;
-    std::vector<Expr> flattened_call_args;
-    // std::cout << "[CG]  Generating params for coarsened function" << std::endl;
     for (size_t j = 0; j < param_poses.size(); ++j) {
       auto pos = param_poses[j];
       auto& param = prim_func_params_vec[pos];
       if (get_access_mode(param) == tvm::runtime::vm::kUnused) {
-        // std::cout << "[CG]   Ignoring " << param << std::endl;
+        param_poses[j] = -1;
       } else {
         auto& type = prim_func_param_types_vec[pos];
         prim_func_params.push_back(param);
         prim_func_param_types.push_back(type);
         prim_func_arg_access_modes.push_back(Integer(static_cast<int>(get_access_mode(param))));
-        flattened_call_args.push_back(flattened_call_args_unsorted[pos]);
       }
-      // std::cout << "[CG]   " << param << " " << type << " " << get_access_mode(param) << " "
-      // << flattened_call_args_unsorted[pos] << " " << prim_func_body << std::endl;
     }
 
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
     func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
     func = WithAttr(func, tir::attr::kDBArgAccessModes, prim_func_arg_access_modes);
-    return TIRLowererResult({func, flattened_call_args, body_in_free_vars, Array<Integer>()});
+    return TIRLowererResult({func, Array<Integer>(), param_poses});
   }
 
  private:
@@ -548,8 +446,6 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     ICHECK(prim_funcs_access_modes_.count(callee_gv)) << callee_gv << " " << callee_gv.get();
     auto access_modes_map = prim_funcs_access_modes_.at(callee_gv);
 
-    // std::cout << "[CG]  Generating call " << RemoveOnDeviceCalls(GetRef<Expr>(call)) <<
-    // std::endl;
     std::string name = callee_gv->name_hint;
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(name));
@@ -558,12 +454,9 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     int ctr = 0;
     auto push_args = [&](const Expr& tuple) {
       for (auto arg : FlattenTuple(tuple)) {
-        // std::cout << "[CG]   Arg " << arg << " " << callee->params[ctr] << std::endl;
         if (access_modes_map.count(callee->params[ctr++])) {
           ICHECK(arg.as<relay::VarNode>());
           args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
-        } else {
-          // std::cout << "[CG]    Ignoring" << std::endl;
         }
       }
     };
@@ -577,13 +470,15 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 class TIRLowererBatched : public AbstractTIRLowerer {
  public:
   TIRLowererBatched(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
-                    const std::string& name, bool scattered_kernels)
-      : AbstractTIRLowerer(mod, prim_funcs_access_modes, name, scattered_kernels) {
+                    Map<relay::Var, Array<Expr>> tuple_var_values, const std::string& name,
+                    bool scattered_kernels)
+      : AbstractTIRLowerer(mod, prim_funcs_access_modes, tuple_var_values, name,
+                           scattered_kernels) {
     batch_size_var_ = tir::Var("batch_size", DataType::Int(32));
   }
 
-  TIRLowererResult LowerToTIR(const RelayVarSet& free_vars_set, const Expr& body,
-                              const std::vector<std::pair<relay::Var, Expr>> bindings) final {
+  TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
+                              const std::vector<std::pair<relay::Var, Expr>>& bindings) final {
     bool print = false;  //(bindings.size() < 5);
 
     if (print) {
@@ -594,14 +489,6 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     }
 
     /* Prologue: Initialization *************************************************************/
-
-    std::vector<Var> free_vars(free_vars_set.begin(), free_vars_set.end());
-    std::vector<Var> flattened_free_vars;
-    std::vector<Expr> flattened_call_args;
-
-    for (auto var : free_vars) {
-      FlattenVar(var, &tuple_var_values_, &flattened_free_vars, &flattened_call_args);
-    }
 
     for (auto rvar : flattened_free_vars) {
       CreateTIRVar(rvar);
@@ -754,17 +641,11 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
     /* Epilogue: Create function *************************************************************/
 
-    Expr body_in_free_vars;
-    if (body.as<relay::VarNode>() && tuple_var_values_.count(Downcast<relay::Var>(body))) {
-      body_in_free_vars = ExpressBodyWithFreeVars(body, free_vars_set, bindings_map);
-    } else {
-      body_in_free_vars = Tuple(Array<Expr>());
-    }
     tir::Stmt prim_func_body = tir::SeqStmt(tir_stmts);
 
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
     func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
-    return TIRLowererResult({func, flattened_call_args, body_in_free_vars, prim_func_arg_modes});
+    return TIRLowererResult({func, prim_func_arg_modes, {}});
   }
 
  private:
@@ -778,12 +659,9 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     auto it = mod_->batched_arg_modes.find(batched_callee_gv);
     ICHECK(it != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
     auto& arg_modes = (*it).second;
-    // std::cout << "[CoG] Arg modes: " << batched_callee_gv->name_hint << " " << arg_modes
-    // << std::endl;
 
     Array<PrimExpr> args;
     args.push_back(tir::StringImm(batched_name));
-    // args.push_back(batched_callee_gv);
     args.push_back(batch_size_var_);
 
     int idx = 0;
@@ -800,9 +678,6 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     ICHECK_GE(call->args.size(), 3) << GetRef<Expr>(call);
     push_args(call->args[1]);
     push_args(call->args[2]);
-    // std::cout << "[ARGS] " << args << std::endl;
-    // return tir::Call(DataType::Int(32), tir::builtin::tvm_call_packed(), args, call->span);
-    // return tir::Call(DataType::Void(), batched_callee_gv, args, call->span);
     return tir::Call(DataType::Int(32), tir::builtin::tvm_call_unpacked_from_packed(), args,
                      call->span);
   }
@@ -1039,15 +914,32 @@ class Coarsener : public ExprMutator {
           bindings.push_back(
               std::make_pair(flattened[j].first, RemoveOnDeviceCalls(flattened[j].second)));
         }
-        auto free_vars = GetFreeVarsInGroup(bindings);
+
+        std::vector<Var> flattened_free_vars;
+        std::vector<Expr> call_args_unsorted;
+        Map<relay::Var, Array<Expr>> tuple_var_values;
+
+        auto free_vars_set = GetFreeVarsInGroup(bindings);
+        for (auto var : free_vars_set) {
+          FlattenVar(var, &tuple_var_values, &flattened_free_vars, &call_args_unsorted);
+        }
 
         std::string name = "prim_func" + std::to_string(ctr++);
-        auto res = TIRLowererUnbatched(mod_, prim_funcs_access_modes_, name, scattered_kernels_)
-                       .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
+        auto res = TIRLowererUnbatched(mod_, prim_funcs_access_modes_, tuple_var_values, name,
+                                       scattered_kernels_)
+                       .LowerToTIR(flattened_free_vars, bindings);
+
+        std::vector<int> param_positions = res.param_positions;
+        std::vector<Expr> call_args;
+
+        for (size_t j = 0; j < param_positions.size(); ++j) {
+          auto pos = param_positions[j];
+          if (pos >= 0) {
+            call_args.push_back(call_args_unsorted[pos]);
+          }
+        }
 
         auto prim_func = res.func;
-        auto call_args = res.call_args;
-        auto replacement = res.replacement;
         GlobalVar prim_func_var(name, prim_func->checked_type_);
         auto input_args_tuple = Tuple(call_args);
         auto output_args_tuple = Tuple(Array<Expr>());
@@ -1063,10 +955,18 @@ class Coarsener : public ExprMutator {
         prim_funcs_.push_back(std::make_pair(prim_func_var, prim_func));
 
         if (batched_execution_) {
+          std::vector<Var> flattened_free_vars_sorted;
+          for (size_t j = 0; j < param_positions.size(); ++j) {
+            auto pos = param_positions[j];
+            if (pos >= 0) {
+              flattened_free_vars_sorted.push_back(flattened_free_vars[pos]);
+            }
+          }
+
           std::string batched_name = runtime::vm::GetBatchedName(name);
-          auto batched_res =
-              TIRLowererBatched(mod_, prim_funcs_access_modes_, batched_name, scattered_kernels_)
-                  .LowerToTIR(free_vars, MakeConstantScalar(DataType::Int(32), 0), bindings);
+          auto batched_res = TIRLowererBatched(mod_, prim_funcs_access_modes_, tuple_var_values,
+                                               batched_name, scattered_kernels_)
+                                 .LowerToTIR(flattened_free_vars_sorted, bindings);
           auto batched_func = batched_res.func;
           GlobalVar batched_func_var(batched_name, prim_func->checked_type_);
           batched_func = AddAttrsToWrapperFunc(batched_func, batched_name, true);
@@ -1074,6 +974,10 @@ class Coarsener : public ExprMutator {
           prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
           batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
           batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
+
+          std::cout << "[XCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCXXCX] " << std::endl;
+          std::cout << "[XCX] PrimFuncParams: " << prim_func->params << std::endl;
+          std::cout << "[XCX] BtchFuncParams: " << batched_func->params << std::endl;
         }
 
         for (int j = static_cast<int>(bindings.size()) - 1; j >= 0; --j) {

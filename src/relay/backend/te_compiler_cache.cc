@@ -252,11 +252,11 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
 
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
-                                        std::vector<bool>* p_reuse_taints) {
-        ICHECK_LE(tensors.size(), model_parameter_taints.size());
+                                        std::vector<bool>* p_reuse_taints, size_t offset) {
+        ICHECK_LE(offset + tensors.size(), model_parameter_taints.size());
         for (size_t i = 0; i < tensors.size(); ++i) {
           auto tensor = tensors[i];
-          if (model_parameter_taints[i].operator bool()) {
+          if (model_parameter_taints[i + offset].operator bool()) {
             p_reuse_taints->push_back(true);
           } else {
             p_reuse_taints->push_back(false);
@@ -264,7 +264,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         }
       };
       std::vector<bool> reuse_taints;
-      construct_reuse_taints(fn_inputs, &reuse_taints);
+      construct_reuse_taints(fn_inputs, &reuse_taints, 0);
+      construct_reuse_taints(outputs, &reuse_taints, fn_inputs.size());
 
       auto res = BatchifyTEGraph(fn_inputs, outputs, reuse_taints, unique_name);
       Map<te::Operation, te::Operation> mapping = res.first;

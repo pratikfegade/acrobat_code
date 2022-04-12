@@ -270,6 +270,9 @@ void DynBatchRuntime<ExecutorType, TensorType>::SetExecutionOptions(VMExecutionO
     } else {
       std::cout << "[VM] Executing unconcurrent" << std::endl;
     }
+#ifdef DEBUG_CHECKS
+    std::cout << "[VM] Enabling debug checks" << std::endl;
+#endif
   }
 }
 
@@ -374,8 +377,10 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
     bool print = true;
     if (print) {
       if (batched_execution_) {
-        std::cout << "[VM] Fun " << packed_index << " " << packed_name << " "
-                  << shared_state_.batched_funcs_[packed_index];
+        std::cout << "[VM] Fun " << packed_index << " " << packed_name;
+        if (!IsBatchedName(packed_name)) {
+          std::cout << " " << shared_state_.batched_funcs_[packed_index];
+        }
       } else {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;
       }
@@ -411,6 +416,12 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
   // (Recall the VM instructions refer to devices by "device index" into this vector of
   // virtual devices.)
   const size_t num_virtual_devices = shared_state_.exec_->virtual_devices.size();
+  if (num_virtual_devices == 2) {
+    // GPU execution
+    shared_state_.lazy_executor_.accelerator_device_ = 1;
+  } else {
+    shared_state_.lazy_executor_.accelerator_device_ = 0;
+  }
   std::cout << "[VM] Virtual devices " << num_virtual_devices << std::endl;
   shared_state_.devices_.reserve(num_virtual_devices);
   shared_state_.allocators_.reserve(num_virtual_devices);

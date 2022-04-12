@@ -258,7 +258,7 @@ const TargetKindNode::ValueTypeInfo& TargetInternal::FindTypeInfo(const TargetKi
   auto it = kind->key2vtype_.find(key);
   if (it == kind->key2vtype_.end()) {
     std::ostringstream os;
-    os << ": Cannot recognize \'" << key << "\'. Candidates are: ";
+    os << ": Cannot recognize \'" << key << "\' for kind " << kind << ". Candidates are: ";
     bool is_first = true;
     for (const auto& kv : kind->key2vtype_) {
       if (is_first) {

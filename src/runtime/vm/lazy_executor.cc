@@ -133,6 +133,19 @@ void LazyAllocationLazyExecutor::Execute() {
   nodes_.clear();
 }
 
+std::string GetDLTensorInfo(const DLTensor* tensor) {
+  std::stringstream ss;
+  ss << "Tensor [";
+  for (int i = 0; i < tensor->ndim; ++i) {
+    ss << tensor->shape[i] << " ";
+  }
+  ss << "] on device (" << tensor->device.device_type << ", " << tensor->device.device_id << ")";
+  if (tensor->data == nullptr) {
+    ss << " with null data";
+  }
+  return ss.str();
+}
+
 template <typename ConcreteExecutorType>
 void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,
                                       const std::vector<LazyOpNode*>& func_nodes) {
@@ -168,7 +181,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         }
         setter(ctr, func_nodes[0]->args_[i]);
 
-        std::cout << "[LZ]   Arg1 " << ctr << " " << func_nodes[0]->args_[i]->ndim << std::endl;
+        std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
+                  << std::endl;
 
         ctr += 1;
         break;
@@ -178,27 +192,32 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
             func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
             (executor.accelerator_device_ == GPU_INDEX));
         setter(ctr, arg_holder[i]);
-        std::cout << "[LZ]   Arg2 " << ctr << " " << arg_holder[i].operator->()->ndim << std::endl;
+
+        std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(arg_holder[i].operator->())
+                  << " " << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
         ctr += 1;
         break;
       }
       case kConcat: {
-        // std::vector<NDArray> to_concat(batch_size);
-        // for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
-        //   to_concat[j] = func_nodes[j]->args_[i];
-        // }
-
-        // NDArray concat_array = CreateConcatenatedNDArray(to_concat);
-        // arg_holder[i] = concat_array;
-        // setter(ctr, concat_array);
+        // arg_holder[i] = CreateConcatenatedNDArray(
+        //     func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
+        //     (executor.accelerator_device_ == GPU_INDEX));
+        // setter(ctr, arg_holder[i]);
         // ctr += 1;
+        // break;
       }
     }
   }
 
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+  }
   TVMRetValue rv;
   vm_shared_state.packed_funcs_[batched_func_idx].CallPacked(
       TVMArgs(values.data(), codes.data(), ctr), &rv);
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("scheduling");
+  }
 }
 
 template <>
@@ -449,9 +468,14 @@ void DepthTrackingExecutor::Execute() {
 }
 
 void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("scheduling");
+  }
   for (size_t j = 0; j < nodes_.size(); ++j) {
+    std::cout << "[LZ] Depth " << j << std::endl;
     auto& depth_nodes = nodes_[j];
     std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
+
     for (auto& node : depth_nodes) {
       func_to_node[node.func_idx_].push_back(&node);
     }
@@ -461,6 +485,9 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     }
   }
   nodes_.clear();
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+  }
 }
 
 }  // namespace vm

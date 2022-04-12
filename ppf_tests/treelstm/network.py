@@ -161,7 +161,6 @@ class Network:
 
     def __call__(self, caller, recursive, *inputs):
         if recursive:
-            print("Recursive call", self.all_weights())
             weights = [caller.get_replacement_weight(weight) for weight in self.all_weights()]
             return self.f(*(weights + list(inputs)))
         else:

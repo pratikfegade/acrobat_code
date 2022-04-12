@@ -283,6 +283,8 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     return node;
   }
 
+  bool IsMapFuncInModule() { return mod_->ContainGlobalVar("map"); }
+
   int VisitMapBody(const int input_depth, const int lambda_depth, const FunctionNode* map_context) {
     auto map_fn_node = GetMapFuncNode();
     auto lambda_var = map_fn_node->params[0];
@@ -375,7 +377,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
 
       int ret = 0;
       for (auto callee : callees) {
-        if (callee == GetMapFuncNode()) {
+        if (IsMapFuncInModule() && callee == GetMapFuncNode()) {
           auto lambda_state = VisitExpr(op->args[0]);
           auto list_state = VisitExpr(op->args[1]);
           return VisitMapBody(list_state, lambda_state, GetCurrentFunction());

@@ -360,8 +360,8 @@ class PartitionFinder : public StmtExprVisitor {
     if (UsesVar(cond, [this](const VarNode* var) { return var == current_var_.get(); })) {
       IntSet interval = DeduceBound(current_var_, cond, hint_map_, relax_map_);
       if (!interval.IsNothing()) {
-        std::cout << "[LP]  Partition for " << cond << " " << current_var_ << std::endl;
-        std::cout << "[LP]     " << interval << std::endl;
+        // std::cout << "[LP]  Partition for " << cond << " " << current_var_ << std::endl;
+        // std::cout << "[LP]     " << interval << std::endl;
         // cond is true within interval
         partitions[{cond, true}] = interval;
       } else {
@@ -374,9 +374,9 @@ class PartitionFinder : public StmtExprVisitor {
       if (inverse_cond.defined()) {
         IntSet interval = DeduceBound(current_var_, inverse_cond, hint_map_, relax_map_);
         if (!interval.IsNothing()) {
-          std::cout << "[LP]  Partition for " << inverse_cond << " " << current_var_ << std::endl;
-          std::cout << "[LP]     " << interval << std::endl;
-          // cond is false within interval
+          // std::cout << "[LP]  Partition for " << inverse_cond << " " << current_var_ <<
+          // std::endl; std::cout << "[LP]     " << interval << std::endl; cond is false within
+          // interval
           partitions[{cond, false}] = interval;
         } else {
           PrimExpr pred = DeduceRelaxedPredicate(current_var_, cond, hint_map_, relax_map_);

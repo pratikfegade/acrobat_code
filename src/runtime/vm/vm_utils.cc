@@ -161,28 +161,47 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg
     raw_data[j] = nodes[j]->args_[arg_num]->data;
   }
 
-  // TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
+  TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
 
   return result;
+}
+
+bool CheckEqualShape(DLTensor& t1, DLTensor& t2) {
+  if (t1.ndim != t2.ndim) {
+    return false;
+  }
+  for (int i = 0; i < t2.ndim; ++i) {
+    if (t1.shape[i] != t2.shape[i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 inline void FillInPointers(void** host_raw_ptrs, size_t size,
                            const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                            Allocator* allocator) {
-  // constexpr size_t unroll_factor = 16;
-  // size_t preloop_bound = size / unroll_factor;
-
   auto first_arg = nodes[0]->args_[arg_num];
   auto data_size = GetDataSize(*first_arg);
   if (first_arg->data != nullptr) {
+    // std::cout << "[VMU] Already mem" << std::endl;
     for (size_t j = 0; j < size; ++j) {
-      // ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+#ifdef DEBUG_CHECKS
+      ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+#endif
       host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
   } else {
+    // std::cout << "[VMU] Alloc total mem " << size * data_size << std::endl;
     void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
     for (size_t j = 0; j < size; ++j) {
-      host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data = static_cast<char*>(start) + j * data_size;
+      auto ptr = static_cast<char*>(start) + j * data_size;
+      host_raw_ptrs[j] = ptr;
+      nodes[j]->args_[arg_num]->data = ptr;
+#ifdef DEBUG_CHECKS
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+#endif
     }
   }
 }
@@ -201,7 +220,9 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
   } else {
     void** raw_data = static_cast<void**>(result->data);
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
-    // TestPointerNDArray(result, data_size / sizeof(float), size);
+#ifdef DEBUG_CHECKS
+    TestPointerNDArray(result, GetDataSize(*(nodes[0]->args_[arg_num])) / sizeof(float), size);
+#endif
   }
   return result;
 }
@@ -231,6 +252,34 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
   mutable_internal->byte_offset = old_offset;
   return result;
 }
+
+// NDArray CreateConcatenatedNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+//                                   Allocator* allocator, bool input) {
+//   auto& first_arg = nodes[0]->args_[arg_num];
+//   auto unbatched_shape = arrays[0].Shape();
+//   std::vector<int64_t> batched_shape(first_arg.ndim + 1);
+//   batched_shape[0] = static_cast<int64_t>(arrays.size());
+//   for (size_t i = 0; i < first_arg.ndim; ++i) {
+//     batched_shape[i + 1] = first_arg.shape[i];
+//   }
+//   auto result = NDArray::Empty(ShapeTuple(batched_shape), first_arg.dtype, first_arg.device);
+
+//   if () DLTensor* mutable_internal = const_cast<DLTensor*>(result.operator->());
+//   auto old_offset = mutable_internal->byte_offset;
+//   auto offset_delta = arrays[0].DataType().bytes();
+//   for (auto dim : unbatched_shape) {
+//     offset_delta *= dim;
+//   }
+//   mutable_internal->shape[0] = 1;
+//   for (size_t i = 0; i < arrays.size(); ++i) {
+//     arrays[i].CopyTo(result);
+//     mutable_internal->byte_offset += offset_delta;
+//   }
+
+//   mutable_internal->shape[0] = arrays.size();
+//   mutable_internal->byte_offset = old_offset;
+//   return result;
+// }
 
 /* Invoking packed functions */
 template <typename TensorType>

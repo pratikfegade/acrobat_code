@@ -80,6 +80,7 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
   ReserveKeywordsAsUnique();
 
   auto global_symbol = f->GetAttr<String>(tvm::attr::kGlobalSymbol);
+  // std::cout << "[CGC] Code Genning for " << global_symbol << std::endl;
   ICHECK(global_symbol.defined())
       << "CodeGenC: Expect PrimFunc to have the global_symbol attribute";
   bool no_alias = f->HasNonzeroAttr(tir::attr::kNoAlias);
@@ -90,15 +91,11 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
 
   std::unordered_map<const VarNode*, Var> scatter_buffer_vars;
   for (auto it : f->scatter_buffer_map) {
-    // std::cout << "[CC] Inserting " << it.second->data.get() << " " << it.second->data->name_hint
-    // << " " << it.first << std::endl;
     scatter_buffer_vars[it.second->data.get()] = it.first;
   }
 
   for (size_t i = 0; i < f->params.size(); ++i) {
     tir::Var v = f->params[i];
-    // std::cout << "[CC] Param " << v.get() << " " << v->name_hint << " "
-    // << scatter_buffer_vars.count(v.get()) << std::endl;
     std::string vid = AllocVarID(v.get());
     if (i != 0) stream << ", ";
     if (v.dtype().is_handle()) {
@@ -151,6 +148,7 @@ void CodeGenC::PrintFinalReturn() {}
 
 std::string CodeGenC::Finish() {
   auto res = decl_stream.str() + stream.str();
+  // std::cout << res << std::endl;
   return res;
 }
 
@@ -257,14 +255,12 @@ std::string CodeGenC::GetBufferRef(DataType t, const VarNode* buffer, PrimExpr i
     }
     if (t.bits() == 4 || (t.bits() == 1 && t.is_int())) {
       os << buffer_base << ") + (";
-      std::cout << "[CGC]   Printing index1 " << index << std::endl;
       PrintExpr(index, os);
       os << ")";
       os << " / " << t.lanes();
       os << ")[0]";
     } else {
       os << buffer_base << " + (";
-      std::cout << "[CGC]   Printing index2 " << index << std::endl;
       PrintExpr(index, os);
       os << ")";
       os << "))[0]";
@@ -781,7 +777,6 @@ void CodeGenC::HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch
     }
 
     if (can_vector_load) {
-      std::cout << "[CGC]  Can vector load " << base.Eval() << std::endl;
       std::string ref = GetVecLoad(dtype, buffer_var.get(), base.Eval(), scatter_buffer_var_ptr,
                                    scatter_batch_index, base.Eval());
       HandleVolatileLoads(ref, dtype, buffer_var, os);
@@ -825,12 +820,12 @@ void CodeGenC::HandleLoad(Var buffer_var, PrimExpr index, PrimExpr scatter_batch
 }
 
 void CodeGenC::VisitExpr_(const LoadNode* op, std::ostream& os) {  // NOLINT(*)
-  std::cout << "[CGC] Load " << GetRef<PrimExpr>(op) << std::endl;
+  // std::cout << "[CGC] Load " << GetRef<PrimExpr>(op) << std::endl;
   HandleLoad(op->buffer_var, op->index, NullValue<PrimExpr>(), op->dtype, op->predicate, os);
 }
 
 void CodeGenC::VisitExpr_(const ScatterLoadNode* op, std::ostream& os) {  // NOLINT(*)
-  std::cout << "[CGC] ScatterLoad " << GetRef<PrimExpr>(op) << std::endl;
+  // std::cout << "[CGC] ScatterLoad " << GetRef<PrimExpr>(op) << std::endl;
   HandleLoad(op->buffer_var, op->elem_index, op->batch_index, op->dtype, op->predicate, os);
 }
 

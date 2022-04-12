@@ -1,4 +1,8 @@
 import os
+# os.environ["DIETCODE_CODEGEN_OPT"] = "1"
+# os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
+# os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
+
 import sys
 import timeit
 import numpy as np
@@ -11,7 +15,7 @@ from utils import get_ansor_log_file
 
 device = tvm.runtime.device("cuda")
 
-hidden_size = 32
+hidden_size = 256
 batch_size = 8
 num_nodes = 6
 
@@ -19,7 +23,7 @@ num_nodes = 6
 target = "cuda"
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
@@ -28,7 +32,7 @@ aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
 # aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
-dynamic_batch_size_estimate=64
+dynamic_batch_size_estimate=997
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
@@ -80,17 +84,17 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=17,
+                num_measure_trials=20,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
             tuner.tune(tune_option)
 
-        for task in tasks:
-            try:
-                print("YOLO", task.print_best(log_file))
-            except Exception:
-                pass
+        # for task in tasks:
+        #     try:
+        #         print("YOLO", task.print_best(log_file))
+        #     except Exception:
+        #         pass
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
