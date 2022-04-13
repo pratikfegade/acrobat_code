@@ -1,16 +1,80 @@
 #[version = "0.0.5"]
 
-def @main(%initial: Tensor[(1, 256), float32], %weight: Tensor[(256, 256), float32],
-          %zero: Tensor[(), int32]) -> Tensor[(1, 256), float32] {
-  let %lineared = nn.dense(%initial, %weight, units = 256);
-  let %sf = nn.softmax(%lineared, axis=-1);
-  let %idx = argmax(%sf);
-  if (%idx == %zero) {
-    %initial
-  } else {
-    %lineared
+type MVTree {
+  InnerNode(MVTree, MVTree),
+  LeafNode(Tensor[(64, 64), float32], Tensor[(1, 64), float32]),
+}
+
+def @mvrnn(
+  %vweight: Tensor[(64, 128), float32],
+  %vbias: Tensor[(1, 64), float32],
+  %mweight: Tensor[(64, 128), float32],
+  %mbias: Tensor[(1, 64), float32],
+  %tree: MVTree
+) -> (Tensor[(64, 64), float32], Tensor[(1, 64), float32]) {
+
+  match? (%tree) {
+    InnerNode(%left, %right) => {
+      let %lres = @mvrnn(%vweight, %vbias, %mweight, %mbias, %right);
+      let %rres = @mvrnn(%vweight, %vbias, %mweight, %mbias, %right);
+      let %ml = %lres.0;
+      let %mr = %rres.0;
+      let %vl = %lres.1;
+      let %vr = %rres.1;
+
+      let %v_comp = reshape(
+        concatenate((squeeze(nn.dense(%vr, %ml, units=64)), squeeze(nn.dense(%vl, %mr, units=64)))),
+        newshape=[1, 128]);
+      let %m_comp = concatenate((%ml, %mr), axis=1);
+
+      let %v = tanh(%vbias + nn.dense(%v_comp, %vweight, units=64));
+      let %m = %mbias + nn.dense(%m_comp, %mweight, units=64);
+      (%m, %v)
+    },
+    LeafNode(%m, %v) => {
+      (%m, %v)
+    }
   }
 }
+
+def @main(
+  %vweight: Tensor[(64, 128), float32],
+  %vbias: Tensor[(1, 64), float32],
+  %mweight: Tensor[(64, 128), float32],
+  %mbias: Tensor[(1, 64), float32],
+  %tree: MVTree
+) -> (Tensor[(64, 64), float32], Tensor[(1, 64), float32]) {
+  @mvrnn(%vweight, %vbias, %mweight, %mbias, %tree)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// def @main(%initial: Tensor[(1, 256), float32], %weight: Tensor[(256, 256), float32],
+          // %zero: Tensor[(), int32]) -> Tensor[(1, 256), float32] {
+  // let %lineared = nn.dense(%initial, %weight, units = 256);
+  // let %sf = nn.softmax(%lineared, axis=-1);
+  // let %idx = argmax(%sf);
+  // if (%idx == %zero) {
+    // %initial
+  // } else {
+    // %lineared
+  // }
+// }
 
 
 // def @main(%inputs: List[Tensor[(1, 256), float32]], %weight: Tensor[(256, 256), float32],

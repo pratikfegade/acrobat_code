@@ -9,9 +9,9 @@ import numpy as np
 import tvm
 from tvm import relay
 from tvm import auto_scheduler
-from converter import initialize_tlstm, generate_random_trees, get_random_tensor
+from converter import initialize_tlstm, generate_random_trees
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file
+from utils import get_ansor_log_file, get_random_tensor
 
 device = tvm.runtime.device("cuda")
 

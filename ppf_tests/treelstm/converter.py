@@ -69,6 +69,16 @@ def initialize_tlstm(input_size, memory_size):
     mod[gv] = relay.Function(main_params, tlstm_gv(*main_params), tlstm_func.ret_type)
     return tlstm, mod, tlstm.p
 
+def initialize_mvrnn(hidden_size):
+    tlstm = MVRNN(hidden_size=hidden_size, name="treelstm")
+    mod = tlstm.mod
+    tlstm_func = mod[tlstm.f]
+    tlstm_gv = tlstm.f
+    gv = relay.GlobalVar("main")
+    main_params = [copy_var(v) for v in tlstm_func.params]
+    mod[gv] = relay.Function(main_params, tlstm_gv(*main_params), tlstm_func.ret_type)
+    return tlstm, mod, tlstm.p
+
 def get_random_tensor(shape):
     return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
 

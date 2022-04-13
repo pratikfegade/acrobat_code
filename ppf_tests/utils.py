@@ -1,4 +1,7 @@
 import os
+import tvm
+from tvm import relay
+import numpy as np
 
 def get_ansor_log_file(model_name, parameters, pass_context, target):
     target = target.split(' ')[0]
@@ -11,3 +14,6 @@ def get_ansor_log_file(model_name, parameters, pass_context, target):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     return log_dir + file_name
+
+def get_random_tensor(shape):
+    return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
