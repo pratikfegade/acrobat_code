@@ -65,6 +65,9 @@ if(USE_CUDA)
     list(APPEND RUNTIME_SRCS ${CONTRIB_THRUST_SRC})
   endif(USE_THRUST)
 
+  file(GLOB DB_RUNTIME_SRC src/runtime/vm/*.cu)
+  list(APPEND RUNTIME_SRCS ${DB_RUNTIME_SRC})
+
   if(USE_GRAPH_EXECUTOR_CUDA_GRAPH)
     if(NOT USE_GRAPH_EXECUTOR)
       message(FATAL_ERROR "CUDA Graph is only supported by graph executor, please set USE_GRAPH_EXECUTOR=ON")

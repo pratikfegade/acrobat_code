@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../contrib/thrust/reduce_sum.h"
 #include "../file_utils.h"
 #include "vm_utils.h"
 
@@ -145,6 +146,67 @@ std::string GetDLTensorInfo(const DLTensor* tensor) {
     ss << " with null data";
   }
   return ss.str();
+}
+
+void ExecuteReduceSum(const DepthTrackingExecutor& executor,
+                      const std::vector<LazyOpNode*>& func_nodes) {
+  static std::vector<NDArray> arg_holder;
+
+  int num_nodes = func_nodes.size();
+  void** output_raw_ptrs = static_cast<void**>(Arena::Current()->allocate_<void*>(num_nodes));
+  int* input_indices = static_cast<int*>(Arena::Current()->allocate_<int>(num_nodes + 1));
+  std::vector<void*> input_raw_ptrs;
+  input_raw_ptrs.reserve(num_nodes * 2);
+
+  auto allocator = executor.vm_shared_state_->allocators_[executor.accelerator_device_];
+  auto& first_output = *(func_nodes[0]->args_.back());
+  size_t output_size = GetDataSize(first_output);
+  void* output_start = allocator->ArenaAlloc(num_nodes * output_size, 256, first_output.dtype).data;
+  auto& accelerator_device = first_output.device;
+
+  int ctr = 0;
+  input_indices[0] = 0;
+  for (int i = 0; i < num_nodes; ++i) {
+    auto& node = *(func_nodes[i]);
+    int num_reduce_tensors = node.args_.size() - 1;
+    for (int j = 0; j < num_reduce_tensors; ++j) {
+#ifdef DEBUG_CHECKS
+      iCHECK(node.args_[j]->data != nullptr);
+#endif
+      input_raw_ptrs.push_back(node.args_[j]->data);
+    }
+    ctr += num_reduce_tensors;
+
+    auto output_data_ptr = static_cast<char*>(output_start) + output_size;
+    output_raw_ptrs[i] = output_data_ptr;
+    node.args_[num_reduce_tensors]->data = output_data_ptr;
+    input_indices[i + 1] = input_indices[i] + num_reduce_tensors;
+  }
+
+  auto num_inputs = input_raw_ptrs.size();
+#ifdef DEBUG_CHECKS
+  iCHECK_EQ(num_inputs, ctr);
+#endif
+  NDArray input_ptrs_device =
+      NDArray::Empty(ShapeTuple({static_cast<int64_t>(num_inputs)}),
+                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
+  NDArray output_ptrs_device =
+      NDArray::Empty(ShapeTuple({static_cast<int64_t>(num_nodes)}),
+                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
+  NDArray input_indices_device =
+      NDArray::Empty(ShapeTuple({static_cast<int64_t>(num_nodes + 1)}),
+                     DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
+
+  input_ptrs_device.CopyFromBytes(&(input_raw_ptrs[0]), sizeof(void*) * num_inputs);
+  output_ptrs_device.CopyFromBytes(output_raw_ptrs, sizeof(void*) * num_nodes);
+  input_indices_device.CopyFromBytes(input_indices, sizeof(void*) * (num_nodes + 1));
+
+  arg_holder.push_back(input_ptrs_device);
+  arg_holder.push_back(output_ptrs_device);
+  arg_holder.push_back(input_indices_device);
+  tvm::contrib::reduce_sum_wrapper(
+      static_cast<float**>(input_ptrs_device->data), static_cast<float**>(output_ptrs_device->data),
+      static_cast<int*>(input_indices_device->data), num_nodes, output_size / sizeof(float));
 }
 
 template <typename ConcreteExecutorType>
@@ -494,7 +556,11 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     }
 
     for (auto kv : func_to_node) {
-      ExecuteOpNodeBatch(kv.first, kv.second);
+      if (kv.first == REDUCE_SUM_FUNC_INDEX) {
+        ExecuteReduceSum(*this, kv.second);
+      } else {
+        ExecuteOpNodeBatch(kv.first, kv.second);
+      }
     }
   }
   nodes_.clear();

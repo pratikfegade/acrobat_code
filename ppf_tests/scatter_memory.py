@@ -28,7 +28,7 @@ I = te.placeholder((batch_size, hidden_size), name = 'I', dtype = float_dtype)
 
 ##################### Computation #####################
 h_idx, c_idx = 0, 1
-k = te.reduce_axis((0, hidden_size), name = 'i_kh2h')
+k = te.reduce_axis((0, hidden_size), name = 'k')
 O = te.compute((batch_size, hidden_size),
                lambda n, i: te.sum(W[i, k] * I[n, k], axis = k),
                name = 'O')

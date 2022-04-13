@@ -23,7 +23,7 @@ num_nodes = 6
 target = "cuda"
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
@@ -31,7 +31,7 @@ use_autoscheduler=True
 aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
 # aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
 model_name="treelstm"
-generate_aot_code=True
+generate_aot_code=False
 dynamic_batch_size_estimate=256
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
@@ -108,11 +108,11 @@ def execute():
                 for tree in trees: params_list += [tree]
 
                 executor.vm.set_input("main", batch_size, *params_list)
-                # exit()
+                exit()
                 # fin_executor()
-                iters = 100
-                timeit.timeit(fin_executor, number=50)
-                print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
+                # iters = 100
+                # timeit.timeit(fin_executor, number=50)
+                # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
