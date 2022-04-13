@@ -259,6 +259,28 @@ struct PairEquals {
   }
 };
 
+/*!
+ * \brief Convert a vector to a string for debugging purposes.
+ */
+template <typename T>
+inline std::string PrintVector(std::vector<T> vector, bool brackets = true) {
+  std::stringstream ss;
+  auto size = vector.size();
+  if (brackets) {
+    ss << "[";
+  }
+  for (size_t i = 0; i < size; ++i) {
+    ss << vector[i];
+    if (i < size - 1) {
+      ss << ", ";
+    }
+  }
+  if (brackets) {
+    ss << "]";
+  }
+  return ss.str();
+}
+
 }  // namespace support
 }  // namespace tvm
 #endif  // TVM_SUPPORT_UTILS_H_

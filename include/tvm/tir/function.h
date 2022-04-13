@@ -330,6 +330,9 @@ constexpr const char* kDBScalarCall = "db.scalar_call";
 /*! \brief Op call with a scalar output. */
 constexpr const char* kDBScalarOutputOp = "db.scalar_output_op";
 
+/*! \brief Fold-style reduce sum call. */
+constexpr const char* kDBFoldReduction = "db.fold_reduction";
+
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

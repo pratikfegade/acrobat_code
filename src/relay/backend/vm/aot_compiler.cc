@@ -32,6 +32,9 @@
 #include <string>
 #include <vector>
 
+#include "../../../support/utils.h"
+#include "../utils.h"
+
 namespace tvm {
 namespace relay {
 namespace vm {
@@ -277,6 +280,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         const std::unordered_map<Index, int32_t>& get_field_tags,
                         const std::unordered_map<Index, DictAttrs>& call_attrs,
                         const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
+                        std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types,
                         std::ostream& stream)
       : exec_(exec),
         mod_(mod),
@@ -288,6 +292,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         get_field_tags_(get_field_tags),
         call_attrs_(call_attrs),
         if_offsets_(if_offsets),
+        p_invoke_reduce_sum_types_(p_invoke_reduce_sum_types),
         stream_(stream) {
     inbuilt_ops_.insert({"equal", "=="});
     inbuilt_ops_.insert({"greater_equal", ">="});
@@ -343,6 +348,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
       return attrs.GetAttr(tir::attr::kDBScalarOutputOp, Bool(false)).value()->value;
     }
     return false;
+  }
+
+  Op GetFoldReductionOp(int pc) {
+    auto it = call_attrs_.find(pc);
+    if (it != call_attrs_.end()) {
+      return it->second.GetAttr(tir::attr::kDBFoldReduction, NullValue<Op>()).value();
+    }
+    return NullValue<Op>();
   }
 
   void CreateFunctionDeclaration(const VMFunction& vm_func, const Function& relay_func) {
@@ -561,33 +574,58 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::Invoke: {
-            auto dst_var = GetVarForReg(instr.dst);
-            auto callee_name = exec_.functions[instr.func_index].name;
-            this->PrintIndent(stream_);
-            stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
-            auto it = invoke_type_vars_.find(i);
-            if (it != invoke_type_vars_.end() && it->second.size() > 0) {
-              auto types = it->second;
-              stream_ << "<";
-              for (size_t j = 0; j < types.size(); ++j) {
-                RelayTypeToCppStr(stream_, types[j]);
-                if (j < types.size() - 1) {
+            auto fold_reduction_op = GetFoldReductionOp(i);
+            auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
+            std::vector<int64_t> int_shape;
+            if (dst_type) {
+              int_shape = backend::GetIntShape(dst_type->shape);
+            }
+
+            if (fold_reduction_op.defined() && fold_reduction_op == GetAddOp() &&
+                (dst_type && int_shape.size() == dst_type->shape.size())) {
+              ICHECK_EQ(instr.num_args, 3);
+              auto dst_var = GetVarForReg(instr.dst);
+              auto list_var = GetVarForReg(instr.invoke_args_registers[2]);
+              auto init_var = GetVarForReg(instr.invoke_args_registers[1]);
+
+              this->PrintIndent(stream_);
+              stream_ << dst_var << " = invoke_reduce_sum(append(" << list_var << ", " << init_var
+                      << ")";
+              if (use_depth_tracking_executor()) {
+                stream_ << ", depth";
+              }
+              stream_ << ");\n";
+
+              p_invoke_reduce_sum_types_->insert(dst_type);
+            } else {
+              auto dst_var = GetVarForReg(instr.dst);
+              auto callee_name = exec_.functions[instr.func_index].name;
+              this->PrintIndent(stream_);
+              stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
+              auto it = invoke_type_vars_.find(i);
+              if (it != invoke_type_vars_.end() && it->second.size() > 0) {
+                auto types = it->second;
+                stream_ << "<";
+                for (size_t j = 0; j < types.size(); ++j) {
+                  RelayTypeToCppStr(stream_, types[j]);
+                  if (j < types.size() - 1) {
+                    stream_ << ",";
+                  }
+                }
+                stream_ << ">";
+              }
+              stream_ << "(";
+              for (int i = 0; i < instr.num_args; ++i) {
+                stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+                if (i < instr.num_args - 1) {
                   stream_ << ",";
                 }
               }
-              stream_ << ">";
-            }
-            stream_ << "(";
-            for (int i = 0; i < instr.num_args; ++i) {
-              stream_ << GetVarForReg(instr.invoke_args_registers[i]);
-              if (i < instr.num_args - 1) {
-                stream_ << ",";
+              if (use_depth_tracking_executor()) {
+                stream_ << ", depth";
               }
+              stream_ << ");\n";
             }
-            if (use_depth_tracking_executor()) {
-              stream_ << ", depth";
-            }
-            stream_ << ");\n";
             break;
           }
           case Opcode::InvokePacked: {
@@ -1064,6 +1102,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<Index, DictAttrs>& call_attrs_;
   const std::unordered_map<Index, std::array<Index, 4>>& if_offsets_;
   std::unordered_map<std::string, std::string> inbuilt_ops_;
+  std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types_;
   std::ostream& stream_;
 };
 
@@ -1140,7 +1179,23 @@ void VMAOTCompiler::DeclareADT(std::ostream& os, const TypeData& adt, bool inclu
   }
 }
 
-void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
+std::string replace_all(const std::string& str, const std::string& find,
+                        const std::string& replace) {
+  using namespace std;
+  string result;
+  size_t find_len = find.size();
+  size_t pos, from = 0;
+  while (string::npos != (pos = str.find(find, from))) {
+    result.append(str, from, pos - from);
+    result.append(replace);
+    from = pos + find_len;
+  }
+  result.append(str, from, string::npos);
+  return result;
+}
+
+void VMAOTCompiler::EmitUtilFunctions(
+    std::ostream& os, const std::unordered_set<const TensorTypeNode*>& invoke_reduce_sum_types) {
   auto nd_to_int64_func =
       "int64_t NDToInt64(const NDArray& nd) {\n"
       "  static auto int64_dtype = DataType::Int(64);\n"
@@ -1150,7 +1205,69 @@ void VMAOTCompiler::EmitUtilFunctions(std::ostream& os) {
       "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
       "}";
 
+  auto list_append_func =
+      "template <class A>\n"
+      "std::shared_ptr<List<A>> append(std::shared_ptr<List<A>> list, A value) {\n"
+      "  auto new_node = std::static_pointer_cast<List<A>>(std::make_shared<Cons<A>>());\n"
+      "  new_node->tag = LIST_CONS_TAG;\n"
+      "  static_cast<Cons<A>*>(new_node.get())->field_0 = value;\n"
+      "  static_cast<Cons<A>*>(new_node.get())->field_1 = list;\n"
+      "  return new_node;\n"
+      "}\n";
+
   os << nd_to_int64_func << "\n\n" << std::endl;
+  os << list_append_func << "\n\n" << std::endl;
+
+  for (auto tt : invoke_reduce_sum_types) {
+    std::stringstream ss;
+    bool use_depth = use_depth_tracking_executor();
+    if (use_depth) {
+      ss << "__TT__ invoke_reduce_sum(std::shared_ptr<List<__TT__>> list, int& depth) {\n";
+    } else {
+      ss << "__TT__ invoke_reduce_sum(std::shared_ptr<List<__TT__>> list) {\n";
+    }
+    ss << "  auto current = list;\n";
+    ss << "  std::vector<__TT__> args;\n";
+    ss << "  while (true) {\n";
+    ss << "    if (current->tag == LIST_NIL_TAG) {\n";
+    ss << "      break;\n";
+    ss << "    }\n";
+    ss << "    args.push_back(static_cast<Cons<__TT__>*>(current.get())->field_0);\n";
+    ss << "    current = static_cast<Cons<__TT__>*>(current.get())->field_1;\n";
+    ss << "  }\n";
+    ss << "\n";
+    ss << "  auto shape_data0 = Arena::Current()->allocate_<int64_t>(__ND__);\n";
+    ss << "  shape_data0 = new (shape_data0) int64_t[__ND__]{__SH__};\n";
+    ss << "  __TT__ sum_tensor =\n";
+    ss << "      __RT__::Current()->AllocArrayWrapper(\n";
+    ss << "          shape_data0, __ND__, __DT__, __DV__);\n";
+    ss << "\n";
+    ss << "  args.push_back(sum_tensor);\n";
+    ss << "\n";
+    if (use_depth) {
+      ss << "  __RT__::Current()->InvokePackedWithDepth(\n";
+      ss << "      __REDUCE_SUM_FUNC_INDEX__, depth++, args.data(), args.size());\n";
+    } else {
+      ss << "  __RT__::Current()->InvokePacked(\n";
+      ss << "      __REDUCE_SUM_FUNC_INDEX__, args.data(), args.size());\n";
+    }
+    ss << "\n";
+    ss << "  return sum_tensor;\n";
+    ss << "}\n";
+
+    auto shape = backend::GetIntShape(tt->shape);
+    auto device_index = 1;
+
+    auto body = ss.str();
+    body = replace_all(body, "__TT__", GetTensorType());
+    body = replace_all(body, "__RT__", GetRuntimeType());
+    body = replace_all(body, "__REDUCE_SUM_FUNC_INDEX__", std::to_string(REDUCE_SUM_FUNC_INDEX));
+    body = replace_all(body, "__ND__", std::to_string(shape.size()));
+    body = replace_all(body, "__DV__", std::to_string(device_index));
+    body = replace_all(body, "__DT__", DTypeToStr(tt->dtype));
+    body = replace_all(body, "__SH__", support::PrintVector(shape, false));
+    os << body;
+  }
 }
 
 void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
@@ -1344,10 +1461,12 @@ void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
 }
 
 void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
-  cpp_stream_ << "#include \"" << header_file_name << "\"\n\n";
+  std::stringstream cpp_model_stream_;
+  std::stringstream cpp_utils_stream_;
 
-  EmitUtilFunctions(cpp_stream_);
+  cpp_utils_stream_ << "#include \"" << header_file_name << "\"\n\n";
 
+  std::unordered_set<const TensorTypeNode*> invoke_reduce_sum_types;
   int max_static_depth = -1;
   for (auto vm_func : exec_.functions) {
     Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
@@ -1357,16 +1476,20 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
     auto function_call_attrs = call_attrs_.at(vm_func.name);
     auto function_if_offsets = if_offsets_.at(vm_func.name);
-    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
-                                            function_register_types, function_invoke_type_vars,
-                                            compiled_functions_, function_get_field_tags,
-                                            function_call_attrs, function_if_offsets, cpp_stream_);
+    VMAOTFunctionCompiler function_compiler(
+        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
+        compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
+        &invoke_reduce_sum_types, cpp_model_stream_);
     max_static_depth = std::max(max_static_depth, function_compiler.GenerateCPPForFunction(true));
     cpp_stream_ << "\n";
   }
 
-  EmitBatchedMainFunction(cpp_stream_, max_static_depth + 1);
-  EmitHarnessFunctions(cpp_stream_);
+  EmitUtilFunctions(cpp_utils_stream_, invoke_reduce_sum_types);
+
+  EmitBatchedMainFunction(cpp_model_stream_, max_static_depth + 1);
+  EmitHarnessFunctions(cpp_model_stream_);
+  cpp_stream_ << cpp_utils_stream_.str() << "\n\n";
+  cpp_stream_ << cpp_model_stream_.str();
 }
 
 void VMAOTCompiler::EmitMacros(std::ostream& os) {}
@@ -1422,10 +1545,10 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     auto function_get_field_tags = get_field_tags_.at(vm_func.name);
     auto function_call_attrs = call_attrs_.at(vm_func.name);
     auto function_if_offsets = if_offsets_.at(vm_func.name);
-    VMAOTFunctionCompiler function_compiler(exec_, mod_, vm_func, relay_func,
-                                            function_register_types, function_invoke_type_vars,
-                                            compiled_functions_, function_get_field_tags,
-                                            function_call_attrs, function_if_offsets, hpp_stream_);
+    VMAOTFunctionCompiler function_compiler(
+        exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
+        compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
+        nullptr, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 

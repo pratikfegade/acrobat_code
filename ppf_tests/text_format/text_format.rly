@@ -34,8 +34,6 @@ def @mvrnn(
     LeafNode(%m, %v) => {
       (%m, %v)
     }
-  }
-}
 
 def @main(
   %vweight: Tensor[(64, 128), float32],

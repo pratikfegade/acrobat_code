@@ -189,6 +189,13 @@ TVM_DLL Pass DefuseOps();
 TVM_DLL Pass MarkScalarCalls();
 
 /*!
+ * \brief Identify foldl-style
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass FoldReduceSumsIdentifierPass();
+
+/*!
  * \brief Rewrite the annotated program.
  *
  * \param fallback_device The fallback device which is the default device for

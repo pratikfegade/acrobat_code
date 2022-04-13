@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../../support/utils.h"
 #include "../contrib/thrust/reduce_sum.h"
 #include "../file_utils.h"
 #include "vm_utils.h"
@@ -171,7 +172,7 @@ void ExecuteReduceSum(const DepthTrackingExecutor& executor,
     int num_reduce_tensors = node.args_.size() - 1;
     for (int j = 0; j < num_reduce_tensors; ++j) {
 #ifdef DEBUG_CHECKS
-      iCHECK(node.args_[j]->data != nullptr);
+      ICHECK(node.args_[j]->data != nullptr);
 #endif
       input_raw_ptrs.push_back(node.args_[j]->data);
     }
@@ -185,7 +186,7 @@ void ExecuteReduceSum(const DepthTrackingExecutor& executor,
 
   auto num_inputs = input_raw_ptrs.size();
 #ifdef DEBUG_CHECKS
-  iCHECK_EQ(num_inputs, ctr);
+  ICHECK_EQ(num_inputs, ctr);
 #endif
   NDArray input_ptrs_device =
       NDArray::Empty(ShapeTuple({static_cast<int64_t>(num_inputs)}),
@@ -312,17 +313,6 @@ void LazyAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   LazyAllocationExecuteOpNodeBatch<LazyAllocationLazyExecutor>(*this, func_idx, func_nodes);
 }
 
-template <typename T>
-std::string PrintVector(std::vector<T> vector) {
-  std::stringstream ss;
-  ss << "[";
-  for (size_t i = 0; i < vector.size(); ++i) {
-    ss << " " << vector[i];
-  }
-  ss << "]";
-  return ss.str();
-}
-
 template <typename TensorType, typename TensorPtrType>
 inline TensorPtrType GetPtr(TensorType& tensor);
 
@@ -424,8 +414,8 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
         tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
       }
       std::cout << " Node: " << j << " " << node.func_idx_ << " " << num_inputs << " "
-                << PrintVector(uncomputed_inputs) << " " << PrintVector(uncomputed_input_ids)
-                << std::endl;
+                << support::PrintVector(uncomputed_inputs) << " "
+                << support::PrintVector(uncomputed_input_ids) << std::endl;
       if (num_inputs == 0) {
         agenda[func_idx_to_position[node.func_idx_]].push_back(&node);
         agenda_size++;
@@ -447,7 +437,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
           }
         }
       }
-      std::cout << " Edge: " << j << " " << PrintVector(consumer_ids) << std::endl;
+      std::cout << " Edge: " << j << " " << support::PrintVector(consumer_ids) << std::endl;
     }
 
     while (agenda_size > 0) {

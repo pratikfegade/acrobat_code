@@ -315,6 +315,24 @@ class DictAttrs : public Attrs {
     return DictAttrs(new_attrs_dict);
   }
 
+  static DictAttrs WithAttr(const Attrs& attrs, const std::string& attr_key, ObjectRef value) {
+    if (attrs.defined()) {
+      ICHECK(attrs->IsInstance<DictAttrsNode>());
+      return Downcast<DictAttrs>(attrs).WithAttr(attr_key, value);
+    } else {
+      return DictAttrs({{attr_key, value}});
+    }
+  }
+
+  static DictAttrs WithAttrs(const Attrs& attrs, const Map<String, ObjectRef>& map) {
+    if (attrs.defined()) {
+      ICHECK(attrs->IsInstance<DictAttrsNode>());
+      return Downcast<DictAttrs>(attrs).WithAttrs(map);
+    } else {
+      return DictAttrs(map);
+    }
+  }
+
   TVM_DEFINE_OBJECT_REF_METHODS(DictAttrs, Attrs, DictAttrsNode);
   TVM_DEFINE_OBJECT_REF_COW_METHOD(DictAttrsNode);
 };

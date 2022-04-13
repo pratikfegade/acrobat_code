@@ -152,6 +152,8 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     return callees_map_;
   }
 
+  FPAVarStateMap GetVarPointsToMap() { return var_states_; }
+
  private:
   const FunctionNode* GetCurrentContext() {
     ICHECK_GE(stack_.size(), 2);
@@ -398,6 +400,12 @@ CalleesMap GetCalleesMap(const IRModule& mod) {
   FunctionPointerAnalysis analysis(mod);
   analysis.PerformAnalysis();
   return analysis.GetCalleesMap();
+}
+
+FPAVarStateMap GetVarPointsToMap(const IRModule& mod) {
+  FunctionPointerAnalysis analysis(mod);
+  analysis.PerformAnalysis();
+  return analysis.GetVarPointsToMap();
 }
 
 }  // namespace relay

@@ -2,6 +2,7 @@ import os
 os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
 os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
+TVM_HOME = os.environ["TVM_HOME"]
 
 import sys
 import timeit
@@ -13,25 +14,26 @@ from converter import initialize_tlstm, generate_random_trees
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor
 
-device = tvm.runtime.device("cuda")
+target = "llvm -mcpu=core-avx2"
+# target = "cuda"
+if target.startswith("cuda"):
+    device = tvm.runtime.device("cuda")
+else:
+    device = tvm.runtime.device("cpu")
 
 hidden_size = 256
 batch_size = 8
 num_nodes = 6
-
-# target = "llvm -mcpu=core-avx2"
-target = "cuda"
 
 lazy_execution=True
 coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=True
-aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test"
-# aot_output_directory="/home/ppf/data/ppf/projects/projects/dyn_batch/tvm/ppf_tests/aot_test"
+use_autoscheduler=False
+aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
-generate_aot_code=False
+generate_aot_code=True
 dynamic_batch_size_estimate=256
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
@@ -114,6 +116,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule((not os.path.exists(log_file)))
+# auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

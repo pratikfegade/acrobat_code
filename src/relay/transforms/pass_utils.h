@@ -157,6 +157,16 @@ inline const Op& GetInvokeTVMOp() {
   return op;
 }
 
+/*!
+ * \brief Cache the add annotation op to reduce registry lookup overhead
+ * \param void
+ * \return add op
+ */
+inline const Op& GetAddOp() {
+  static const Op& op = Op::Get("add");
+  return op;
+}
+
 inline bool IsScalarTensorType(const Type& type) {
   if (auto tn = type.as<TensorTypeNode>()) {
     return (tn->shape.size() == 0);
