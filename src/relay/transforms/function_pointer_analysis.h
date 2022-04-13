@@ -58,6 +58,8 @@ std::pair<FunctionSet, CalleesMap> GetRecursiveFunctions(const IRModule& mod);
 
 CalleesMap GetCalleesMap(const IRModule& mod);
 
+FPAVarStateMap GetVarPointsToMap(const IRModule& mod);
+
 std::vector<Var> CollectPatternVars(const Pattern& p);
 
 }  // namespace relay

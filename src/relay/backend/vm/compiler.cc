@@ -752,14 +752,17 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     if (call_node->op.as<OpNode>()) {
       OpMatch<void> matcher;
       matcher
-          .Match("vm.invoke_tvm_op",
-                 [this, call_node](const Array<Expr>& args, const Attrs& attrs,
-                                   const Array<Type>& type_arg) {
-                   ICHECK_EQ(args.size(), 3);
-                   auto pc = EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
-                   CollectAndRegisterTIRCallees(args[0], Downcast<DictAttrs>(attrs));
-                   call_attrs_[pc] = Downcast<DictAttrs>(call_node->attrs);
-                 })
+          .Match(
+              "vm.invoke_tvm_op",
+              [this, call_node](const Array<Expr>& args, const Attrs& attrs,
+                                const Array<Type>& type_arg) {
+                ICHECK_EQ(args.size(), 3);
+                auto pc = EmitInvokeTVMOp(args[0], args[1], args[2], Downcast<DictAttrs>(attrs));
+                CollectAndRegisterTIRCallees(args[0], Downcast<DictAttrs>(attrs));
+                if (call_node->attrs.defined() && call_node->attrs->IsInstance<DictAttrsNode>()) {
+                  call_attrs_[pc] = Downcast<DictAttrs>(call_node->attrs);
+                }
+              })
           .Match("memory.alloc_tensor",
                  [this, call_node](const Array<Expr>& args, const Attrs& attrs,
                                    const Array<Type>& type_arg) {
@@ -898,6 +901,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         auto invoke_pc = Emit(Instruction::Invoke(it->second, args_registers, new_register));
         if (generate_aot_information_) {
           invoke_type_vars_[invoke_pc] = call_node->type_args;
+          std::cout << "[COMP] Calling " << call_node->op << " " << call_node->attrs << std::endl;
+          if (call_node->attrs.defined() && call_node->attrs->IsInstance<DictAttrsNode>()) {
+            call_attrs_[invoke_pc] = Downcast<DictAttrs>(call_node->attrs);
+          }
         }
         AddRegisterTypeInfo(new_register, call_node->checked_type_);
       }
@@ -1430,6 +1437,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::PlanDevices(config_));
 
   pass_seqs.push_back(transform::InferType());
+  pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
+  pass_seqs.push_back(transform::PrintCurrentIR("FoldReduceSumsIdentifierPass", true, true));
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
@@ -1492,8 +1501,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (true) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before HoistNonSequentialOps", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before HoistNonSequentialOps", true, true));
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
@@ -1508,11 +1517,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(transform::ComputePrimFuncAccessModes());
   }
 
-  // if (true) {
-  //   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
-  //   pass_seqs.push_back(transform::InferType());
-  //   pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
-  // }
+  if (true) {
+    // pass_seqs.push_back(transform::InferType());
+    // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
+  }
 
   pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
   transform::Sequential seq(pass_seqs);

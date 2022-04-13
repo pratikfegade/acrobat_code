@@ -112,7 +112,8 @@ class VMAOTCompiler : SourcePrinter {
  private:
   void DeclareADT(std::ostream& os, const TypeData& adt, bool include_definitions);
 
-  void EmitUtilFunctions(std::ostream& os);
+  void EmitUtilFunctions(std::ostream& os,
+                         const std::unordered_set<const TensorTypeNode*>& invoke_reduce_sum_types);
 
   void EmitBatchedMainFunction(std::ostream& os, int start_depth);
 

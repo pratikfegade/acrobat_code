@@ -24,26 +24,17 @@
 #ifndef TVM_RUNTIME_CONTRIB_REDUCE_SUM_H_
 #define TVM_RUNTIME_CONTRIB_REDUCE_SUM_H_
 
-#include <dlpack/dlpack.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/gather.h>
-#include <thrust/scan.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <tvm/runtime/registry.h>
-
-#include <algorithm>
-#include <functional>
-#include <vector>
-
 namespace tvm {
 namespace contrib {
 
+#ifdef USE_CUDA
 void reduce_sum_wrapper(float** input, float** output, int* input_indices, int batch_size,
                         int hidden_size);
-
-}
+#else
+inline void reduce_sum_wrapper(float** input, float** output, int* input_indices, int batch_size,
+                               int hidden_size) {}
+#endif
+}  // namespace contrib
 }  // namespace tvm
 
 #endif

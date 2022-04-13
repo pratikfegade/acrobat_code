@@ -57,7 +57,6 @@ using TDCOTAVarStateMap = std::unordered_map<TDCOTAVarKey, bool, PairHash, PairE
 using TDCOTAInvokeTVMOpDepthMap = std::unordered_map<TDCOTAOpKey, bool, PairHash, PairEquals>;
 using TDCOTAFunctionStateMap = std::unordered_map<TDCOTAFunctionKey, bool, PairHash, PairEquals>;
 
-constexpr int MAX_DEPTH_VALUE = 1 << 4;
 class TensorDependentControlOpsTaintAnalysis : public TDCOTABaseExprFunctor {
  public:
   TensorDependentControlOpsTaintAnalysis(IRModule& mod, const CalleesMap& callees_map)

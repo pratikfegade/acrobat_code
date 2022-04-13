@@ -46,14 +46,8 @@ Function MarkScalarCallsInFunc(const Function& func) {
       auto callee_op_node = op->op.as<OpNode>();
       if (callee_op_node && IsOpOnScalars(mutated_node)) {
         std::cout << "[SCA] Marking scalar op " << mutated << std::endl;
-        auto attrs = mutated_node->attrs.as<DictAttrsNode>();
-        Map<String, ObjectRef> new_attrs_dict;
-        if (attrs) {
-          new_attrs_dict = attrs->dict;
-        } else {
-          new_attrs_dict.Set(tir::attr::kDBScalarCall, callee_op_node->name);
-        }
-        auto new_attrs = DictAttrs(new_attrs_dict);
+        auto new_attrs = DictAttrs::WithAttr(mutated_node->attrs, tir::attr::kDBScalarCall,
+                                             callee_op_node->name);
         auto ret = Call(mutated_node->op, mutated_node->args, new_attrs, mutated_node->type_args,
                         mutated_node->span);
         ret->checked_type_ = op->checked_type_;
