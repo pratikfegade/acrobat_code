@@ -1215,6 +1215,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     // TODO(mbs): We forget the memory scope.
     exec_->virtual_devices.push_back(Device{/*device_type=*/se_scope->device_type(),
                                             /*device_id=*/se_scope->virtual_device_id});
+    std::cout << "[COMP] Pushing device " << se_scope->device_type() << std::endl;
   }
   exec_->host_device_index = kHostDeviceIndex;
 
@@ -1351,8 +1352,9 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Perform memory planning in order to coalesce/reduce allocations.
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", false, true));
   pass_seqs.push_back(transform::CPPMemoryPlan());
+  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1438,7 +1440,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
-  pass_seqs.push_back(transform::PrintCurrentIR("FoldReduceSumsIdentifierPass", true, true));
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
@@ -1507,7 +1508,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
+    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
     // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));

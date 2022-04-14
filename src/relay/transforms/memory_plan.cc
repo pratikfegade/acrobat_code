@@ -179,6 +179,7 @@ class MemoryPlanner : public ExprMutator {
   Expr PlanMemory(const Expr& expr) { return this->VisitExpr(expr); }
 
   Expr VisitExpr_(const LetNode* let_node) {
+    std::cout << "[MP] Visiting let" << std::endl;
     std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual> dynamic_regions;
     std::vector<std::pair<Var, Expr>> bindings;
 
@@ -186,6 +187,14 @@ class MemoryPlanner : public ExprMutator {
     while ((let_node = let.as<LetNode>())) {
       auto lhs = let_node->var;
       auto rhs = let_node->value;
+
+      {
+        enter_scope("Let value");
+        rhs = this->VisitExpr(rhs);
+        rhs = exit_scope(rhs);
+      }
+
+      std::cout << "[MP]  Let var " << lhs->vid->name_hint << std::endl;
 
       auto on_device_props = GetOnDeviceProps(rhs);
       if (on_device_props.body.defined()) {
@@ -350,7 +359,7 @@ class MemoryPlanner : public ExprMutator {
   }
 
   void enter_scope(std::string reason) {
-    // std::cout << "Enter Scope: " << reason << std::endl;
+    std::cout << "[MP] Enter Scope: " << reason << std::endl;
 
     std::vector<std::pair<Var, Expr>> new_tensor_allocations;
     this->tensor_allocations_.push_back(new_tensor_allocations);
@@ -361,7 +370,7 @@ class MemoryPlanner : public ExprMutator {
 
   // When leaving a scope build a region allocation for the scope.
   Expr exit_scope(Expr body) {
-    // std::cout << "Exit Scope" << std::endl;
+    std::cout << "[MP] Exit Scope" << std::endl;
 
     auto& tensors_in_region = this->tensor_allocations_.back();
     for (auto it : tensors_in_region) {

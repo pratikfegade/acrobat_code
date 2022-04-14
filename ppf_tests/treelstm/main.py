@@ -14,8 +14,8 @@ from converter import initialize_tlstm, generate_random_trees
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor
 
-target = "llvm -mcpu=core-avx2"
-# target = "cuda"
+# target = "llvm -mcpu=core-avx2"
+target = "cuda"
 if target.startswith("cuda"):
     device = tvm.runtime.device("cuda")
 else:
@@ -26,11 +26,11 @@ batch_size = 8
 num_nodes = 6
 
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=False
+use_autoscheduler=True
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
@@ -116,6 +116,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# auto_schedule((not os.path.exists(log_file)))
+auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

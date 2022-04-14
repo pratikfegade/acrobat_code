@@ -37,7 +37,7 @@ weights_dict = {
 }
 
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False

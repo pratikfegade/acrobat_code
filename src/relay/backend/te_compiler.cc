@@ -405,35 +405,56 @@ class TECompilerImpl : public TECompilerNode {
         }
 
         // Create all_args
+
+        Array<Integer> access_modes;
         Array<ObjectRef> all_args;
         all_args.push_back_all(cached_func->input_variables);
+        for (size_t i = 0; i < cached_func->input_variables.size(); ++i) {
+          access_modes.push_back(Integer(static_cast<int>(runtime::vm::kInput)));
+        }
         if (batched && scattered_kernels) {
           for (auto input : cached_func->inputs) {
             all_args.push_back(input);
+            access_modes.push_back(Integer(static_cast<int>(runtime::vm::kInput)));
             auto it = scatter_buffers.find(input);
             if (it != scatter_buffers.end()) {
               auto scatter_input = (*it).second;
               all_args.push_back(scatter_input);
+              access_modes.push_back(Integer(static_cast<int>(runtime::vm::kInput)));
             }
           }
           for (auto output : cached_func->outputs) {
+            access_modes.push_back(Integer(static_cast<int>(runtime::vm::kOutput)));
             all_args.push_back(output);
             auto it = scatter_buffers.find(output);
             if (it != scatter_buffers.end()) {
               auto scatter_output = (*it).second;
               all_args.push_back(scatter_output);
+              access_modes.push_back(Integer(static_cast<int>(runtime::vm::kOutput)));
             }
           }
         } else {
           all_args.push_back_all(cached_func->inputs);
           all_args.push_back_all(cached_func->outputs);
+          for (size_t i = 0; i < cached_func->inputs.size(); ++i) {
+            access_modes.push_back(Integer(static_cast<int>(runtime::vm::kInput)));
+          }
+          for (size_t i = 0; i < cached_func->outputs.size(); ++i) {
+            access_modes.push_back(Integer(static_cast<int>(runtime::vm::kOutput)));
+          }
         }
+
+        std::cout << cached_func->input_variables << std::endl;
+        std::cout << access_modes << std::endl;
         // lower the function
         std::unordered_map<te::Tensor, tir::Buffer> binds;
         auto func_name = cached_func->prim_fn_var->name_hint;
         VLOG(1) << "scheduling";
         IRModule scheduled_module =
             tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds, scatter_buffers);
+
+        ICHECK_EQ(scheduled_module->functions.size(), 1);
+
         // Unfortunately the above machinery creates its own GlobalVars instead of using *the*
         // GlobalVar we established above. Fix this before the confusion spreads any further.
         // TODO(mbs): LowerSchedule should be given prim_fn_gvar instead of func_name.
@@ -442,12 +463,14 @@ class TECompilerImpl : public TECompilerNode {
                                      ? cached_func->prim_fn_var
                                      : kv.first;
           auto func = kv.second;
-          if (func.as<tir::PrimFuncNode>()) {
+          if (auto pfn = func.as<tir::PrimFuncNode>()) {
+            std::cout << pfn->params << std::endl;
             Map<String, ObjectRef> attrs;
             if (batched) {
               attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));
             }
             attrs.Set(tir::attr::kDBKernelPrimFunc, Integer(1));
+            attrs.Set(tir::attr::kDBArgAccessModes, access_modes);
             // std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
             func = WithAttrs(std::move(Downcast<tir::PrimFunc>(func)), attrs);
           }

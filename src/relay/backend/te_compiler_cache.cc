@@ -166,6 +166,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     auto prim_fn_var = GlobalVar(unique_name);
     prim_fn_var->checked_type_ = relay_func->checked_type();
 
+    std::cout << "------------------------------------------------------ " << std::endl;
+    std::cout << unique_name << std::endl;
+    std::cout << relay_func << std::endl;
+    std::cout << fn_inputs << std::endl;
+    std::cout << outputs << std::endl;
+
     // Fusion over tupled results may leave identity relationships
     // between inputs and outputs, and those should not be scheduled.
     // Hence schedule only non PlaceholderOp outputs.

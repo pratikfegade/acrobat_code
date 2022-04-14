@@ -149,11 +149,44 @@ class LeafTensorAccessModeCalculator : public tir::StmtExprVisitor {
   const tir::PrimFunc func_;
 };
 
+std::pair<Array<Integer>, AccessModesMap> ComputeAndVerifyAccessModes(const tir::PrimFunc& func) {
+  auto original_access_modes =
+      func->GetAttr(tir::attr::kDBArgAccessModes, Array<Integer>()).value();
+  auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
+  if (original_access_modes.size() > 0) {
+    ICHECK_EQ(original_access_modes.size(), func->params.size());
+
+    auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
+    Array<Integer> computed_access_modes;
+    for (size_t i = 0; i < func->params.size(); ++i) {
+      auto param = func->params[i];
+      auto computed_access_mode = static_cast<int>(
+          access_modes_map.count(param) ? access_modes_map.at(param) : runtime::vm::kInput);
+      computed_access_modes.push_back(computed_access_mode);
+      ICHECK_LE(original_access_modes[i]->value, computed_access_mode);
+    }
+
+    std::cout << original_access_modes << std::endl;
+    std::cout << computed_access_modes << std::endl;
+
+    return std::make_pair(original_access_modes, access_modes_map);
+  } else {
+    Array<Integer> access_modes;
+    for (size_t i = 0; i < func->params.size(); ++i) {
+      auto param = func->params[i];
+      access_modes.push_back(Integer(static_cast<int>(
+          access_modes_map.count(param) ? access_modes_map.at(param) : runtime::vm::kInput)));
+    }
+    return std::make_pair(access_modes, access_modes_map);
+  }
+}
+
 class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
  public:
   CoarsenedTensorAccessModeCalculator(const IRModule& mod) : mod_(mod) {}
 
   AccessModesMap Compute(const tir::Stmt& body) {
+    std::cout << "[COR] Computing access modes " << body << std::endl;
     body_ = body;
     VisitStmt(body);
     return access_modes_map_;
@@ -161,13 +194,15 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
  private:
   void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
+    std::cout << "[COR] Setting mode " << var << " " << mode << std::endl;
     auto iit = access_modes_map_.find(var);
     if (iit == access_modes_map_.end()) {
       access_modes_map_[var] = mode;
     } else {
       auto old_mode = iit->second;
       ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
-          << "Reused tensor: " << var << " in " << body_;
+          << "Modes found: " << old_mode << " " << mode << ". Reused tensor: " << var << " in "
+          << body_;
       if (old_mode != mode) {
         access_modes_map_[var] = runtime::vm::kInputOutput;
       }
@@ -180,19 +215,32 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
     ICHECK(base_leaf_callee.as<tir::PrimFuncNode>());
     auto leaf_callee = Downcast<tir::PrimFunc>(base_leaf_callee);
 
-    auto func_access_modes = LeafTensorAccessModeCalculator(leaf_callee).Compute();
-
+    auto res = ComputeAndVerifyAccessModes(leaf_callee);
+    auto func_access_modes = res.first;
+    auto func_access_modes_map = res.second;
     size_t ctr = 1;
     for (size_t i = 1; i <= leaf_callee->params.size(); ++i) {
       auto arg = op->args[ctr];
       auto param = leaf_callee->params[i - 1];
-      auto it = func_access_modes.find(param);
-      if (it != func_access_modes.end()) {
-        auto mode = it->second;
+      auto it = func_access_modes_map.find(param);
+      if (it != func_access_modes_map.end()) {
+        auto mode = static_cast<runtime::vm::DBArgAccessMode>(func_access_modes[i - 1]->value);
         MergeAndSet(Downcast<tir::Var>(arg), mode);
         ctr++;
       }
     }
+
+    // std::cout << "==============================================" << std::endl;
+    // auto func_access_modes = ComputeAndVerifyAccessModes(leaf_callee);
+    // std::cout << func_access_modes << std::endl;
+    // std::cout << leaf_callee->params << std::endl;
+    // std::cout << op->args << std::endl;
+    // for (size_t i = 1; i <= leaf_callee->params.size(); ++i) {
+    //   auto arg = op->args[i];
+    //   auto mode = func_access_modes[i - 1];
+    //   MergeAndSet(Downcast<tir::Var>(arg),
+    //   static_cast<runtime::vm::DBArgAccessMode>(mode->value));
+    // }
   }
 
   const IRModule mod_;
@@ -1132,12 +1180,7 @@ IRModule ComputeAccessModes(IRModule& mod) {
   for (const auto& it : funcs) {
     if (it.second.as<tir::PrimFuncNode>()) {
       auto func = Downcast<tir::PrimFunc>(it.second);
-      auto access_modes_map = LeafTensorAccessModeCalculator(func).Compute();
-      Array<Integer> access_modes;
-      for (auto param : func->params) {
-        access_modes.push_back(Integer(static_cast<int>(
-            access_modes_map.count(param) ? access_modes_map.at(param) : runtime::vm::kInput)));
-      }
+      Array<Integer> access_modes = ComputeAndVerifyAccessModes(func).first;
       func = WithAttr(func, tir::attr::kDBArgAccessModes, access_modes);
       std::cout << "[AccessMode] " << it.first << " " << access_modes << std::endl;
       new_prim_funcs.Set(it.first, func);

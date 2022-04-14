@@ -1,3 +1,4 @@
+#ifdef USE_CUDA
 #include "reduce_sum.h"
 
 #define CEIL(a, b) (((a) + (b)-1) / (b))
@@ -39,3 +40,4 @@ void reduce_sum_wrapper(float** input, float** output, int* input_indices, int b
 
 }  // namespace contrib
 }  // namespace tvm
+#endif

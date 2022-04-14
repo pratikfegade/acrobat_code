@@ -514,6 +514,10 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
+  for (int i = 0; i < num_args; ++i) {
+    ICHECK(args[i] != nullptr);
+  }
+
   auto size = nodes_.size();
   auto depthp1 = depth + 1;
   if (size < depthp1) {
