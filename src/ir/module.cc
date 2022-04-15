@@ -273,6 +273,10 @@ void IRModuleNode::Remove(const GlobalVar& var) {
   functions_node->erase(var);
   auto gvar_node = global_var_map_.CopyOnWrite();
   gvar_node->erase(var->name_hint);
+  auto batched_funcs_node = batched_prim_funcs.CopyOnWrite();
+  batched_funcs_node->erase(var);
+  auto batched_arg_modes_node = batched_arg_modes.CopyOnWrite();
+  batched_arg_modes_node->erase(var);
 }
 
 BaseFunc IRModuleNode::Lookup(const GlobalVar& var) const {

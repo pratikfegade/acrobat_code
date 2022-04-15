@@ -87,6 +87,8 @@ void TestNDArray(DLTensor* array);
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num);
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                              Allocator* allocator, bool gpu_execution);
+DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                                Allocator* allocator, bool gpu_execution);
 
 /*!
  * \brief A simple procedure to write to all locations of an gathered

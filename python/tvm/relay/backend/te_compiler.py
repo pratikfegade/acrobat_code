@@ -308,7 +308,7 @@ def lower_call(call, inputs, target):
             reenable_tracing = True
 
     if not is_dyn:
-        best_impl, outputs = select_implementation(op, call.attrs, inputs, ret_type, target)
+        best_impl, outputs =  select_implementation(op, call.attrs, inputs, ret_type, target)
     else:
         # TODO(@icemelon9): Allow tvm to generate multiple kernels for dynamic shapes.
         best_impl, outputs = select_implementation(

@@ -166,8 +166,8 @@ std::pair<Array<Integer>, AccessModesMap> ComputeAndVerifyAccessModes(const tir:
       ICHECK_LE(original_access_modes[i]->value, computed_access_mode);
     }
 
-    std::cout << original_access_modes << std::endl;
-    std::cout << computed_access_modes << std::endl;
+    // std::cout << original_access_modes << std::endl;
+    // std::cout << computed_access_modes << std::endl;
 
     return std::make_pair(original_access_modes, access_modes_map);
   } else {
@@ -186,7 +186,7 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
   CoarsenedTensorAccessModeCalculator(const IRModule& mod) : mod_(mod) {}
 
   AccessModesMap Compute(const tir::Stmt& body) {
-    std::cout << "[COR] Computing access modes " << body << std::endl;
+    // std::cout << "[COR] Computing access modes " << body << std::endl;
     body_ = body;
     VisitStmt(body);
     return access_modes_map_;
@@ -194,7 +194,7 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
  private:
   void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
-    std::cout << "[COR] Setting mode " << var << " " << mode << std::endl;
+    // std::cout << "[COR] Setting mode " << var << " " << mode << std::endl;
     auto iit = access_modes_map_.find(var);
     if (iit == access_modes_map_.end()) {
       access_modes_map_[var] = mode;
@@ -1056,8 +1056,8 @@ class Coarsener : public ExprMutator {
 int Coarsener::ctr = 0;
 
 IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattered_kernels) {
-  std::cout << "==============================================================" << std::endl;
-  std::cout << "[CG] Coarsening now!" << std::endl;
+  // std::cout << "==============================================================" << std::endl;
+  // std::cout << "[CG] Coarsening now!" << std::endl;
   tvm::Map<GlobalVar, Function> updates;
   tvm::Map<GlobalVar, tir::PrimFunc> new_prim_funcs;
 
@@ -1176,13 +1176,13 @@ IRModule ComputeAccessModes(IRModule& mod) {
   auto funcs = mod->functions;
 
   FunctionsAccessModesMap prim_funcs_access_modes;
-  std::cout << "[CG] AccessModeMaps" << std::endl;
+  // std::cout << "[CG] AccessModeMaps" << std::endl;
   for (const auto& it : funcs) {
     if (it.second.as<tir::PrimFuncNode>()) {
       auto func = Downcast<tir::PrimFunc>(it.second);
       Array<Integer> access_modes = ComputeAndVerifyAccessModes(func).first;
       func = WithAttr(func, tir::attr::kDBArgAccessModes, access_modes);
-      std::cout << "[AccessMode] " << it.first << " " << access_modes << std::endl;
+      // std::cout << "[AccessMode] " << it.first << " " << access_modes << std::endl;
       new_prim_funcs.Set(it.first, func);
     }
   }

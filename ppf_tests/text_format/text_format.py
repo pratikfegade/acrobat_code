@@ -2,6 +2,8 @@ import os
 os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
 os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
+TVM_HOME = os.environ["TVM_HOME"]
+print("TVM_HOME", TVM_HOME)
 
 import timeit
 import numpy as np
@@ -14,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor
 
 mod = tvm.IRModule()
-mod._import("/home/ppf/dyn_batch/tvm/ppf_tests/text_format/text_format.rly")
+mod._import(TVM_HOME + "/ppf_tests/text_format/text_format.rly")
 
 mvrnn_func = mod["mvrnn"]
 
@@ -37,15 +39,15 @@ weights_dict = {
 }
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
 use_autoscheduler=True
-aot_output_directory="/home/ppf/dyn_batch/tvm/ppf_tests/aot_test/"
+aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
 model_name="mvrnn"
 generate_aot_code=True
-dynamic_batch_size_estimate=64
+dynamic_batch_size_estimate=256
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
     coarsened_execution=coarsened_execution,
@@ -83,7 +85,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=10,
+                num_measure_trials=17,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
@@ -91,8 +93,9 @@ def auto_schedule(tune):
 
         # for task in tasks:
         #     try:
-        #         print("YOLO", task.print_best(log_file))
+        #         print("BOLO", task.print_best(log_file))
         #     except Exception:
+        #         print("BOLO Exception")
         #         pass
 
 def execute():
@@ -113,6 +116,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule((not os.path.exists(log_file)))
+if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

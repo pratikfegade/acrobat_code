@@ -405,6 +405,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
   }
 
+  bool IsTupleMapFunction(const std::string& name) {
+    return support::StartsWith(name, "tuple_map_");
+  }
+
   void GenerateLocalDecls(const std::vector<bool>& used_regs,
                           const std::unordered_set<Index>& scalar_op_outputs) {
     std::unordered_map<std::string, std::vector<std::string>> type2vars;
@@ -531,7 +535,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
+    bool same_depth_for_all_calls = IsTupleMapFunction(vm_func_.name);
     int max_static_depth = -1;
+    std::vector<std::string> all_depth_vars;
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
@@ -581,6 +587,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
               int_shape = backend::GetIntShape(dst_type->shape);
             }
 
+            std::string depth_var;
+            if (same_depth_for_all_calls) {
+              this->PrintIndent(stream_);
+              depth_var = "__depth" + std::to_string(tmp_var_counter++);
+              stream_ << "int " << depth_var << " = __orig_depth;\n";
+              all_depth_vars.push_back(depth_var);
+            } else if (use_depth_tracking_executor()) {
+              depth_var = "depth";
+            }
+
             if (fold_reduction_op.defined() && fold_reduction_op == GetAddOp() &&
                 (dst_type && int_shape.size() == dst_type->shape.size())) {
               ICHECK_EQ(instr.num_args, 3);
@@ -592,7 +608,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
               stream_ << dst_var << " = invoke_reduce_sum(append(" << list_var << ", " << init_var
                       << ")";
               if (use_depth_tracking_executor()) {
-                stream_ << ", depth";
+                stream_ << ", " << depth_var;
               }
               stream_ << ");\n";
 
@@ -622,7 +638,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 }
               }
               if (use_depth_tracking_executor()) {
-                stream_ << ", depth";
+                stream_ << ", " << depth_var;
               }
               stream_ << ");\n";
             }
@@ -1013,6 +1029,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::Ret: {
+            if (same_depth_for_all_calls) {
+              this->PrintIndent(stream_);
+              stream_ << "depth = max({" << support::PrintVector(all_depth_vars, false) << "});\n";
+            }
             auto result_var = GetVarForReg(instr.result);
             this->PrintIndent(stream_);
             stream_ << "return " << result_var << ";\n";
@@ -1044,6 +1064,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     };
 
+    if (same_depth_for_all_calls) {
+      this->PrintIndent(stream_);
+      stream_ << "int __orig_depth = depth;\n";
+    }
     generate_code(0, vm_func_.instructions.size());
     return max_static_depth;
   }
@@ -1196,6 +1220,16 @@ std::string replace_all(const std::string& str, const std::string& find,
 
 void VMAOTCompiler::EmitUtilFunctions(
     std::ostream& os, const std::unordered_set<const TensorTypeNode*>& invoke_reduce_sum_types) {
+  auto max_func =
+      "int max(std::initializer_list<int> numbers) {\n"
+      "  int res = std::numeric_limits<int>::min();\n"
+      "  for (auto& num : numbers) {\n"
+      "    res = (res > num) ? res : num;\n"
+      "  }\n"
+      "  return res;\n"
+      "}\n";
+  os << max_func << "\n" << std::endl;
+
   auto nd_to_int64_func =
       "int64_t NDToInt64(const NDArray& nd) {\n"
       "  static auto int64_dtype = DataType::Int(64);\n"
@@ -1203,20 +1237,21 @@ void VMAOTCompiler::EmitUtilFunctions(
       "  NDArray cpu_array = nd.CopyTo(cpu_ctx);\n"
       "  CHECK_EQ(DataType(cpu_array->dtype), int64_dtype);\n"
       "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
-      "}";
-
-  auto list_append_func =
-      "template <class A>\n"
-      "std::shared_ptr<List<A>> append(std::shared_ptr<List<A>> list, A value) {\n"
-      "  auto new_node = std::static_pointer_cast<List<A>>(std::make_shared<Cons<A>>());\n"
-      "  new_node->tag = LIST_CONS_TAG;\n"
-      "  static_cast<Cons<A>*>(new_node.get())->field_0 = value;\n"
-      "  static_cast<Cons<A>*>(new_node.get())->field_1 = list;\n"
-      "  return new_node;\n"
       "}\n";
+  os << nd_to_int64_func << "\n" << std::endl;
 
-  os << nd_to_int64_func << "\n\n" << std::endl;
-  os << list_append_func << "\n\n" << std::endl;
+  if (invoke_reduce_sum_types.size() > 0) {
+    auto list_append_func =
+        "template <class A>\n"
+        "std::shared_ptr<List<A>> append(std::shared_ptr<List<A>> list, A value) {\n"
+        "  auto new_node = std::static_pointer_cast<List<A>>(std::make_shared<Cons<A>>());\n"
+        "  new_node->tag = LIST_CONS_TAG;\n"
+        "  static_cast<Cons<A>*>(new_node.get())->field_0 = value;\n"
+        "  static_cast<Cons<A>*>(new_node.get())->field_1 = list;\n"
+        "  return new_node;\n"
+        "}\n";
+    os << list_append_func << "\n" << std::endl;
+  }
 
   for (auto tt : invoke_reduce_sum_types) {
     std::stringstream ss;

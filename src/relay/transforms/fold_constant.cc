@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 /*!
  * \file constant_folding.cc
  */
@@ -82,8 +81,8 @@ class ConstantFolder : public MixedModeMutator {
       // Rely on the Memoizer to cache pre-visit values
       Expr new_value = Mutate(op->value);
       if (IsSimpleConstant(new_value)) {
-        // Inline new value (along with any on_device annotation wrapping it) at all occurrences of
-        // the variable.
+        // Inline new value (along with any on_device annotation wrapping it) at all occurrences
+        // of the variable.
         //
         // We need to retain any "on_device" annotation so that downstream 'device aware'
         // passes can still retrieve the \p SEScope for the constant in its new position(s). Eg:

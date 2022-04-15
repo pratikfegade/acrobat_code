@@ -26,6 +26,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/ndarray.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 
 #include "runtime_base.h"
 
@@ -74,7 +75,9 @@ void ArrayCopyFromBytes(DLTensor* handle, const void* data, size_t nbytes) {
   from.byte_offset = 0;
   DeviceAPI::Get(handle->device)->CopyDataFromTo(&from, handle, nullptr);
   // Synchronize in case data become unavailable later.
-  DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
+#ifdef DEBUG_CHECKS
+  // DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
+#endif
 }
 
 void ArrayCopyToBytes(const DLTensor* handle, void* data, size_t nbytes) {
@@ -93,7 +96,9 @@ void ArrayCopyToBytes(const DLTensor* handle, void* data, size_t nbytes) {
 
   DeviceAPI::Get(handle->device)->CopyDataFromTo(const_cast<DLTensor*>(handle), &to, nullptr);
   // Synchronize in case data become unavailable later.
+#ifdef DEBUG_CHECKS
   DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
+#endif
 }
 
 struct NDArray::Internal {

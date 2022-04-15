@@ -112,16 +112,16 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
       merged_op_depths[kv.first.second] = Merge(merged_op_depths[kv.first.second], kv.second).first;
     }
 
-    if (true) {
-      // for (auto kv : merged_var_states) {
-      //   std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
-      //             << std::endl;
-      // }
+    if (false) {
+      for (auto kv : merged_var_states) {
+        std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
+                  << std::endl;
+      }
 
-      // for (auto kv : merged_function_states) {
-      //   std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
-      //             << std::endl;
-      // }
+      for (auto kv : merged_function_states) {
+        std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
+                  << std::endl;
+      }
 
       std::cout << "[SAI] Iterations: " << i << std::endl;
       for (auto kv : merged_op_depths) {

@@ -136,7 +136,6 @@ DLTensor* DynBatchRuntime<ExecutorType, TensorType>::AllocArrayWrapper(int64_t* 
   wrapper->ndim = ndim;
   wrapper->dtype = std::move(dtype);
   wrapper->shape = shape_data;
-  ICHECK_GT(wrapper->ndim, 0);
   return wrapper;
 }
 

@@ -901,7 +901,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         auto invoke_pc = Emit(Instruction::Invoke(it->second, args_registers, new_register));
         if (generate_aot_information_) {
           invoke_type_vars_[invoke_pc] = call_node->type_args;
-          std::cout << "[COMP] Calling " << call_node->op << " " << call_node->attrs << std::endl;
           if (call_node->attrs.defined() && call_node->attrs->IsInstance<DictAttrsNode>()) {
             call_attrs_[invoke_pc] = Downcast<DictAttrs>(call_node->attrs);
           }
@@ -1215,7 +1214,6 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     // TODO(mbs): We forget the memory scope.
     exec_->virtual_devices.push_back(Device{/*device_type=*/se_scope->device_type(),
                                             /*device_id=*/se_scope->virtual_device_id});
-    std::cout << "[COMP] Pushing device " << se_scope->device_type() << std::endl;
   }
   exec_->host_device_index = kHostDeviceIndex;
 
@@ -1352,13 +1350,10 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Perform memory planning in order to coalesce/reduce allocations.
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", false, true));
   pass_seqs.push_back(transform::CPPMemoryPlan());
-  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
-  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", false));
 
   // Fuse & lower yet again
   pass_seqs.push_back(FuseAndLowerOperators(host_se_scope));
@@ -1383,9 +1378,6 @@ transform::Sequential VMCompiler::FuseAndLowerOperators(const SEScope& host_se_s
   pass_seqs.push_back(FuseOps());
   // Give each "primitive" Function a hash.
   pass_seqs.push_back(LabelOps());
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
-
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
   // Lower "primitive" Functions to PrimFuncs and rewrite calls.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
@@ -1394,7 +1386,6 @@ transform::Sequential VMCompiler::FuseAndLowerOperators(const SEScope& host_se_s
                                          }
                                        },
                                        host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTEPass2", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1464,7 +1455,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // }
 
   pass_seqs.push_back(transform::Inline());
-  // pass_seqs.push_back(transform::PrintCurrentIR("Inline", true, true));
   pass_seqs.push_back(transform::ToANormalForm());
   pass_seqs.push_back(transform::InferType());
   pass_seqs.push_back(transform::LambdaLift());
@@ -1473,7 +1463,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // lowering all calls to lowered functions will be kept.
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
 
   // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
@@ -1503,15 +1492,12 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   if (true) {
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(transform::HoistNonSequentialOps());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before HoistNonSequentialOps", true, true));
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
-    // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
     pass_seqs.push_back(transform::InferType());
   } else {
     // Compute prim func access modes for all prim funcs

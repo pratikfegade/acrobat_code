@@ -252,10 +252,14 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         break;
       }
       case kScatter: {
-        arg_holder[i] = CreatePointerNDArray(
-            func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
-            (executor.accelerator_device_ == GPU_INDEX));
-        setter(ctr, arg_holder[i]);
+        // arg_holder[i] = CreatePointerNDArray(
+        // func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
+        // (executor.accelerator_device_ == GPU_INDEX));
+        // setter(ctr, arg_holder[i].ToDLPack());
+
+        setter(ctr, CreatePointerDLTensor(func_nodes, i,
+                                          vm_shared_state.allocators_[executor.accelerator_device_],
+                                          (executor.accelerator_device_ == GPU_INDEX)));
 
         // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(arg_holder[i].operator->())
         // << " " << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
@@ -514,10 +518,6 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
-  for (int i = 0; i < num_args; ++i) {
-    ICHECK(args[i] != nullptr);
-  }
-
   auto size = nodes_.size();
   auto depthp1 = depth + 1;
   if (size < depthp1) {

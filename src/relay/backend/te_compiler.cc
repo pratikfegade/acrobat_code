@@ -444,8 +444,8 @@ class TECompilerImpl : public TECompilerNode {
           }
         }
 
-        std::cout << cached_func->input_variables << std::endl;
-        std::cout << access_modes << std::endl;
+        // std::cout << cached_func->input_variables << std::endl;
+        // std::cout << access_modes << std::endl;
         // lower the function
         std::unordered_map<te::Tensor, tir::Buffer> binds;
         auto func_name = cached_func->prim_fn_var->name_hint;
@@ -464,7 +464,7 @@ class TECompilerImpl : public TECompilerNode {
                                      : kv.first;
           auto func = kv.second;
           if (auto pfn = func.as<tir::PrimFuncNode>()) {
-            std::cout << pfn->params << std::endl;
+            // std::cout << pfn->params << std::endl;
             Map<String, ObjectRef> attrs;
             if (batched) {
               attrs.Set(tir::attr::kDBBatchedPrimFunc, Integer(1));

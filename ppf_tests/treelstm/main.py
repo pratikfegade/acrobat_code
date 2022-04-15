@@ -34,7 +34,7 @@ use_autoscheduler=True
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
-dynamic_batch_size_estimate=256
+dynamic_batch_size_estimate=8
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)

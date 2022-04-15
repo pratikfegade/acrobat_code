@@ -38,7 +38,10 @@
 #include <vector>
 
 #include "../file_utils.h"
-
+//////////////////////////////////////////////////
+#include <cuda.h>
+#include <cuda_runtime.h>
+//////////////////////////////////////////////////
 using namespace tvm::runtime;
 
 namespace tvm {
@@ -222,6 +225,60 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
 #ifdef DEBUG_CHECKS
     TestPointerNDArray(result, GetDataSize(*(nodes[0]->args_[arg_num])) / sizeof(float), size);
+#endif
+  }
+  return result;
+}
+
+void MyArrayCopyFromBytes(DLTensor* handle, const void* data, size_t nbytes) {
+  size_t arr_size = GetDataSize(*handle);
+#ifdef DEBUG_CHECKS
+  ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " << nbytes;
+  ICHECK(IsContiguous(*handle)) << "ArrayCopyFromBytes only support contiguous array for now";
+#endif
+
+  DLTensor from;
+  from.data = const_cast<void*>(data);
+  from.device = Device{kDLCPU, 0};
+  from.ndim = handle->ndim;
+  from.dtype = handle->dtype;
+  from.shape = handle->shape;
+  from.strides = nullptr;
+  from.byte_offset = 0;
+  DeviceAPI::Get(handle->device)->CopyDataFromTo(&from, handle, nullptr);
+#ifdef DEBUG_CHECKS
+  // Synchronize in case data become unavailable later.
+  DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
+#endif
+}
+
+DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                                Allocator* allocator, bool gpu_execution) {
+  int64_t size = nodes.size();
+  auto& accelerator_device = nodes[0]->args_[arg_num]->device;
+
+  DLTensor* result = Arena::Current()->allocate_<DLTensor>();
+  {
+    int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
+    shape_data = new (shape_data) int64_t[1]{size};
+    auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+    result->device = accelerator_device;
+    result->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
+    result->strides = nullptr;
+    result->ndim = 1;
+    result->dtype = dtype;
+    result->shape = shape_data;
+  }
+
+  if (gpu_execution) {
+    void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
+    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    MyArrayCopyFromBytes(result, raw_data, size * sizeof(void*));
+  } else {
+    void** raw_data = static_cast<void**>(result->data);
+    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+#ifdef DEBUG_CHECKS
+    // TestPointerNDArray(result, GetDataSize(*(nodes[0]->args_[arg_num])) / sizeof(float), size);
 #endif
   }
   return result;

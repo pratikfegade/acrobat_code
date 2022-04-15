@@ -127,13 +127,13 @@ class FoldReduceSumsIdentifier : public ExprMutator {
     auto op = mutated.as<CallNode>();
     ICHECK(op);
     if (op->op == GetFoldlGlobalVar() || op->op == GetFoldrGlobalVar()) {
-      std::cout << "[FRS] Calling fold" << std::endl;
+      // std::cout << "[FRS] Calling fold" << std::endl;
       ICHECK_EQ(op->args.size(), 3);
       auto lambda_arg = op->args[0];
       auto init_arg = op->args[1];
       auto list_arg = op->args[2];
       if (IsTensorList(list_arg) && DoesPointToReductionLambda(lambda_arg)) {
-        std::cout << "[FRS]  Is reduce sum!" << std::endl;
+        // std::cout << "[FRS]  Is reduce sum!" << std::endl;
         auto new_attrs = DictAttrs::WithAttr(op->attrs, tir::attr::kDBFoldReduction, GetAddOp());
         mutated = Call(op->op, op->args, new_attrs, op->type_args, op->span);
         mutated->checked_type_ = old_op->checked_type_;
