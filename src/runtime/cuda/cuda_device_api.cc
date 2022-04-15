@@ -234,6 +234,7 @@ class CUDADeviceAPI final : public DeviceAPI {
     if (stream != nullptr) {
       CUDA_CALL(cudaMemcpyAsync(to, from, size, kind, stream));
     } else {
+      // std::cout << to << " " << from << " " << size << " " << kind << std::endl;
       CUDA_CALL(cudaMemcpy(to, from, size, kind));
     }
   }

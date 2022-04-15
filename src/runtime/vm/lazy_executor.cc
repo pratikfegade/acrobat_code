@@ -252,17 +252,18 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         break;
       }
       case kScatter: {
-        // arg_holder[i] = CreatePointerNDArray(
+        arg_holder[i] = CreatePointerNDArray(
+            func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
+            (executor.accelerator_device_ == GPU_INDEX));
+        setter(ctr, arg_holder[i].ToDLPack());
+
+        // auto tensor = CreatePointerDLTensor(
         // func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
         // (executor.accelerator_device_ == GPU_INDEX));
-        // setter(ctr, arg_holder[i].ToDLPack());
+        // setter(ctr, tensor);
 
-        setter(ctr, CreatePointerDLTensor(func_nodes, i,
-                                          vm_shared_state.allocators_[executor.accelerator_device_],
-                                          (executor.accelerator_device_ == GPU_INDEX)));
-
-        // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(arg_holder[i].operator->())
-        // << " " << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+        // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(tensorx) << " "
+        // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
         ctr += 1;
         break;
       }

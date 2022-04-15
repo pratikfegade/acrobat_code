@@ -535,7 +535,8 @@ bool IsLocalOpPadded(const Schedule& schedule, const Stage& stage) {
     return false;
   }
   for (auto& tensor : stage->op->InputTensors()) {
-    auto input_stage = schedule[tensor->op];
+    // auto input_stage = schedule[tensor->op];
+    auto input_stage = schedule->op2stage_cache_.at(tensor->op.get());
     if (!support::IsLocal(input_stage->scope) && !support::IsShared(input_stage->scope)) {
       return false;
     }

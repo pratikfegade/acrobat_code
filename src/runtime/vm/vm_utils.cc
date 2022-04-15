@@ -260,7 +260,7 @@ DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, in
   DLTensor* result = Arena::Current()->allocate_<DLTensor>();
   {
     int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-    shape_data = new (shape_data) int64_t[1]{size};
+    shape_data[0] = size;
     auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
     result->device = accelerator_device;
     result->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;

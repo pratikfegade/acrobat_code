@@ -16,10 +16,8 @@ from utils import get_ansor_log_file, get_random_tensor
 
 # target = "llvm -mcpu=core-avx2"
 target = "cuda"
-if target.startswith("cuda"):
-    device = tvm.runtime.device("cuda")
-else:
-    device = tvm.runtime.device("cpu")
+if target.startswith("cuda"): device = tvm.runtime.device("cuda")
+else: device = tvm.runtime.device("cpu")
 
 hidden_size = 256
 batch_size = 8
@@ -39,6 +37,7 @@ dynamic_batch_size_estimate=8
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
+print(mod["lstm_cell"])
 
 trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
 
@@ -86,7 +85,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20000,
+                num_measure_trials=17,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
@@ -116,6 +115,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-auto_schedule((not os.path.exists(log_file)))
+if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

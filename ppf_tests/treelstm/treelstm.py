@@ -1,7 +1,7 @@
 from network import Network
-from tvm import relay
+from tvm import relay, ir
 from tvm.relay import op, var, Var, Function, Clause, PatternConstructor, PatternVar, Match
-from tvm.relay import TupleGetItem, Tuple, TensorType, TupleType
+from tvm.relay import TupleGetItem, Tuple, TensorType, TupleType, Let
 
 def unique_var(name, shape=None, dtype=None):
     unique_var.ctr += 1
@@ -23,6 +23,19 @@ def lam(names, func):
     args = [unique_var(name) for name in names]
     return Function(args, func(*args))
 
+def fuse_ops(body_fn, body_type, arg_list):
+    param_list = []
+    tmp_list = []
+    for i in range(len(arg_list)):
+        param_list.append(relay.Var("param" + str(i)))
+        tmp_list.append(relay.Var("tmp" + str(i)))
+        i += 1
+    body = body_fn(*param_list)
+    attr_dict = { "Primitive": 1 }
+    attrs = ir.make_node("DictAttrs", **attr_dict)
+    func = relay.Function(param_list, body, body_type, attrs=attrs)
+    return func(*arg_list)
+
 class LSTMCell(Network):
     def initialize(self, input_size, memory_size, dtype="float32"):
         self.ilinear = self.create_sub_network(Linear(input_size=input_size,
@@ -31,6 +44,10 @@ class LSTMCell(Network):
                                                       output_size=memory_size * 3, name="hlinear"))
         self.fxlinear = self.create_sub_network(Linear(input_size=input_size, output_size=memory_size))
         self.fhlinear = self.create_sub_network(Linear(input_size=memory_size, output_size=memory_size))
+
+        self.fxlinear_w = self.weight(unique_var("linear_weight", shape=(memory_size, input_size), dtype=dtype))
+        self.fxlinear_b = self.weight(unique_var("linear_bias", shape=(1, memory_size,), dtype=dtype))
+
 
     def build_impl(self, input_size, memory_size, dtype="float32"):
         t = TensorType(shape=(1, memory_size), dtype=dtype)
@@ -43,17 +60,53 @@ class LSTMCell(Network):
         ioux = self.ilinear(self, False, i)
         iouh = self.hlinear(self, False, child_h_sum)
         iou = ioux + iouh
+
+
         i, o, u = op.split(iou, 3, axis=1)
         i, o, u = op.sigmoid(i), op.sigmoid(o), op.tanh(u)
+        iu = i * u
+
+        #####################
+        iu = fuse_ops(
+            lambda _iou: (op.sigmoid(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 0)) *
+                          op.tanh(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 2))),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou]
+        )
+        #####################
 
         fx = self.fxlinear(self, False, i)
         fh = self.fhlinear
 
+        #####################
+        fx = relay.Var("fx")
+        fx_value = fuse_ops(
+            lambda _iou, _w, _b: op.add(op.nn.dense(op.sigmoid(TupleGetItem(
+                op.split(_iou, 3, axis=1).astuple(), 0)), _w), _b),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou, self.fxlinear_w, self.fxlinear_b]
+        )
+        #####################
+
+
         def foreach_children(children):
             f = op.sigmoid(fh(self, False, TupleGetItem(children, 1)) + fx)
             return f * TupleGetItem(children, 0)
-        c = self.p.foldl(sum, i * u, self.p.map(lam(["z"], foreach_children), c))
-        return Tuple([c, o * op.tanh(c)])
+        c = Let(fx, fx_value, self.p.foldl(sum, iu, self.p.map(lam(["z"], foreach_children), c)))
+
+        #####################
+        h = fuse_ops(
+            lambda _iou, _c: op.sigmoid(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 1)) * op.tanh(_c),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou, c]
+        )
+        #####################
+
+
+
+
+        # return Tuple([c, o * op.tanh(c)])
+        return Tuple([c, h])
 
 class LSTMEncoder(Network):
     def build_impl(self, input_size, memory_size, dtype="float32"):

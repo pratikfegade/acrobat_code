@@ -129,12 +129,14 @@ class IndexedForwardGraph {
     std::ostringstream os;
     for (size_t i = 0; i < post_dfs_order.size(); ++i) {
       Node* node = post_dfs_order[i];
-      os << "node[" << i << "], " << GetRef<ObjectRef>(node->ref) << " outputs=[";
+      os << "node[" << i << ", " << node->pattern << "], " << GetRef<ObjectRef>(node->ref)
+         << " outputs=[";
       for (auto* link = node->outputs.head; link != nullptr; link = link->next) {
         os << link->value.node->index << ", ";
       }
       os << "]\n";
     }
+
     LOG(INFO) << os.str();
   }
   /*!
@@ -813,6 +815,7 @@ class FuseMutator : private MixedModeMutator {
   Expr Transform(const Expr& body, int fuse_opt_level, size_t max_fuse_depth) {
     // setup the group map.
     auto graph = IndexedForwardGraph::Create(&arena_, body);
+    // graph.DebugDump();
     auto groups = GraphPartitioner(&arena_, fuse_opt_level, max_fuse_depth).Partition(graph);
     for (size_t nid = 0; nid < graph.post_dfs_order.size(); ++nid) {
       ICHECK(graph.post_dfs_order[nid]->ref != nullptr);

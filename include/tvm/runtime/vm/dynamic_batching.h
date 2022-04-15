@@ -73,7 +73,7 @@ inline bool IsBatchedName(std::string name) {
 #define GPU_INDEX 1
 #define REDUCE_SUM_FUNC_INDEX 1 << 16
 
-#define DEBUG_CHECKS
+// #define DEBUG_CHECKS
 
 }  // namespace vm
 }  // namespace runtime

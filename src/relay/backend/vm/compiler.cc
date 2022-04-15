@@ -1433,9 +1433,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
   pass_seqs.push_back(transform::MarkScalarCalls());
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("PlanDevices", true, true));
-
+  // pass_seqs.push_back(transform::PrintCurrentIR("MarkScalarCalls", true, true));
   pass_seqs.push_back(transform::FuseOps());
+  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
 
   // Do layout rewrite for auto-scheduler.
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));

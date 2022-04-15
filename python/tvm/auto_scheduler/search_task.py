@@ -439,31 +439,31 @@ class SearchTask(Object):
         task_inputs_save_to_file=False,
         desc="",
     ):
-        # assert (
-            # func is not None or workload_key is not None
-        # ), "Either a workload generation function or a workload key should be provided"
-
-        # if func is not None:
-            # workload_key = make_workload_key(func, args)
-        # if compute_dag is None:
-            # compute_dag = ComputeDAG(workload_key)
-
         assert (
-            (func is not None and args is not None) or (compute_dag is not None) or (workload_key is not None)
-        ), "Either a workload generation function or a compute dag should be provided"
+            func is not None or workload_key is not None
+        ), "Either a workload generation function or a workload key should be provided"
 
-        if compute_dag is None and func is not None and args is not None:
-            compute_dag = ComputeDAG(func(*args))
-            if workload_key is None:
-                workload_key = compute_dag.workload_key()
-        elif compute_dag is not None and workload_key is None:
-            if workload_key is None:
-                workload_key = compute_dag.workload_key()
-        else:
-            if func is not None:
-                workload_key = make_workload_key(func, args)
-            if compute_dag is None:
-                compute_dag = ComputeDAG(workload_key)
+        if func is not None:
+            workload_key = make_workload_key(func, args)
+        if compute_dag is None:
+            compute_dag = ComputeDAG(workload_key)
+
+        # assert (
+            # (func is not None and args is not None) or (compute_dag is not None) or (workload_key is not None)
+        # ), "Either a workload generation function or a compute dag should be provided"
+
+        # if compute_dag is None and func is not None and args is not None:
+            # compute_dag = ComputeDAG(func(*args))
+            # if workload_key is None:
+                # workload_key = compute_dag.workload_key()
+        # elif compute_dag is not None and workload_key is None:
+            # if workload_key is None:
+                # workload_key = compute_dag.workload_key()
+        # else:
+            # if func is not None:
+                # workload_key = make_workload_key(func, args)
+            # if compute_dag is None:
+                # compute_dag = ComputeDAG(workload_key)
 
 
         assert target is not None, "Must specify a target."

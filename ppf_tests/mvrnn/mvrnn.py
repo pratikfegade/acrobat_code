@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor
 
 mod = tvm.IRModule()
-mod._import(TVM_HOME + "/ppf_tests/text_format/text_format.rly")
+mod._import(TVM_HOME + "/ppf_tests/mvrnn/mvrnn.rly")
 
 mvrnn_func = mod["mvrnn"]
 
