@@ -281,6 +281,14 @@ Expr ToBasicBlockNormalFormAux(const Expr& e);
 // Remove on_device calls for easier printing and analysis.
 Expr RemoveOnDeviceCalls(const Expr& e);
 
+// Lift lets out of values to make a program with straight line
+// control flow
+Expr LiftLetsOutOfValues(const Expr& expr);
+
+// Get the type of a relay var, either from the type annotation or the
+// checked_type.
+Type GetVarType(relay::Var var);
+
 // Pretty print individual relay expressions.
 inline std::string DebugPrint(const ObjectRef& obj) {
   return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
