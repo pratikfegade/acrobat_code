@@ -542,8 +542,8 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     VMDBProfiler::ProfileHostStartCall("scheduling");
   }
   for (size_t j = 0; j < nodes_.size(); ++j) {
-    // std::cout << "[LZ] Depth " << j << std::endl;
     auto& depth_nodes = nodes_[j];
+    // std::cout << "[LZ] Depth " << j << " " << depth_nodes.size() << std::endl;
     std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
 
     for (auto& node : depth_nodes) {

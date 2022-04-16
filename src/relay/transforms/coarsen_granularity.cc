@@ -186,7 +186,7 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
   CoarsenedTensorAccessModeCalculator(const IRModule& mod) : mod_(mod) {}
 
   AccessModesMap Compute(const tir::Stmt& body) {
-    // std::cout << "[COR] Computing access modes " << body << std::endl;
+    std::cout << "[COR] Computing access modes " << body << std::endl;
     body_ = body;
     VisitStmt(body);
     return access_modes_map_;
@@ -194,16 +194,16 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
 
  private:
   void MergeAndSet(const tir::Var& var, runtime::vm::DBArgAccessMode mode) {
-    // std::cout << "[COR] Setting mode " << var << " " << mode << std::endl;
+    std::cout << "[COR] Setting mode " << var << " " << mode << std::endl;
     auto iit = access_modes_map_.find(var);
     if (iit == access_modes_map_.end()) {
       access_modes_map_[var] = mode;
     } else {
       auto old_mode = iit->second;
-      ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
-          << "Modes found: " << old_mode << " " << mode << ". Reused tensor: " << var << " in "
-          << body_;
       if (old_mode != mode) {
+        ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
+            << "Modes found: " << old_mode << " " << mode << ". Reused tensor: " << var << " in "
+            << body_;
         access_modes_map_[var] = runtime::vm::kInputOutput;
       }
     }
@@ -959,8 +959,10 @@ class Coarsener : public ExprMutator {
         auto start = it->second;
         std::vector<std::pair<Var, Expr>> bindings;
         for (int j = start; j <= i; ++j) {
-          bindings.push_back(
-              std::make_pair(flattened[j].first, RemoveOnDeviceCalls(flattened[j].second)));
+          auto value = RemoveOnDeviceCalls(flattened[j].second);
+          bindings.push_back(std::make_pair(flattened[j].first, value));
+          std::cout << "[COR]================= " << std::endl;
+          std::cout << flattened[j].first->vid->name_hint << " = " << value << std::endl;
         }
 
         std::vector<Var> flattened_free_vars;

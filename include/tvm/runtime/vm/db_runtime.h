@@ -209,6 +209,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void LazyExecute();
 
   /*!
+   * \brief Recycle arena allocated memory
+   */
+  void RecycleAllArenaMemory();
+
+  /*!
    * \brief Get the current instance of the runtime.
    */
   static inline DynBatchRuntime<ExecutorType, TensorType>* Current() { return current_; }

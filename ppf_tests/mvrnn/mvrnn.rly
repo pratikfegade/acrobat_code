@@ -106,9 +106,6 @@ def @mvrnn(
       let %vl = %lres.1;
       let %vr = %rres.1;
 
-      let %lr_dense = nn.dense(%vl, %mr, units=64);
-      let %rl_dense = nn.dense(%vr, %ml, units=64);
-
       // let %v_comp = concatenate((%d_res.0, %d_res.1), axis=1);
       // let %v = tanh(%vbias + nn.dense(%v_comp, %vweight, units=64));
 
@@ -124,7 +121,6 @@ def @mvrnn(
       ) -> Tensor[(1, 64), float32] {
         tanh(%vbias + nn.dense(concatenate((%v1, %v2), axis=1), %vweight, units=64))
       };
-      let %v = %v_func(%lr_dense, %rl_dense, %vweight, %vbias);
 
       let %m_func = fn(
         %ml: Tensor[(64, 64), float32],
@@ -135,9 +131,16 @@ def @mvrnn(
       ) -> Tensor[(64, 64), float32] {
         %mbias + nn.dense(concatenate((%ml, %mr), axis=1), %mweight, units=64)
       };
-      let %m = %m_func(%ml, %mr, %mweight, %mbias);
 
-      (%m, %v)
+      (
+        %m_func(%ml, %mr, %mweight, %mbias),
+        %v_func(
+          nn.dense(%vl, %mr, units=64),
+          nn.dense(%vr, %ml, units=64),
+          %vweight,
+          %vbias
+        )
+      )
     },
     LeafNode(%m, %v) => {
       (%m, %v)

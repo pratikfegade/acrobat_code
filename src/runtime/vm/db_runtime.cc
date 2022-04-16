@@ -443,6 +443,14 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
   }
 }
 
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::RecycleAllArenaMemory() {
+  Arena::Current()->RecycleAll();
+  for (auto& allocator : shared_state_.allocators_) {
+    allocator->ArenaFree();
+  }
+}
+
 runtime::Module CreateEagerAllocationDynBatchRuntime(Executable* exec) {
   auto vm = make_object<DynBatchRuntime<EagerAllocationLazyExecutor, NDArray>>();
   vm->LoadExecutable(exec);
