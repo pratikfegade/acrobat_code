@@ -350,6 +350,15 @@ class VMAOTFunctionCompiler : SourcePrinter {
     return false;
   }
 
+  bool DoIncrementDepth(int pc) {
+    auto it = call_attrs_.find(pc);
+    if (it != call_attrs_.end()) {
+      auto attrs = it->second;
+      return attrs.GetAttr(tir::attr::kDBIncrementDepth, Bool(true)).value()->value;
+    }
+    return false;
+  }
+
   Op GetFoldReductionOp(int pc) {
     auto it = call_attrs_.find(pc);
     if (it != call_attrs_.end()) {
@@ -695,8 +704,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 if (depth >= 0) {
                   max_static_depth = std::max(depth, max_static_depth);
                   depth_str += std::to_string(depth);
-                } else {
+                } else if (DoIncrementDepth(i)) {
                   depth_str += "depth++";
+                } else {
+                  depth_str += "depth";
                 }
                 stream_ << GetRuntimeType() << "::Current()->InvokePackedWithDepth("
                         << instr.packed_index << depth_str << ", " << args_vec << ".data(), "

@@ -333,6 +333,9 @@ constexpr const char* kDBScalarOutputOp = "db.scalar_output_op";
 /*! \brief Fold-style reduce sum call. */
 constexpr const char* kDBFoldReduction = "db.fold_reduction";
 
+/*! \brief Whether or not to increment depth for this call when using
+    a depth tracking executor. */
+constexpr const char* kDBIncrementDepth = "db.increment_depth";
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

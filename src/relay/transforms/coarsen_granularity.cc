@@ -321,6 +321,7 @@ class AbstractTIRLowerer {
 struct GroupSchedulerResult {
   std::vector<std::vector<Expr>> groups;
   Map<relay::Var, tir::Var> var_to_var_mapping;
+  std::vector<bool> increment_depth;
 };
 
 class GroupStaticScheduler : public AbstractTIRLowerer {
@@ -378,7 +379,8 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
     }
 
     std::vector<std::vector<Expr>> groups;
-    if (false) {
+    std::vector<bool> increment_depth;
+    if (true) {
       std::unordered_map<const Object*, int> depths;
       std::vector<std::unordered_map<const Object*, std::vector<Expr>>> depth2func2calls;
       for (auto param : flattened_free_vars) {
@@ -405,10 +407,12 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
           if (calls.size() > 1) {
             if (current_group.size() > 0) {
               groups.push_back(current_group);
+              increment_depth.push_back(true);
               current_group = std::vector<Expr>();
             }
-            for (auto call : calls) {
-              groups.push_back({call});
+            for (size_t i = 0; i < calls.size(); ++i) {
+              groups.push_back({calls[i]});
+              increment_depth.push_back(i == (calls.size() - 1));
             }
           } else {
             ICHECK_EQ(calls.size(), 1);
@@ -418,11 +422,13 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
       }
       if (current_group.size() > 0) {
         groups.push_back(current_group);
+        increment_depth.push_back(true);
       }
     } else {
       groups.push_back(calls);
+      increment_depth.push_back(true);
     }
-    return {groups, var_to_var_mapping_};
+    return {groups, var_to_var_mapping_, increment_depth};
   }
 
   TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
@@ -958,6 +964,7 @@ class Coarsener : public ExprMutator {
                                               scattered_kernels_)
                              .Schedule(flattened_free_vars, bindings);
         auto call_groups = group_res.groups;
+        auto groups_increment_depth = group_res.increment_depth;
         auto var_to_var_mapping = group_res.var_to_var_mapping;
         //////////////////////////////////////////////////
 
@@ -976,7 +983,8 @@ class Coarsener : public ExprMutator {
             std::cout << PrettyPrint(call) << std::endl;
           }
           std::string name = "prim_func" + std::to_string(prim_func_ctr++);
-          std::cout << "Creating prim function " << name << std::endl;
+          std::cout << "Creating prim function " << name << " " << groups_increment_depth[k]
+                    << std::endl;
           auto group_free_vars_set = GetFreeVarsInGroup(group);
           std::vector<Var> group_flattened_free_vars;
           std::vector<Expr> group_call_args_unsorted;
@@ -1005,8 +1013,10 @@ class Coarsener : public ExprMutator {
           GlobalVar prim_func_var(name, prim_func->checked_type_);
           auto input_args_tuple = Tuple(call_args);
           auto output_args_tuple = Tuple(Array<Expr>());
-          Map<String, ObjectRef> attrs_map = {{attr::kPrimitive, tvm::Integer(1)},
-                                              {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)}};
+          Map<String, ObjectRef> attrs_map = {
+              {attr::kPrimitive, tvm::Integer(1)},
+              {tir::attr::kDBCoarseWrapperPrimFunc, Integer(1)},
+              {tir::attr::kDBIncrementDepth, Bool(groups_increment_depth[k])}};
           auto it = group_static_depths.find(i);
           if (it != group_static_depths.end()) {
             attrs_map.Set(tir::attr::kDBGraphDepth, Integer(it->second));
