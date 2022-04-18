@@ -105,13 +105,11 @@ bool lazy_execution() {
 }
 
 bool use_depth_tracking_executor() {
-  // static bool use_depth_tracking_executor_ =
-  // tvm::transform::PassContext::Current()
-  // ->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false))
-  // .value();
-  // return use_depth_tracking_executor_;
-  return true;
-  // return false;
+  static bool use_depth_tracking_executor_ =
+      tvm::transform::PassContext::Current()
+          ->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false))
+          .value();
+  return use_depth_tracking_executor_;
 }
 
 inline std::string GetTensorType() {
@@ -1495,13 +1493,13 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  runtime->Init({devices}, {" << alloc_list.str() << "});\n";
 
   os << "  runtime->CacheConstants();\n";
-  os << "  invoke_model<" << GetTensorType() << ">(devices);\n";
+  os << "  invoke_model<" << GetTensorType() << ">(devices, argc - 2, &(argv[2]));\n";
   os << "}\n\n";
 }
 
 void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
   os << "template <typename TensorType>\n";
-  os << "void invoke_model(std::vector<Device> devices);\n";
+  os << "void invoke_model(std::vector<Device> devices, int argc, char* argv[]);\n";
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> runner, "
         "bool profiling = false);\n";
 }

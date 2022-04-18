@@ -380,7 +380,9 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
 
     std::vector<std::vector<Expr>> groups;
     std::vector<bool> increment_depth;
-    if (true) {
+    if (PassContext::Current()
+            ->GetConfig<Bool>("relay.db_perform_static_scheduling", Bool(false))
+            .value()) {
       std::unordered_map<const Object*, int> depths;
       std::vector<std::unordered_map<const Object*, std::vector<Expr>>> depth2func2calls;
       for (auto param : flattened_free_vars) {
