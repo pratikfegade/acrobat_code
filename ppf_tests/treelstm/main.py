@@ -24,7 +24,7 @@ batch_size = 8
 num_nodes = 6
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False

@@ -36,13 +36,12 @@ def fuse_ops(body_fn, body_type, arg_list):
     func = relay.Function(param_list, body, body_type, attrs=attrs)
     return func(*arg_list)
 
-class LSTMCell(Network):
+class LSTMCellMultipleChildren(Network):
     def initialize(self, input_size, memory_size, dtype="float32"):
         self.ilinear = self.create_sub_network(Linear(input_size=input_size,
                                                       output_size=memory_size * 3, name="ilinear"))
         self.hlinear = self.create_sub_network(Linear(input_size=memory_size,
                                                       output_size=memory_size * 3, name="hlinear"))
-        self.fxlinear = self.create_sub_network(Linear(input_size=input_size, output_size=memory_size))
         self.fhlinear = self.create_sub_network(Linear(input_size=memory_size, output_size=memory_size))
 
         self.fxlinear_w = self.weight(unique_var("linear_weight", shape=(memory_size, input_size), dtype=dtype))
@@ -61,11 +60,6 @@ class LSTMCell(Network):
         iouh = self.hlinear(self, False, child_h_sum)
         iou = ioux + iouh
 
-
-        i, o, u = op.split(iou, 3, axis=1)
-        i, o, u = op.sigmoid(i), op.sigmoid(o), op.tanh(u)
-        iu = i * u
-
         #####################
         iu = fuse_ops(
             lambda _iou: (op.sigmoid(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 0)) *
@@ -74,9 +68,6 @@ class LSTMCell(Network):
             [iou]
         )
         #####################
-
-        fx = self.fxlinear(self, False, i)
-        fh = self.fhlinear
 
         #####################
         fx = relay.Var("fx")
@@ -88,7 +79,7 @@ class LSTMCell(Network):
         )
         #####################
 
-
+        fh = self.fhlinear
         def foreach_children(children):
             f = op.sigmoid(fh(self, False, TupleGetItem(children, 1)) + fx)
             return f * TupleGetItem(children, 0)
@@ -102,8 +93,62 @@ class LSTMCell(Network):
         )
         #####################
 
+        # return Tuple([c, o * op.tanh(c)])
+        return Tuple([c, h])
+
+class LSTMCellOneChild(Network):
+    def initialize(self, input_size, memory_size, dtype="float32"):
+        self.ilinear = self.create_sub_network(Linear(input_size=input_size,
+                                                      output_size=memory_size * 3, name="ilinear"))
+        self.hlinear = self.create_sub_network(Linear(input_size=memory_size,
+                                                      output_size=memory_size * 3, name="hlinear"))
+        self.fhlinear = self.create_sub_network(Linear(input_size=memory_size, output_size=memory_size))
+
+        self.fxlinear_w = self.weight(unique_var("linear_weight", shape=(memory_size, input_size), dtype=dtype))
+        self.fxlinear_b = self.weight(unique_var("linear_bias", shape=(1, memory_size,), dtype=dtype))
 
 
+    def build_impl(self, input_size, memory_size, dtype="float32"):
+        t = TensorType(shape=(1, memory_size), dtype=dtype)
+        i = self.input(unique_var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+        c = self.input(Var("lstmcell_child", TupleType([t, t])))
+        child_h_sum = TupleGetItem(c, 1)
+        ioux = self.ilinear(self, False, i)
+        iouh = self.hlinear(self, False, child_h_sum)
+        iou = ioux + iouh
+
+        #####################
+        iu = fuse_ops(
+            lambda _iou: (op.sigmoid(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 0)) *
+                          op.tanh(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 2))),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou]
+        )
+        #####################
+
+        #####################
+        fx = relay.Var("fx")
+        fx_value = fuse_ops(
+            lambda _iou, _w, _b: op.add(op.nn.dense(op.sigmoid(TupleGetItem(
+                op.split(_iou, 3, axis=1).astuple(), 0)), _w), _b),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou, self.fxlinear_w, self.fxlinear_b]
+        )
+        #####################
+
+        fh = self.fhlinear
+        def foreach_children(children):
+            f = op.sigmoid(fh(self, False, TupleGetItem(children, 1)) + fx)
+            return f * TupleGetItem(children, 0)
+        c = iu + foreach_children(c)
+
+        #####################
+        h = fuse_ops(
+            lambda _iou, _c: op.sigmoid(TupleGetItem(op.split(_iou, 3, axis=1).astuple(), 1)) * op.tanh(_c),
+            TensorType(shape=(1, memory_size), dtype=dtype),
+            [iou, c]
+        )
+        #####################
 
         # return Tuple([c, o * op.tanh(c)])
         return Tuple([c, h])
@@ -131,9 +176,10 @@ class LSTMTransformer(Network):
 
 class TreeLSTM(Network):
     def initialize(self, input_size, memory_size, dtype="float32"):
-        self.lstm_cell = self.create_sub_network(LSTMCell(input_size=input_size,
-                                                          memory_size=memory_size,
-                                                          dtype=dtype, name="lstm_cell"))
+        self.lstm_cell = self.create_sub_network(
+            LSTMCellMultipleChildren(input_size=input_size,
+                                     memory_size=memory_size,
+                                     dtype=dtype, name="lstm_cell"))
 
     def build_impl(self, input_size, memory_size, dtype="float32"):
         t = TensorType(shape=(1, memory_size), dtype=dtype)

@@ -7,7 +7,7 @@ from tvm import relay
 from tvm.runtime.container import ADT
 from tvm.relay.prelude import Prelude
 
-from treelstm import TreeLSTM, LSTMCell, Linear
+from treelstm import TreeLSTM
 from network import copy_var
 
 class RoseTree:
