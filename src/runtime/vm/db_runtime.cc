@@ -438,6 +438,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
         << "Unable to find a physical device (from among the " << physical_devices.size()
         << " given) to match the virtual device with device type " << virtual_device_type;
     const size_t i = std::distance(physical_devices.begin(), itr);
+    std::cout << "[VM]  Device " << itr->device_type << " " << itr->device_id << std::endl;
     shared_state_.devices_.push_back(*itr);
     shared_state_.allocators_.push_back(MemoryManager::GetOrCreateAllocator(*itr, alloc_types[i]));
   }

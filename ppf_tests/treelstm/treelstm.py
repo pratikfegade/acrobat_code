@@ -69,6 +69,9 @@ class LSTMCellMultipleChildren(Network):
         )
         #####################
 
+
+
+
         #####################
         fx = relay.Var("fx")
         fx_value = fuse_ops(
@@ -83,7 +86,10 @@ class LSTMCellMultipleChildren(Network):
         def foreach_children(children):
             f = op.sigmoid(fh(self, False, TupleGetItem(children, 1)) + fx)
             return f * TupleGetItem(children, 0)
-        c = Let(fx, fx_value, self.p.foldl(sum, iu, self.p.map(lam(["z"], foreach_children), c)))
+        # c = Let(fx, fx_value, self.p.foldl(sum, iu, self.p.map(lam(["z"], foreach_children), c)))
+        c = self.p.foldl(sum, iu, self.p.map(lam(["z"], foreach_children), c))
+
+
 
         #####################
         h = fuse_ops(
@@ -93,8 +99,7 @@ class LSTMCellMultipleChildren(Network):
         )
         #####################
 
-        # return Tuple([c, o * op.tanh(c)])
-        return Tuple([c, h])
+        return Let(fx, fx_value, Tuple([c, h]))
 
 class LSTMCellOneChild(Network):
     def initialize(self, input_size, memory_size, dtype="float32"):

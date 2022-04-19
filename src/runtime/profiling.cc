@@ -128,31 +128,35 @@ void Profiler::Start() {
 
 void Profiler::StartCall(String name, Device dev,
                          std::unordered_map<std::string, ObjectRef> extra_metrics) {
-  std::vector<std::pair<MetricCollector, ObjectRef>> objs;
-  for (auto& collector : collectors_) {
-    ObjectRef obj = collector->Start(dev);
-    if (obj.defined()) {
-      objs.emplace_back(collector, obj);
+  if (is_running_) {
+    std::vector<std::pair<MetricCollector, ObjectRef>> objs;
+    for (auto& collector : collectors_) {
+      ObjectRef obj = collector->Start(dev);
+      if (obj.defined()) {
+        objs.emplace_back(collector, obj);
+      }
     }
+    in_flight_.push(CallFrame{dev, name, Timer::Start(dev), extra_metrics, objs});
   }
-  in_flight_.push(CallFrame{dev, name, Timer::Start(dev), extra_metrics, objs});
 }
 
 void Profiler::StopCall(std::unordered_map<std::string, ObjectRef> extra_metrics) {
-  CallFrame cf = in_flight_.top();
-  cf.timer->Stop();
-  for (auto& p : extra_metrics) {
-    cf.extra_metrics[p.first] = p.second;
-  }
-  // collect the extra metrics from user defined collectors
-  for (const auto& obj : cf.extra_collectors) {
-    auto collector_metrics = obj.first->Stop(obj.second);
-    for (auto& p : collector_metrics) {
+  if (is_running_) {
+    CallFrame cf = in_flight_.top();
+    cf.timer->Stop();
+    for (auto& p : extra_metrics) {
       cf.extra_metrics[p.first] = p.second;
     }
+    // collect the extra metrics from user defined collectors
+    for (const auto& obj : cf.extra_collectors) {
+      auto collector_metrics = obj.first->Stop(obj.second);
+      for (auto& p : collector_metrics) {
+        cf.extra_metrics[p.first] = p.second;
+      }
+    }
+    in_flight_.pop();
+    calls_.push_back(cf);
   }
-  in_flight_.pop();
-  calls_.push_back(cf);
 }
 
 void Profiler::Stop() {
@@ -343,7 +347,7 @@ String ReportNode::AsJSON() const {
   return s.str();
 }
 
-String ReportNode::AsTable(bool sort, bool aggregate, bool compute_col_sums) const {
+String ReportNode::AsTable(bool sort, bool aggregate, bool compute_col_sums, int iterations) const {
   // aggregate calls by op hash (or op name if hash is not set) + argument shapes
   std::vector<Map<String, ObjectRef>> aggregated_calls;
   if (aggregate) {
@@ -488,12 +492,13 @@ String ReportNode::AsTable(bool sort, bool aggregate, bool compute_col_sums) con
         if ((*it).second.as<CountNode>()) {
           std::stringstream s;
           s.imbue(std::locale(""));  // for 1000s seperators
-          s << std::fixed << (*it).second.as<CountNode>()->value;
+          s << std::fixed << ((*it).second.as<CountNode>()->value / iterations);
           val = s.str();
         } else if ((*it).second.as<DurationNode>()) {
           std::stringstream s;
           s.imbue(std::locale(""));  // for 1000s seperators
-          s << std::fixed << std::setprecision(2) << (*it).second.as<DurationNode>()->microseconds;
+          s << std::fixed << std::setprecision(2)
+            << ((*it).second.as<DurationNode>()->microseconds / (1000.0 * iterations));
           val = s.str();
         } else if ((*it).second.as<PercentNode>()) {
           std::stringstream s;

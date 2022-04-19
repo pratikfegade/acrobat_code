@@ -59,10 +59,8 @@ class VMDBProfiler {
 
   static inline void ProfileDeviceStopCall() { instance_->profiler_.StopCall(); }
 
-  static inline std::string GetReport() {
-    std::stringstream ss;
-    ss << instance_->profiler_.Report(true, true)->AsTable();
-    return ss.str();
+  static inline std::string GetReport(int iterations = 1) {
+    return instance_->profiler_.Report(true, true)->AsTable(true, true, true, iterations);
   }
 
   static inline Device& GetHost() { return instance_->devices_[0]; }

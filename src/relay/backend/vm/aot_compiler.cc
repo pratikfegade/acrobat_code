@@ -413,7 +413,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   bool IsTupleMapFunction(const std::string& name) {
-    return support::StartsWith(name, "tuple_map_");
+    return use_depth_tracking_executor() && support::StartsWith(name, "tuple_map_");
   }
 
   void GenerateLocalDecls(const std::vector<bool>& used_regs,
@@ -1355,10 +1355,10 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   this->PrintIndent(os);
   os << "}\n";
   auto pass_ctx = transform::PassContext::Current();
-  if (lazy_execution()) {
-    this->PrintIndent(os);
-    os << GetRuntimeType() << "::Current()->LazyExecute();\n";
-  }
+  // if (lazy_execution()) {
+  //   this->PrintIndent(os);
+  //   os << GetRuntimeType() << "::Current()->LazyExecute();\n";
+  // }
   this->PrintIndent(os);
   os << "return res;\n";
   this->EndScope();

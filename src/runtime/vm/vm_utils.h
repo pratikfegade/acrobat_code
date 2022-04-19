@@ -86,9 +86,9 @@ void TestNDArray(DLTensor* array);
  */
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num);
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                             Allocator* allocator, bool gpu_execution);
+                             Allocator* allocator);
 DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                                Allocator* allocator, bool gpu_execution);
+                                Allocator* allocator);
 
 /*!
  * \brief A simple procedure to write to all locations of an gathered
@@ -99,6 +99,15 @@ DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, in
  * \param batch_size The number of gathered tensors.
  */
 void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t batch_size);
+
+/*!
+ * \brief Async memory copy function.
+ *
+ * \param handle The destination array.
+ * \param data The source on the host .
+ * \param nbytes The number of bytes to be copied.
+ */
+void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes);
 
 /* Invoking packed functions */
 

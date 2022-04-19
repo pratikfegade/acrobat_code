@@ -211,7 +211,8 @@ class ReportNode : public Object {
    *      the Count, Duation, and Percent columns.
    *
    */
-  String AsTable(bool sort = true, bool aggregate = true, bool compute_col_sums = true) const;
+  String AsTable(bool sort = true, bool aggregate = true, bool compute_col_sums = true,
+                 int iterations = 1) const;
   /*! \brief Convert this report to JSON.
    *
    * Output JSON will be of this format:

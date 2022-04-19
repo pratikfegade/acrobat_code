@@ -1352,9 +1352,9 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Perform memory planning in order to coalesce/reduce allocations.
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", false, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", false, true));
   pass_seqs.push_back(transform::CPPMemoryPlan());
-  // pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1500,10 +1500,9 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    pass_seqs.push_back(transform::PrintCurrentIR("Before coarsen", true, true));
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before coarsen", true, true));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
-    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
     pass_seqs.push_back(transform::InferType());
   } else {
     // Compute prim func access modes for all prim funcs
@@ -1515,6 +1514,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

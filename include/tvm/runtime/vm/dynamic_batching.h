@@ -75,6 +75,8 @@ inline bool IsBatchedName(std::string name) {
 
 // #define DEBUG_CHECKS
 
+#define DB_PROFILING
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

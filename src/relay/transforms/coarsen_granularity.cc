@@ -24,6 +24,7 @@
  * \brief This is a backend-aware optimization pass.
  *   Fuse necessary ops into a single one.
  */
+#include <tvm/ir/transform.h>
 #include <tvm/relay/analysis.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/transform.h>
@@ -158,9 +159,9 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
     } else {
       auto old_mode = iit->second;
       if (old_mode != mode) {
-        ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
-            << "Modes found: " << old_mode << " " << mode << ". Reused tensor: " << var << " in "
-            << body_;
+        // ICHECK(old_mode == runtime::vm::kOutput && mode == runtime::vm::kInput)
+        //     << "Modes found: " << old_mode << " " << mode << ". Reused tensor: " << var << " in "
+        //     << body_;
         access_modes_map_[var] = runtime::vm::kInputOutput;
       }
     }
@@ -380,7 +381,7 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
 
     std::vector<std::vector<Expr>> groups;
     std::vector<bool> increment_depth;
-    if (PassContext::Current()
+    if (transform::PassContext::Current()
             ->GetConfig<Bool>("relay.db_perform_static_scheduling", Bool(false))
             .value()) {
       std::unordered_map<const Object*, int> depths;

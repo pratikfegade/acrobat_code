@@ -41,6 +41,8 @@
 //////////////////////////////////////////////////
 #include <cuda.h>
 #include <cuda_runtime.h>
+
+#include "../cuda/cuda_common.h"
 //////////////////////////////////////////////////
 using namespace tvm::runtime;
 
@@ -187,7 +189,7 @@ inline void FillInPointers(void** host_raw_ptrs, size_t size,
   auto first_arg = nodes[0]->args_[arg_num];
   auto data_size = GetDataSize(*first_arg);
   if (first_arg->data != nullptr) {
-    // std::cout << "[VMU] Already mem" << std::endl;
+#pragma GCC ivdep
     for (size_t j = 0; j < size; ++j) {
 #ifdef DEBUG_CHECKS
       ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
@@ -196,8 +198,8 @@ inline void FillInPointers(void** host_raw_ptrs, size_t size,
       host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
   } else {
-    // std::cout << "[VMU] Alloc total mem " << size * data_size << std::endl;
     void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
+#pragma GCC ivdep
     for (size_t j = 0; j < size; ++j) {
       auto ptr = static_cast<char*>(start) + j * data_size;
       host_raw_ptrs[j] = ptr;
@@ -210,13 +212,13 @@ inline void FillInPointers(void** host_raw_ptrs, size_t size,
 }
 
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                             Allocator* allocator, bool gpu_execution) {
+                             Allocator* allocator) {
   int64_t size = nodes.size();
   auto& accelerator_device = nodes[0]->args_[arg_num]->device;
   NDArray result =
       NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
                      DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
-  if (gpu_execution) {
+  if (accelerator_device.device_type == kDLCUDA) {
     void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
     result.CopyFromBytes(raw_data, size * sizeof(void*));
@@ -230,7 +232,7 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
   return result;
 }
 
-void MyArrayCopyFromBytes(DLTensor* handle, const void* data, size_t nbytes) {
+void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes) {
   size_t arr_size = GetDataSize(*handle);
 #ifdef DEBUG_CHECKS
   ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " << nbytes;
@@ -253,7 +255,7 @@ void MyArrayCopyFromBytes(DLTensor* handle, const void* data, size_t nbytes) {
 }
 
 DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                                Allocator* allocator, bool gpu_execution) {
+                                Allocator* allocator) {
   int64_t size = nodes.size();
   auto& accelerator_device = nodes[0]->args_[arg_num]->device;
 
@@ -268,12 +270,13 @@ DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, in
     result->ndim = 1;
     result->dtype = dtype;
     result->shape = shape_data;
+    result->byte_offset = 0;
   }
 
-  if (gpu_execution) {
+  if (accelerator_device.device_type == kDLCUDA) {
     void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
-    MyArrayCopyFromBytes(result, raw_data, size * sizeof(void*));
+    ArrayCopyFromBytesAsync(result, raw_data, size * sizeof(void*));
   } else {
     void** raw_data = static_cast<void**>(result->data);
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
@@ -342,9 +345,11 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
 template <typename TensorType>
 void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, TensorType* args,
                             int arity) {
+#ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("arg_prep_unbatched");
   }
+#endif
 
   std::vector<TVMValue> values(arity);
   std::vector<int> codes(arity);
@@ -353,15 +358,19 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Tenso
     setter(i, args[i]);
   }
 
+#ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();
     VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
   }
+#endif
   TVMRetValue rv;
   func.CallPacked(TVMArgs(values.data(), codes.data(), arity), &rv);
+#ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileDeviceStopCall();
   }
+#endif
 }
 
 template void InvokePackedFnUnrolled<NDArray>(const size_t func_idx, const PackedFunc& func,

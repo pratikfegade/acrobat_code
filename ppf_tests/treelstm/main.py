@@ -16,7 +16,7 @@ from utils import get_ansor_log_file, get_random_tensor
 
 # target = "llvm -mcpu=core-avx2"
 target = "cuda"
-if target.startswith("cuda"): device = tvm.runtime.device("cuda")
+if target.startswith("cuda"): device = tvm.runtime.device("cuda", 0)
 else: device = tvm.runtime.device("cpu")
 
 hidden_size = 256
@@ -29,15 +29,17 @@ batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
 use_autoscheduler=True
+use_depth_tracking=True
+perform_static_scheduling=False
+use_autoscheduler=True
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
-dynamic_batch_size_estimate=8
+dynamic_batch_size_estimate=256
 
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
-print(mod["lstm_cell"])
 
 trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
 
@@ -54,6 +56,8 @@ pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     batched_execution=batched_execution,
     scattered_kernels=scattered_kernels,
     concurrent_execution=concurrent_execution,
+    use_depth_tracking=use_depth_tracking,
+    perform_static_scheduling=perform_static_scheduling,
     use_autoscheduler=use_autoscheduler,
     dynamic_batch_size_estimate=dynamic_batch_size_estimate,
     batch_size=batch_size,
@@ -85,7 +89,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=17,
+                num_measure_trials=25000,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
