@@ -75,7 +75,7 @@ void TestNDArray(const NDArray& array);
 void TestNDArray(DLTensor* array);
 
 /*!
- * \brief Create a gathered NDArray from a batch of scattered tensors.
+ * \brief Create a gathered/copied NDArray from a batch of scattered tensors.
  *
  * \param nodes The OpNodes that contain the scattered tensors.
  * \param arg_num The index of the scattered argument tensors.
@@ -89,7 +89,8 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
                              Allocator* allocator);
 DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                                 Allocator* allocator);
-
+DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                                     Allocator* allocator);
 /*!
  * \brief A simple procedure to write to all locations of an gathered
  * NDArray/DLTensor to check for invalid accesses.

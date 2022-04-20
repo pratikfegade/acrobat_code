@@ -36,6 +36,24 @@ def fuse_ops(body_fn, body_type, arg_list):
     func = relay.Function(param_list, body, body_type, attrs=attrs)
     return func(*arg_list)
 
+
+class RNNCell(Network):
+    def initialize(self, input_size, memory_size, dtype="float32"):
+        self.ilinear = self.create_sub_network(Linear(input_size=input_size,
+                                                      output_size=memory_size, name="ilinear"))
+        self.hlinear = self.create_sub_network(Linear(input_size=memory_size,
+                                                      output_size=memory_size, name="hlinear"))
+
+    def build_impl(self, input_size, memory_size, dtype="float32"):
+        t = TensorType(shape=(1, memory_size), dtype=dtype)
+        i = self.input(unique_var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+        h = self.input(unique_var("lstmcell_input", shape=(1, input_size), dtype=dtype))
+
+        ilinear = self.ilinear(self, False, i)
+        hlinear = self.hlinear(self, False, h)
+
+        return op.sigmoid(ilinear + hlinear)
+
 class LSTMCellMultipleChildren(Network):
     def initialize(self, input_size, memory_size, dtype="float32"):
         self.ilinear = self.create_sub_network(Linear(input_size=input_size,

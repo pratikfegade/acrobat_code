@@ -40,6 +40,8 @@ dynamic_batch_size_estimate=256
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
+print(mod)
+exit()
 
 trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
 

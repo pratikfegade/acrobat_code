@@ -231,3 +231,43 @@ def normal(key, shape, dtype="float32", mean=0.0, scale=1.0):
     if not isinstance(scale, Expr):
         scale = const(scale, dtype=dtype)
     return _make.normal(key, mean, scale, shape, dtype)
+
+
+def db_uniform(shape, dtype="float32", low=0.0, high=1.0):
+    """Draw samples from a stateful uniform distribution.
+
+    Samples are uniformly distributed over the half-open interval [low, high)
+    (includes low, but excludes high). In other words, any value within the
+    given interval is equally likely to be drawn by uniform.
+
+    Example
+    -------
+
+    .. code-block:: python
+
+        random_values = uniform((100,), low=0, high=10)
+
+    Parameters
+    ----------
+    shape : Sequence[int]
+        Desired outputs shape of random numbers.
+
+    dtype : str
+        Desired outputs type of random numbers.
+
+    low : float or relay.Expr, optional
+        Lower bound of the uniform distribution.
+
+    high : float or relay.Expr, optional
+        Upper bound of the uniform distribution.
+
+    Returns
+    -------
+    random_values : relay.Expr
+        The generated uniform distributed random numbers.
+    """
+    if not isinstance(low, Expr):
+        low = const(low, dtype=dtype)
+    if not isinstance(high, Expr):
+        high = const(high, dtype=dtype)
+    return _make.db_uniform(key, low, high, shape, dtype)

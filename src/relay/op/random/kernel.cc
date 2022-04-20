@@ -179,5 +179,62 @@ RELAY_REGISTER_OP("random.normal")
     .add_argument("scale", "Tensor", "Standard deviation of the distribution")
     .add_type_rel("Normal", NormalRel);
 
+////////////////////////////// Dynamic batching
+bool DBUniformRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
+                  const TypeReporter& reporter) {
+  const UniformAttrs* param = attrs.as<UniformAttrs>();
+  ICHECK_EQ(types.size(), 3) << "Uniform should have two inputs and one output";
+
+  std::vector<IndexExpr> oshape;
+  for (auto& x : param->out_shape) {
+    oshape.push_back(x);
+  }
+
+  if (!oshape.size() == 0) {
+    reporter->GetDiagCtx().EmitFatal(Diagnostic::Error(reporter->GetSpan())
+                                     << "We only support generating uniform random value of "
+                                     << "scalars, got tensor of shape " << param->out_shape << ".");
+  }
+  DataType out_dtype = param->out_dtype;
+  // // we are supporting float32 and float64 at the moment.
+  // if (!(out_dtype.is_float() && (out_dtype.bits() == 32 || out_dtype.bits() == 64))) {
+  //   reporter->GetDiagCtx().EmitFatal(Diagnostic::Error(reporter->GetSpan())
+  //                                    << "We only support generating uniform random value of "
+  //                                    << "type float32 or float64, got " << out_dtype << ".");
+  //   return false;
+  // }
+  // we are supporting in32.
+  if (!(out_dtype.is_int() && out_dtype.bits() == 32)) {
+    reporter->GetDiagCtx().EmitFatal(Diagnostic::Error(reporter->GetSpan())
+                                     << "We only support generating uniform random value of "
+                                     << "type int32, got " << out_dtype << ".");
+    return false;
+  }
+  reporter->Assign(types[0], TensorType({}, out_dtype));
+  reporter->Assign(types[1], TensorType({}, out_dtype));
+  // generate returns the next key and an array of random values
+  reporter->Assign(types[2], TensorType(oshape, out_dtype));
+  return true;
+}
+
+Expr MakeDBUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_dtype) {
+  auto attrs = make_object<UniformAttrs>();
+  attrs->out_shape = out_shape;
+  attrs->out_dtype = out_dtype;
+  static const Op& op = Op::Get("random.db_uniform");
+  return Call(op, {low, high}, Attrs(attrs), {});
+}
+
+TVM_REGISTER_GLOBAL("relay.op.random._make.db_uniform").set_body_typed(MakeDBUniform);
+
+RELAY_REGISTER_OP("random.db_uniform")
+    .describe(
+        R"doc(Generate an array of random numbers under uniform distribution.)doc" TVM_ADD_FILELINE)
+    .set_num_inputs(2)
+    .set_attrs_type<UniformAttrs>()
+    .add_argument("low", "Tensor", "Lower bound of the distribution")
+    .add_argument("high", "Tensor", "Higher bound of the distribution")
+    .add_type_rel("DBUniform", DBUniformRel);
+
 }  // namespace relay
 }  // namespace tvm

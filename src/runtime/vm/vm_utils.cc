@@ -38,12 +38,14 @@
 #include <vector>
 
 #include "../file_utils.h"
-//////////////////////////////////////////////////
-#include <cuda.h>
-#include <cuda_runtime.h>
 
-#include "../cuda/cuda_common.h"
-//////////////////////////////////////////////////
+// //////////////////////////////////////////////////
+// #include <cuda.h>
+// #include <cuda_runtime.h>
+
+// #include "../cuda/cuda_common.h"
+// //////////////////////////////////////////////////
+
 using namespace tvm::runtime;
 
 namespace tvm {
@@ -233,8 +235,8 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
 }
 
 void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes) {
-  size_t arr_size = GetDataSize(*handle);
 #ifdef DEBUG_CHECKS
+  size_t arr_size = GetDataSize(*handle);
   ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " << nbytes;
   ICHECK(IsContiguous(*handle)) << "ArrayCopyFromBytes only support contiguous array for now";
 #endif
@@ -313,33 +315,52 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
   return result;
 }
 
-// NDArray CreateConcatenatedNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-//                                   Allocator* allocator, bool input) {
-//   auto& first_arg = nodes[0]->args_[arg_num];
-//   auto unbatched_shape = arrays[0].Shape();
-//   std::vector<int64_t> batched_shape(first_arg.ndim + 1);
-//   batched_shape[0] = static_cast<int64_t>(arrays.size());
-//   for (size_t i = 0; i < first_arg.ndim; ++i) {
-//     batched_shape[i + 1] = first_arg.shape[i];
-//   }
-//   auto result = NDArray::Empty(ShapeTuple(batched_shape), first_arg.dtype, first_arg.device);
+DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                                     Allocator* allocator) {
+  auto& first_arg = nodes[0]->args_[arg_num];
+  auto ub_ndim = first_arg->ndim;
+  int64_t size = nodes.size();
+  auto& accelerator_device = first_arg->device;
 
-//   if () DLTensor* mutable_internal = const_cast<DLTensor*>(result.operator->());
-//   auto old_offset = mutable_internal->byte_offset;
-//   auto offset_delta = arrays[0].DataType().bytes();
-//   for (auto dim : unbatched_shape) {
-//     offset_delta *= dim;
-//   }
-//   mutable_internal->shape[0] = 1;
-//   for (size_t i = 0; i < arrays.size(); ++i) {
-//     arrays[i].CopyTo(result);
-//     mutable_internal->byte_offset += offset_delta;
-//   }
+  DLTensor* result = Arena::Current()->allocate_<DLTensor>();
+  int64_t ub_flat_bytes = 4;
+  {
+    int64_t* shape_data = Arena::Current()->allocate_<int64_t>(ub_ndim + 1);
+    shape_data[0] = size;
+    for (int i = 0; i < ub_ndim; ++i) {
+      auto dim_ext = first_arg->shape[i];
+      shape_data[i + 1] = dim_ext;
+      ub_flat_bytes *= dim_ext;
+    }
+    int64_t b_flat_bytes = ub_flat_bytes * size;
 
-//   mutable_internal->shape[0] = arrays.size();
-//   mutable_internal->byte_offset = old_offset;
-//   return result;
-// }
+    auto& dtype = first_arg->dtype;
+    result->device = accelerator_device;
+    result->data = allocator->ArenaAlloc(b_flat_bytes, 256, dtype).data;
+    result->strides = nullptr;
+    result->ndim = 1;
+    result->dtype = dtype;
+    result->shape = shape_data;
+    result->byte_offset = 0;
+  }
+
+  if (first_arg->data == nullptr) {
+    void* start = result->data;
+#pragma GCC ivdep
+    for (int j = 0; j < size; ++j) {
+      nodes[j]->args_[arg_num]->data = static_cast<char*>(start) + j * ub_flat_bytes;
+    }
+  } else {
+    auto dev_api = DeviceAPI::Get(accelerator_device);
+    for (int j = 0; j < size; ++j) {
+      result->byte_offset = j * ub_flat_bytes;
+      dev_api->CopyDataFromTo(nodes[j]->args_[arg_num], result, nullptr);
+    }
+  }
+  result->byte_offset = 0;
+
+  return result;
+}
 
 /* Invoking packed functions */
 template <typename TensorType>

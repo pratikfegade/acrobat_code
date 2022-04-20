@@ -345,12 +345,10 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           break;
         }
         case kConcat: {
-          // arg_holder[i] = CreateConcatenatedNDArray(
-          //     func_nodes, i, vm_shared_state.allocators_[executor.accelerator_device_],
-          //     (executor.accelerator_device_ == GPU_INDEX));
-          // setter(ctr, arg_holder[i]);
-          // ctr += 1;
-          // break;
+          auto tensor = CreateConcatenatedDLTensor(func_nodes, i, allocator);
+          setter(ctr, tensor);
+          ctr += 1;
+          break;
         }
       }
     }
