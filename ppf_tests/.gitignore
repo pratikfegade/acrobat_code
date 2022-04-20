@@ -1,0 +1,9 @@
+aot_test/*_src.cpp
+aot_test/*_src.hpp
+aot_test/*.ro
+aot_test/*.so
+aot_test/mvrnn
+aot_test/treelstm
+aot_test/lstm_cell
+aot_test/graph_gen
+aot_test/dump*
