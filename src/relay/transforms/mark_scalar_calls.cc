@@ -28,6 +28,7 @@
 #include <tvm/relay/op_attr_types.h>
 #include <tvm/relay/transform.h>
 
+#include "../op/random/db_random.h"
 #include "pass_utils.h"
 
 namespace tvm {
@@ -40,14 +41,16 @@ Function MarkScalarCallsInFunc(const Function& func) {
       auto on_device_props = GetOnDeviceProps(op);
       if (on_device_props.body.defined()) {
         return VisitExpr(on_device_props.body);
+      } else if (op->op == GetDBRandomUniformOp()) {
+        return ExprMutator::VisitExpr_(op);
       }
       auto mutated = ExprMutator::VisitExpr_(op);
       auto mutated_node = mutated.as<CallNode>();
       auto callee_op_node = op->op.as<OpNode>();
       if (callee_op_node && IsOpOnScalars(mutated_node)) {
         std::cout << "[SCA] Marking scalar op " << mutated << std::endl;
-        auto new_attrs = DictAttrs::WithAttr(mutated_node->attrs, tir::attr::kDBScalarCall,
-                                             callee_op_node->name);
+        auto new_attrs =
+            DictAttrs::WithAttr(mutated_node->attrs, tir::attr::kDBScalarCall, mutated);
         auto ret = Call(mutated_node->op, mutated_node->args, new_attrs, mutated_node->type_args,
                         mutated_node->span);
         ret->checked_type_ = op->checked_type_;

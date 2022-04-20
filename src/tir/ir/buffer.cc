@@ -298,10 +298,23 @@ PrimExpr Buffer::vload(Array<PrimExpr> begin, DataType dtype, Buffer scatter_buf
   ICHECK(dtype.element_of() == n->dtype.element_of() && dtype.lanes() % n->dtype.lanes() == 0)
       << "Cannot load " << dtype << " from buffer of " << n->dtype;
   if (dtype == DataType::Bool()) {
-    ICHECK(!scatter_buffer.defined()) << "Scatter buffers not yet supported for boolean buffers";
-    return tir::Cast(DataType::Bool(),
-                     tir::Load(DataType::Int(8), n->data, BufferOffset(n, begin, DataType::Int(8)),
-                               const_true()));
+    if (scatter_buffer.defined()) {
+      Array<PrimExpr> scatter_begin;
+      scatter_begin.push_back(0);
+      for (size_t i = 1; i < begin.size(); ++i) {
+        scatter_begin.push_back(begin[i]);
+      }
+      PrimExpr scatter_batch_offset = begin[0];
+      PrimExpr scatter_elem_offset = BufferOffset(n, scatter_begin, DataType::Int(8));
+      PrimExpr combined_offset = BufferOffset(n, begin, DataType::Int(8));
+      return tir::Cast(DataType::Bool(), tir::Load(DataType::Int(8), n->data, combined_offset,
+                                                   const_true(dtype.lanes()), scatter_buffer->data,
+                                                   scatter_batch_offset, scatter_elem_offset));
+    } else {
+      return tir::Cast(DataType::Bool(),
+                       tir::Load(DataType::Int(8), n->data,
+                                 BufferOffset(n, begin, DataType::Int(8)), const_true()));
+    }
   } else {
     if (scatter_buffer.defined()) {
       Array<PrimExpr> scatter_begin;
@@ -334,9 +347,26 @@ Stmt Buffer::vstore(Array<PrimExpr> begin, PrimExpr value, Buffer scatter_buffer
   ICHECK(dtype.element_of() == n->dtype.element_of() && dtype.lanes() % n->dtype.lanes() == 0)
       << "Cannot store " << dtype << " to buffer of " << n->dtype;
   if (value.dtype() == DataType::Bool()) {
-    ICHECK(!scatter_buffer.defined()) << "Scatter buffers not yet supported for boolean buffers";
-    return tir::Store(n->data, tir::Cast(DataType::Int(8), value),
-                      BufferOffset(n, begin, DataType::Int(8)), const_true());
+    if (scatter_buffer.defined()) {
+      Array<PrimExpr> scatter_begin;
+      scatter_begin.push_back(0);
+      for (size_t i = 1; i < begin.size(); ++i) {
+        scatter_begin.push_back(begin[i]);
+      }
+      PrimExpr scatter_batch_offset = begin[0];
+      PrimExpr scatter_elem_offset = BufferOffset(n, scatter_begin, DataType::Int(8));
+      PrimExpr combined_offset = BufferOffset(n, begin, DataType::Int(8));
+      // std::cout << "[VL] Offsets" << std::endl;
+      // std::cout << "[VL]  Batch " << scatter_batch_offset << std::endl;
+      // std::cout << "[VL]  Elem " << scatter_elem_offset << std::endl;
+      // std::cout << "[VL]  Combined " << combined_offset << std::endl;
+      return tir::Store(n->data, tir::Cast(DataType::Int(8), value), combined_offset,
+                        const_true(dtype.lanes()), scatter_buffer->data, scatter_batch_offset,
+                        scatter_elem_offset);
+    } else {
+      return tir::Store(n->data, tir::Cast(DataType::Int(8), value),
+                        BufferOffset(n, begin, DataType::Int(8)), const_true());
+    }
   } else {
     if (scatter_buffer.defined()) {
       Array<PrimExpr> scatter_begin;

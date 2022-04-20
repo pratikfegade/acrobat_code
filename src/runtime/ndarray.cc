@@ -43,7 +43,7 @@ namespace runtime {
 inline void VerifyDataType(DLDataType dtype) {
   ICHECK_GE(dtype.lanes, 1);
   if (dtype.code == kDLFloat) {
-    ICHECK_EQ(dtype.bits % 8, 0);
+    ICHECK_EQ(dtype.bits % 8, 0) << dtype.bits << " " << dtype.lanes;
   } else {
     // allow uint1 as a special flag for bool.
     if (dtype.bits == 1 && dtype.code == kDLUInt) return;

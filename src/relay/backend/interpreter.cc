@@ -40,6 +40,7 @@
 #include "../op/annotation/annotation.h"
 #include "../op/call/call.h"
 #include "../op/memory/device_copy.h"
+#include "../op/random/db_random.h"
 #include "../transforms/pass_utils.h"
 #include "te_compiler.h"
 
@@ -706,11 +707,15 @@ class Interpreter : public ExprFunctor<ObjectRef(const Expr& n)>,
 
   ObjectRef VisitExpr_(const CallNode* call_node) final {
     DeviceCopyProps device_copy_props = GetDeviceCopyProps(call_node);
+    DBRandomUniformProps db_random_uniform_props = GetDBRandomUniformProps(call_node);
     CallLoweredProps call_lowered_props = GetCallLoweredProps(call_node);
 
     if (device_copy_props.body.defined()) {
       // TODO(mbs): device_copy cleanup
       LOG(FATAL) << "The interpreter does not support device_copy";
+      return {};
+    } else if (db_random_uniform_props.low.defined()) {
+      LOG(FATAL) << "The interpreter does not support db_random_uniform";
       return {};
     } else if (call_lowered_props.lowered_func.defined()) {
       // Special case: Call a lowered TIR function.

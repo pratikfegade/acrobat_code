@@ -292,6 +292,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
         if_offsets_(if_offsets),
         p_invoke_reduce_sum_types_(p_invoke_reduce_sum_types),
         stream_(stream) {
+    inbuilt_ops_.insert({"subtract", "-"});
+    inbuilt_ops_.insert({"add", "+"});
     inbuilt_ops_.insert({"equal", "=="});
     inbuilt_ops_.insert({"greater_equal", ">="});
   }
@@ -330,13 +332,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
     return -1;
   }
 
-  std::string GetScalarOpName(int pc) {
+  const CallNode* GetScalarOp(int pc) {
     auto it = call_attrs_.find(pc);
     if (it != call_attrs_.end()) {
       auto attrs = it->second;
-      return attrs.GetAttr(tir::attr::kDBScalarCall, String("")).value();
+      auto opt_op = attrs.GetAttr(tir::attr::kDBScalarCall, NullValue<Expr>());
+      if (opt_op) {
+        return opt_op.value().as<CallNode>();
+      }
     }
-    return "";
+    return nullptr;
   }
 
   bool IsOpOutputScalar(int pc) {
@@ -488,8 +493,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
 
-      if (instr.op == Opcode::InvokePacked && IsOpOutputScalar(i) &&
-          GetScalarOpName(i).size() == 0) {
+      if (instr.op == Opcode::InvokePacked && IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
         for (int j = 0; j < instr.arity; ++j) {
           if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
             scalar_op_outputs.insert(instr.packed_args[j]);
@@ -538,7 +542,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
-    // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
@@ -548,6 +552,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
+        std::cout << "[BT]     " << instr << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
           continue;
@@ -587,67 +592,75 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::Invoke: {
-            auto fold_reduction_op = GetFoldReductionOp(i);
-            auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
-            std::vector<int64_t> int_shape;
-            if (dst_type) {
-              int_shape = backend::GetIntShape(dst_type->shape);
-            }
-
-            std::string depth_var;
-            if (same_depth_for_all_calls) {
+            if (instr.packed_index == DB_RANDOM_UNIFORM_INDEX) {
               this->PrintIndent(stream_);
-              depth_var = "__depth" + std::to_string(tmp_var_counter++);
-              stream_ << "int " << depth_var << " = __orig_depth;\n";
-              all_depth_vars.push_back(depth_var);
-            } else if (use_depth_tracking_executor()) {
-              depth_var = "depth";
-            }
-
-            if (fold_reduction_op.defined() && fold_reduction_op == GetAddOp() &&
-                (dst_type && int_shape.size() == dst_type->shape.size())) {
-              ICHECK_EQ(instr.num_args, 3);
               auto dst_var = GetVarForReg(instr.dst);
-              auto list_var = GetVarForReg(instr.invoke_args_registers[2]);
-              auto init_var = GetVarForReg(instr.invoke_args_registers[1]);
-
-              this->PrintIndent(stream_);
-              stream_ << dst_var << " = invoke_reduce_sum(append(" << list_var << ", " << init_var
-                      << ")";
-              if (use_depth_tracking_executor()) {
-                stream_ << ", " << depth_var;
-              }
-              stream_ << ");\n";
-
-              p_invoke_reduce_sum_types_->insert(dst_type);
+              auto lo_var = GetVarForReg(instr.invoke_args_registers[0]);
+              auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
+              stream_ << dst_var << " = GetRandom(" << lo_var << ", " << hi_var << ");\n";
             } else {
-              auto dst_var = GetVarForReg(instr.dst);
-              auto callee_name = exec_.functions[instr.func_index].name;
-              this->PrintIndent(stream_);
-              stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
-              auto it = invoke_type_vars_.find(i);
-              if (it != invoke_type_vars_.end() && it->second.size() > 0) {
-                auto types = it->second;
-                stream_ << "<";
-                for (size_t j = 0; j < types.size(); ++j) {
-                  RelayTypeToCppStr(stream_, types[j]);
-                  if (j < types.size() - 1) {
+              auto fold_reduction_op = GetFoldReductionOp(i);
+              auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
+              std::vector<int64_t> int_shape;
+              if (dst_type) {
+                int_shape = backend::GetIntShape(dst_type->shape);
+              }
+
+              std::string depth_var;
+              if (same_depth_for_all_calls) {
+                this->PrintIndent(stream_);
+                depth_var = "__depth" + std::to_string(tmp_var_counter++);
+                stream_ << "int " << depth_var << " = __orig_depth;\n";
+                all_depth_vars.push_back(depth_var);
+              } else if (use_depth_tracking_executor()) {
+                depth_var = "depth";
+              }
+
+              if (fold_reduction_op.defined() && fold_reduction_op == GetAddOp() &&
+                  (dst_type && int_shape.size() == dst_type->shape.size())) {
+                ICHECK_EQ(instr.num_args, 3);
+                auto dst_var = GetVarForReg(instr.dst);
+                auto list_var = GetVarForReg(instr.invoke_args_registers[2]);
+                auto init_var = GetVarForReg(instr.invoke_args_registers[1]);
+
+                this->PrintIndent(stream_);
+                stream_ << dst_var << " = invoke_reduce_sum(append(" << list_var << ", " << init_var
+                        << ")";
+                if (use_depth_tracking_executor()) {
+                  stream_ << ", " << depth_var;
+                }
+                stream_ << ");\n";
+
+                p_invoke_reduce_sum_types_->insert(dst_type);
+              } else {
+                auto dst_var = GetVarForReg(instr.dst);
+                auto callee_name = exec_.functions[instr.func_index].name;
+                this->PrintIndent(stream_);
+                stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
+                auto it = invoke_type_vars_.find(i);
+                if (it != invoke_type_vars_.end() && it->second.size() > 0) {
+                  auto types = it->second;
+                  stream_ << "<";
+                  for (size_t j = 0; j < types.size(); ++j) {
+                    RelayTypeToCppStr(stream_, types[j]);
+                    if (j < types.size() - 1) {
+                      stream_ << ",";
+                    }
+                  }
+                  stream_ << ">";
+                }
+                stream_ << "(";
+                for (int i = 0; i < instr.num_args; ++i) {
+                  stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+                  if (i < instr.num_args - 1) {
                     stream_ << ",";
                   }
                 }
-                stream_ << ">";
-              }
-              stream_ << "(";
-              for (int i = 0; i < instr.num_args; ++i) {
-                stream_ << GetVarForReg(instr.invoke_args_registers[i]);
-                if (i < instr.num_args - 1) {
-                  stream_ << ",";
+                if (use_depth_tracking_executor()) {
+                  stream_ << ", " << depth_var;
                 }
+                stream_ << ");\n";
               }
-              if (use_depth_tracking_executor()) {
-                stream_ << ", " << depth_var;
-              }
-              stream_ << ");\n";
             }
             break;
           }
@@ -673,15 +686,30 @@ class VMAOTFunctionCompiler : SourcePrinter {
               }
             }
 
-            auto scalar_op = GetScalarOpName(i);
-            if (scalar_op.size() > 0 && inbuilt_ops_.count(scalar_op)) {
-              ICHECK_EQ(flattened_args.size(), 3);
-              auto op_str = inbuilt_ops_.at(scalar_op);
-              auto op1 = flattened_args[0];
-              auto op2 = flattened_args[1];
-              auto dst_var = flattened_args[2];
+            auto scalar_op_call = GetScalarOp(i);
+            auto scalar_op = scalar_op_call ? scalar_op_call->op.as<OpNode>() : nullptr;
+            if (scalar_op_call && inbuilt_ops_.count(scalar_op->name)) {
+              ICHECK(scalar_op);
+              auto op_str = inbuilt_ops_.at(scalar_op->name);
+              auto dst_var = flattened_args.back();
               this->PrintIndent(stream_);
-              stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
+              if (flattened_args.size() == 3) {
+                auto op1 = flattened_args[0];
+                auto op2 = flattened_args[1];
+                stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
+              } else {
+                ICHECK_EQ(flattened_args.size(), 2);
+                ICHECK_EQ(scalar_op_call->args.size(), 2);
+                if (auto cn = scalar_op_call->args[0].as<ConstantNode>()) {
+                  auto op1 = backend::NDToInt64(cn->data);
+                  auto op2 = flattened_args[0];
+                  stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
+                } else if (auto cn = scalar_op_call->args[1].as<ConstantNode>()) {
+                  auto op1 = flattened_args[0];
+                  auto op2 = backend::NDToInt64(cn->data);
+                  stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
+                }
+              }
             } else {
               auto args_vec = "args_tmp" + std::to_string(tmp_var_counter++);
               this->PrintIndent(stream_);
@@ -720,7 +748,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 }
               }
 
-              if (IsOpOutputScalar(i) && GetScalarOpName(i).size() == 0) {
+              if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
                 for (int j = 0; j < instr.arity; ++j) {
                   if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
                     this->PrintIndent(stream_);
@@ -730,6 +758,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 }
               }
             }
+
             break;
           }
           case Opcode::InvokeClosure: {
@@ -1084,7 +1113,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
   void EmitPMapCPP(bool definition) {
     auto pmap_func_declaration =
         "template <class A, class B>\n"
-        "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, std::shared_ptr<List<A>> "
+        "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, "
+        "std::shared_ptr<List<A>> "
         "local_1, int& depth)";
     stream_ << pmap_func_declaration;
     if (definition) {

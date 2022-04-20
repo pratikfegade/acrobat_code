@@ -71,7 +71,8 @@ class ConstantFolder : public MixedModeMutator {
         shape_of_op_(Op::Get("shape_of")),
         vm_shape_of_op_(Op::Get("vm.shape_of")),
         cast_op_(Op::Get("cast")),
-        ndarray_size_op_(Op::Get("ndarray_size")) {}
+        ndarray_size_op_(Op::Get("ndarray_size")),
+        db_random_uniform_op_(Op::Get("random.db_uniform")) {}
 
  private:
   using ExprMutator::VisitExpr_;
@@ -181,7 +182,8 @@ class ConstantFolder : public MixedModeMutator {
       return opt_result.value();
     }
     if ((fnoncomputational.count(op) && fnoncomputational[op]) || op == device_copy_op_ ||
-        op == shape_of_op_ || op == vm_shape_of_op_ || op == ndarray_size_op_) {
+        op == shape_of_op_ || op == vm_shape_of_op_ || op == ndarray_size_op_ ||
+        op == db_random_uniform_op_) {
       // We should think about potentially constant evaluation over these ops too.
       return std::move(post_call);
     }
@@ -391,6 +393,7 @@ class ConstantFolder : public MixedModeMutator {
   const Op& vm_shape_of_op_;
   const Op& cast_op_;
   const Op& ndarray_size_op_;
+  const Op& db_random_uniform_op_;
 
   // True if currently within a "primitive" Relay Function.
   bool inside_primitive_ = false;

@@ -19,6 +19,9 @@
 
 #include <tvm/relay/attrs/random.h>
 #include <tvm/relay/op.h>
+#include <tvm/relay/op_attr_types.h>
+
+#include "db_random.h"
 
 namespace tvm {
 namespace relay {
@@ -217,7 +220,7 @@ bool DBUniformRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
   return true;
 }
 
-Expr MakeDBUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_dtype) {
+Expr MakeDBRandomUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_dtype) {
   auto attrs = make_object<UniformAttrs>();
   attrs->out_shape = out_shape;
   attrs->out_dtype = out_dtype;
@@ -225,7 +228,7 @@ Expr MakeDBUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_d
   return Call(op, {low, high}, Attrs(attrs), {});
 }
 
-TVM_REGISTER_GLOBAL("relay.op.random._make.db_uniform").set_body_typed(MakeDBUniform);
+TVM_REGISTER_GLOBAL("relay.op.random._make.db_uniform").set_body_typed(MakeDBRandomUniform);
 
 RELAY_REGISTER_OP("random.db_uniform")
     .describe(
@@ -234,7 +237,32 @@ RELAY_REGISTER_OP("random.db_uniform")
     .set_attrs_type<UniformAttrs>()
     .add_argument("low", "Tensor", "Lower bound of the distribution")
     .add_argument("high", "Tensor", "Higher bound of the distribution")
+    .set_attr<TOpPattern>("TOpPattern", kOpaque)
     .add_type_rel("DBUniform", DBUniformRel);
+
+const Op& GetDBRandomUniformOp() {
+  static auto op = Op::Get("random.db_uniform");
+  return op;
+}
+
+DBRandomUniformProps GetDBRandomUniformProps(const CallNode* call_node) {
+  if (call_node->op == GetDBRandomUniformOp()) {
+    ICHECK_EQ(call_node->args.size(), 2) << "db_random_uniform expects two argument";
+    ICHECK(call_node->attrs.defined()) << "db_random_uniform requires attributes";
+    const auto* db_random_uniform_attrs = call_node->attrs.as<UniformAttrs>();
+    ICHECK(db_random_uniform_attrs != nullptr) << "db_random_uniform requires UniformAttrs";
+    return {call_node->args[0], call_node->args[1], db_random_uniform_attrs->out_shape,
+            db_random_uniform_attrs->out_dtype};
+  }
+  return {};
+}
+
+DBRandomUniformProps GetDBRandomUniformProps(const Expr& expr) {
+  if (const auto* call_node = expr.as<CallNode>()) {
+    return GetDBRandomUniformProps(call_node);
+  }
+  return {};
+}
 
 }  // namespace relay
 }  // namespace tvm

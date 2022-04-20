@@ -30,6 +30,7 @@
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/transform.h>
 #include <tvm/relay/type.h>
+#include <tvm/runtime/ndarray.h>
 #include <tvm/target/codegen.h>
 #include <tvm/target/se_scope.h>
 #include <tvm/te/operation.h>
@@ -509,6 +510,43 @@ Map<Target, IRModule> TargetStrModuleMapToTargetModuleMap(
  * \param IRModule after lowering by LowerTEPass.
  */
 void UpdateAutoSchedulerOpWeights(const IRModule& module);
+
+/*!
+ * \brief Unwrap an NDArray to an integer.
+ * \param nd Input NdArray.
+ * \return Unwrapped integer contents of nd
+ */
+inline int64_t NDToInt64(const runtime::NDArray& nd) {
+  DLDevice cpu_ctx{kDLCPU, 0};
+  runtime::NDArray cpu_array = nd.CopyTo(cpu_ctx);
+  auto dtype = DataType(cpu_array->dtype);
+  ICHECK(dtype.is_int() || dtype.is_uint());
+  if (dtype.is_int()) {
+    switch (dtype.bits()) {
+      case 8:
+        return static_cast<int64_t>(reinterpret_cast<int8_t*>(cpu_array->data)[0]);
+      case 16:
+        return static_cast<int64_t>(reinterpret_cast<int16_t*>(cpu_array->data)[0]);
+      case 32:
+        return static_cast<int64_t>(reinterpret_cast<int32_t*>(cpu_array->data)[0]);
+      case 64:
+        return static_cast<int64_t>(reinterpret_cast<int64_t*>(cpu_array->data)[0]);
+    }
+  } else if (dtype.is_uint()) {
+    switch (dtype.bits()) {
+      case 8:
+        return static_cast<int64_t>(reinterpret_cast<uint8_t*>(cpu_array->data)[0]);
+      case 16:
+        return static_cast<int64_t>(reinterpret_cast<uint16_t*>(cpu_array->data)[0]);
+      case 32:
+        return static_cast<int64_t>(reinterpret_cast<uint32_t*>(cpu_array->data)[0]);
+      case 64:
+        return static_cast<int64_t>(reinterpret_cast<uint64_t*>(cpu_array->data)[0]);
+    }
+  }
+  ICHECK(false) << "Found unsupported datatype " << dtype;
+  return 0;
+}
 
 }  // namespace backend
 }  // namespace relay

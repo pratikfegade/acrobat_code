@@ -48,6 +48,7 @@
 #include "../op/annotation/annotation.h"
 #include "../op/call/call.h"
 #include "../op/memory/device_copy.h"
+#include "../op/random/db_random.h"
 #include "../transforms/device_aware_visitors.h"
 #include "./te_compiler_cache.h"
 #include "./utils.h"
@@ -898,10 +899,15 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     // TODO(mbs): device_copy cleanup. Would be better for FuseOps to just leave device_copy alone.
     if (const auto* function_node = primitive_func.as<FunctionNode>()) {
       DeviceCopyProps device_copy_props = GetDeviceCopyProps(function_node->body);
+      DBRandomUniformProps db_random_uniform_props = GetDBRandomUniformProps(function_node->body);
       if (device_copy_props.body.defined()) {
         ICHECK_EQ(new_args.size(), 1);
         return DeviceCopy(new_args[0], device_copy_props.src_se_scope,
                           device_copy_props.dst_se_scope);
+      } else if (db_random_uniform_props.low.defined()) {
+        ICHECK_EQ(new_args.size(), 2);
+        return MakeDBRandomUniform(new_args[0], new_args[1], db_random_uniform_props.out_shape,
+                                   db_random_uniform_props.out_dtype);
       }
     }
 

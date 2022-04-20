@@ -371,6 +371,11 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
     } else {
       auto callee_context = GetCurrentFunction();
       auto it = callees_map_.find(OpKey(GetCurrentContext(), op));
+      if (it == callees_map_.end()) {
+        for (auto kv : callees_map_) {
+          std::cout << func_name_map_[kv.first.first] << " " << kv.first.second->op << std::endl;
+        }
+      }
       ICHECK(it != callees_map_.end())
           << func_name_map_[GetCurrentContext()] << " " << GetCurrentContext() << " " << op->op;
       auto callees = it->second;
@@ -504,6 +509,7 @@ class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
 };
 
 IRModule ComputeConstantDepths(IRModule& mod) {
+  std::cout << "[SAI] Starting hoisting" << std::endl;
   auto recursive_res = GetRecursiveFunctions(mod);
   auto recursive_functions = recursive_res.first;
   auto callees_map = recursive_res.second;

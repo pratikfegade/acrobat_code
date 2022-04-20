@@ -198,8 +198,9 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
   FPAOpKey OpKey(const FunctionNode* ctx, const CallNode* op) { return std::make_pair(ctx, op); }
 
   FunctionSet VisitBody(const Function& func) {
-    // std::cout << "[FPA] Visiting function " << func_name_map_[func.get()] << std::endl;
     stack_.push_back(func.get());
+    std::cout << "[FPA]  Visiting function body " << func_name_map_[func.get()] << " in context "
+              << func_name_map_[GetCurrentContext()] << std::endl;
     auto res = VisitExpr(func->body);
     stack_.pop_back();
     return res;
@@ -269,15 +270,15 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     if (on_device_props.body.defined()) {
       return VisitExpr(on_device_props.body);
     }
-    if (op->op.as<OpNode>()) {
+    if (op->op.as<OpNode>() || op->op.as<ConstructorNode>()) {
       return {};
     }
     auto callee_set = VisitExpr(op->op);
     callees_map_[OpKey(GetCurrentContext(), op)] =
         Merge(callees_map_[OpKey(GetCurrentContext(), op)], callee_set).first;
-    // std::cout << "[FPA] Setting callee " << func_name_map_[GetCurrentContext()] << " "
-    // << GetCurrentContext() << " " << op->op << " " << FunctionSetToStr(callee_set)
-    // << std::endl;
+    std::cout << "[FPA]   Setting callee " << func_name_map_[GetCurrentContext()] << " "
+              << GetCurrentContext() << " " << op->op << " " << FunctionSetToStr(callee_set)
+              << std::endl;
     if (callee_set.empty()) {
       for (auto arg : op->args) {
         this->VisitExpr(arg);
@@ -285,7 +286,7 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     }
     FunctionSet ret;
     for (auto callee : callee_set) {
-      auto callee_key = FunctionKey(GetCurrentContext(), callee);
+      auto callee_key = FunctionKey(GetCurrentFunction(), callee);
       bool print = false;  //(func_name_map_[callee] == "map");
       auto callee_fn = GetRef<Function>(callee);
       bool args_changed = false;

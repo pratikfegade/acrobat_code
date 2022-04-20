@@ -680,13 +680,15 @@ Doc RelayTextPrinter::VisitType_(const GlobalTypeVarNode* node) {
 
 Doc RelayTextPrinter::VisitType_(const TypeCallNode* node) {
   Doc doc = PrintType(node->func, false);
-  std::vector<Doc> args;
-  for (const Type& t : node->args) {
-    args.push_back(PrintType(t, false));
+  if (node->args.size() > 0) {
+    std::vector<Doc> args;
+    for (const Type& t : node->args) {
+      args.push_back(PrintType(t, false));
+    }
+    doc << "[";
+    doc << Doc::Concat(args);
+    doc << "]";
   }
-  doc << "[";
-  doc << Doc::Concat(args);
-  doc << "]";
   return doc;
 }
 

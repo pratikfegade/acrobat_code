@@ -325,6 +325,8 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
 
   DLTensor* result = Arena::Current()->allocate_<DLTensor>();
   int64_t ub_flat_size = 1;
+  auto& dtype = first_arg->dtype;
+  auto dtype_bytes = (dtype.lanes * dtype.bits + 7) / 8;
   {
     int64_t* shape_data = Arena::Current()->allocate_<int64_t>(ub_ndim + 1);
     shape_data[0] = size;
@@ -333,9 +335,8 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
       shape_data[i + 1] = dim_ext;
       ub_flat_size *= dim_ext;
     }
-    int64_t b_flat_bytes = ub_flat_size * 4 * size;
+    int64_t b_flat_bytes = ub_flat_size * dtype_bytes * size;
 
-    auto& dtype = first_arg->dtype;
     result->device = accelerator_device;
     result->data = allocator->ArenaAlloc(b_flat_bytes, 256, dtype).data;
     result->strides = nullptr;
@@ -344,7 +345,7 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
     result->shape = shape_data;
     result->byte_offset = 0;
   }
-  int64_t ub_flat_bytes = ub_flat_size * 4;
+  int64_t ub_flat_bytes = ub_flat_size * dtype_bytes;
 
   if (first_arg->data == nullptr) {
     void* start = result->data;

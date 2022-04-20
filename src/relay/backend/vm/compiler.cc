@@ -54,6 +54,7 @@
 #include "../../op/annotation/annotation.h"
 #include "../../op/memory/device_copy.h"
 #include "../../op/op_common.h"
+#include "../../op/random/db_random.h"
 #include "../../transforms/device_aware_visitors.h"
 #include "../../transforms/pass_utils.h"
 #include "../utils.h"
@@ -330,13 +331,6 @@ struct VMFunctionCompilerResult {
   std::unordered_map<Index, std::array<Index, 4>> if_offsets;
 };
 
-int64_t NDToInt64(const NDArray& nd) {
-  DLDevice cpu_ctx{kDLCPU, 0};
-  NDArray cpu_array = nd.CopyTo(cpu_ctx);
-  CHECK_EQ(DataType(cpu_array->dtype), DataType::Int(64));
-  return reinterpret_cast<int64_t*>(cpu_array->data)[0];
-}
-
 class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
  public:
   VMFunctionCompiler(VMCompilerContext* context, SEScope host_se_scope, bool batched_execution,
@@ -527,7 +521,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     // std::cout << "[COM]   " << const_ndarr.Shape().size() << " " << const_ndarr.DataType()
     // << std::endl;
     if (const_ndarr.Shape().size() == 0 && const_ndarr.DataType() == DataType::Int(64)) {
-      auto const_int = NDToInt64(const_ndarr);
+      auto const_int = backend::NDToInt64(const_ndarr);
       Emit(Instruction::LoadConsti(const_int, new_register));
       AddRegisterTypeInfo(new_register, PrimType(const_ndarr.DataType()));
     } else {
@@ -731,6 +725,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
   void DeviceAwareVisitExpr_(const CallNode* call_node) final {
     DeviceCopyProps device_copy_props = GetDeviceCopyProps(call_node);
+    DBRandomUniformProps db_random_uniform_props = GetDBRandomUniformProps(call_node);
     CallLoweredProps call_lowered_props = GetCallLoweredProps(call_node);
     ICHECK(!call_lowered_props.lowered_func.defined());
     if (device_copy_props.body.defined()) {
@@ -746,6 +741,21 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         Emit(Instruction::DeviceCopy(src_reg, src_index, dst_index, new_register));
         AddRegisterTypeInfo(new_register, device_copy_props.body->checked_type_);
       }
+      return;
+    } else if (db_random_uniform_props.low.defined()) {
+      ICHECK_EQ(call_node->args.size(), 2);
+      ICHECK_EQ(db_random_uniform_props.out_shape.size(), 0);
+      ICHECK(db_random_uniform_props.out_dtype.is_int());
+
+      std::vector<Index> argument_registers;
+      VisitExpr(call_node->args[0]);
+      argument_registers.push_back(last_register_);
+      VisitExpr(call_node->args[1]);
+      argument_registers.push_back(last_register_);
+
+      auto new_register = NewRegister();
+      Emit(Instruction::Invoke(DB_RANDOM_UNIFORM_INDEX, argument_registers, new_register));
+      AddRegisterTypeInfo(new_register, db_random_uniform_props.low->checked_type_);
       return;
     }
 
@@ -1352,9 +1362,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
 
   // Perform memory planning in order to coalesce/reduce allocations.
 
-  pass_seqs.push_back(transform::PrintCurrentIR("FuseAndLowerOperators", false, true));
   pass_seqs.push_back(transform::CPPMemoryPlan());
-  pass_seqs.push_back(transform::PrintCurrentIR("CPPMemoryPlan", true, true));
 
   // Compute away constant computation introduced by coalescing allocations.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1495,12 +1503,12 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
+    pass_seqs.push_back(transform::PrintCurrentIR("Before hoisting", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before coarsen", true, true));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
     pass_seqs.push_back(transform::InferType());
