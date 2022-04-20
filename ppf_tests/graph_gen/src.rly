@@ -1,0 +1,115 @@
+#[version = "0.0.5"]
+
+type Node {
+  NodeCons(Tensor[(1, 256), float32], List[Tensor[(1, 256), float32]]),
+}
+
+def @rnn_cell(
+  %input: Tensor[(1, 256), float32],
+  %state: Tensor[(1, 256), float32],
+
+  %weight: Tensor[(256, 512), float32],
+  %bias: Tensor[(1, 256), float32]
+) -> Tensor[(1, 256), float32] {
+  sigmoid(
+    %bias + nn.dense(concatenate((%input, %state), axis=1), %weight, units=256)
+  )
+}
+
+def @gru_cell(
+  %input: Tensor[(1, 256), float32],
+  %state: Tensor[(1, 256), float32],
+
+  %zweight: Tensor[(256, 512), float32],
+  %rweight: Tensor[(256, 512), float32],
+  %hweight: Tensor[(256, 512), float32],
+  %zbias: Tensor[(1, 256), float32],
+  %rbias: Tensor[(1, 256), float32],
+  %hbias: Tensor[(1, 256), float32]
+) -> Tensor[(1, 256), float32] {
+  let %z = sigmoid(
+    %zbias + nn.dense(concatenate((%input, %state), axis=1), %zweight, units=256)
+  );
+  let %r = sigmoid(
+    %rbias + nn.dense(concatenate((%input, %state), axis=1), %rweight, units=256)
+  );
+  let %hp = tanh(
+    %hbias + nn.dense(concatenate((%input, %r * %state), axis=1), %zweight, units=256)
+  );
+  ((1f - %z) * %state) + (%z * %hp)
+}
+
+def @create_edges(
+  %num_edges: Tensor[(), int32],
+  %node_state: Tensor[(1, 256), float32],
+  %edge_state: Tensor[(1, 256), float32],
+
+  %edge_rnn_weight: Tensor[(256, 512), float32],
+  %edge_rnn_bias: Tensor[(1, 256), float32]
+) -> List[Tensor[(1, 256), float32]] {
+  if (%num_edges == 0) {
+    Nil
+  } else {
+    let %tail = @create_edges(%num_edges - 1, %node_state, %edge_state,
+      %edge_rnn_weight, %edge_rnn_bias);
+    let %updated_edge_state = @rnn_cell(%node_state, %edge_state,
+      %edge_rnn_weight, %edge_rnn_bias);
+    Cons(%updated_edge_state, %tail)
+  }
+}
+
+def @create_nodes(
+  %num_nodes: Tensor[(), int32],
+  %node_state: Tensor[(1, 256), float32],
+
+  %node_rnn_zweight: Tensor[(256, 512), float32],
+  %node_rnn_rweight: Tensor[(256, 512), float32],
+  %node_rnn_hweight: Tensor[(256, 512), float32],
+  %node_rnn_zbias: Tensor[(1, 256), float32],
+  %node_rnn_rbias: Tensor[(1, 256), float32],
+  %node_rnn_hbias: Tensor[(1, 256), float32],
+
+  %edge_rnn_weight: Tensor[(256, 512), float32],
+  %edge_rnn_bias: Tensor[(1, 256), float32]
+) -> List[Node] {
+  if (%num_nodes == 0) {
+    Nil
+  } else {
+    let %tail = @create_nodes(
+      %num_nodes - 1, %node_state,
+      %node_rnn_zweight, %node_rnn_rweight,
+      %node_rnn_hweight, %node_rnn_zbias,
+      %node_rnn_rbias, %node_rnn_hbias,
+      %edge_rnn_weight, %edge_rnn_bias
+    );
+
+    let %num_edges = random.db_uniform(20, 50, out_shape=[], out_dtype="int32");
+    let %edges = @create_edges(%num_edges, %node_state, %node_state,
+      %edge_rnn_weight, %edge_rnn_bias);
+    Cons(NodeCons(%node_state, %edges), %tail)
+  }
+}
+
+def @main(
+  %node_rnn_zweight: Tensor[(256, 512), float32],
+  %node_rnn_rweight: Tensor[(256, 512), float32],
+  %node_rnn_hweight: Tensor[(256, 512), float32],
+  %node_rnn_zbias: Tensor[(1, 256), float32],
+  %node_rnn_rbias: Tensor[(1, 256), float32],
+  %node_rnn_hbias: Tensor[(1, 256), float32],
+
+  %edge_rnn_weight: Tensor[(256, 512), float32],
+  %edge_rnn_bias: Tensor[(1, 256), float32],
+
+  %input: Tensor[(1, 256), float32]
+) -> List[Node] {
+  let %num_nodes = random.db_uniform(20, 50, out_shape=[], out_dtype="int32");
+  let %node_state = zeros(shape=[1, 256], dtype="float32");
+  @create_nodes(
+    %num_nodes, %node_state,
+    %node_rnn_zweight, %node_rnn_rweight,
+    %node_rnn_hweight, %node_rnn_zbias,
+    %node_rnn_rbias, %node_rnn_hbias,
+    %edge_rnn_weight, %edge_rnn_bias
+  )
+}
