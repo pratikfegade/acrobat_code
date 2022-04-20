@@ -489,7 +489,6 @@ Instruction Instruction::Move(RegName src, RegName dst) {
 bool Instruction::UsesDst(const Instruction& instr) {
   switch (instr.op) {
     case Opcode::Move:
-    case Opcode::Ret:
     case Opcode::AllocTensor:
     case Opcode::AllocTensorReg:
     case Opcode::AllocADT:
@@ -508,6 +507,7 @@ bool Instruction::UsesDst(const Instruction& instr) {
       break;
     }
     case Opcode::Fatal:
+    case Opcode::Ret:
     case Opcode::InvokePacked:
     case Opcode::If:
     case Opcode::Goto: {

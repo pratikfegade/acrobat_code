@@ -173,8 +173,6 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     }
     batched_main(trees);
     DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
-    batched_main(trees);
-    DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});

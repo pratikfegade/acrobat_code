@@ -517,11 +517,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     context_->constants.push_back(const_ndarr);
     auto new_register = NewRegister();
 
-    // std::cout << "[COM] Encountered constant " << const_ndarr << std::endl;
-    // std::cout << "[COM]   " << const_ndarr.Shape().size() << " " << const_ndarr.DataType()
-    // << std::endl;
-    if (const_ndarr.Shape().size() == 0 && const_ndarr.DataType() == DataType::Int(64)) {
-      auto const_int = backend::NDToInt64(const_ndarr);
+    if (const_ndarr.Shape().size() == 0 &&
+        (const_ndarr.DataType().is_int() || const_ndarr.DataType().is_uint())) {
+      auto const_int = backend::NDToInt(const_ndarr);
       Emit(Instruction::LoadConsti(const_int, new_register));
       AddRegisterTypeInfo(new_register, PrimType(const_ndarr.DataType()));
     } else {
@@ -748,6 +746,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       ICHECK(db_random_uniform_props.out_dtype.is_int());
 
       std::vector<Index> argument_registers;
+
+      std::cout << "[COMP] Visiting " << call_node->args[0] << "  " << call_node->args[1]
+                << std::endl;
+
       VisitExpr(call_node->args[0]);
       argument_registers.push_back(last_register_);
       VisitExpr(call_node->args[1]);

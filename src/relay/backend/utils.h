@@ -516,7 +516,7 @@ void UpdateAutoSchedulerOpWeights(const IRModule& module);
  * \param nd Input NdArray.
  * \return Unwrapped integer contents of nd
  */
-inline int64_t NDToInt64(const runtime::NDArray& nd) {
+inline int64_t NDToInt(const runtime::NDArray& nd) {
   DLDevice cpu_ctx{kDLCPU, 0};
   runtime::NDArray cpu_array = nd.CopyTo(cpu_ctx);
   auto dtype = DataType(cpu_array->dtype);

@@ -477,11 +477,18 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   int VisitBytecode() {
+    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    bool print = (vm_func_.name == "main");
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
       if (lazy_execution() && instr.op == Opcode::AllocStorage) {
         continue;
+      }
+      if (print && instr.op == Opcode::Ret) {
+        std::cout << "[BT]  Read registers instruction " << instr << std::endl;
+        std::cout << "[BT]    " << support::PrintVector(Instruction::ReadRegisters(instr))
+                  << std::endl;
       }
       for (auto reg : Instruction::ReadRegisters(instr)) {
         used_regs[reg] = true;
@@ -489,20 +496,27 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
 
     // Registers that are scalar outputs of tensor ops
-    std::unordered_set<Index> scalar_op_outputs;
+    std::unordered_set<Index> scalar_outs_of_tensor_ops;
+    std::unordered_set<Index> scalar_outs_of_scalar_ops;
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
 
-      if (instr.op == Opcode::InvokePacked && IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
-        for (int j = 0; j < instr.arity; ++j) {
-          if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
-            scalar_op_outputs.insert(instr.packed_args[j]);
+      if (instr.op == Opcode::InvokePacked && IsOpOutputScalar(i)) {
+        if (GetScalarOp(i)) {
+          ICHECK(IsScalarTensorType(register_types_.at(instr.packed_args[instr.arity - 1])));
+          scalar_outs_of_scalar_ops.insert(instr.packed_args[instr.arity - 1]);
+
+        } else {
+          for (int j = 0; j < instr.arity; ++j) {
+            if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+              scalar_outs_of_tensor_ops.insert(instr.packed_args[j]);
+            }
           }
         }
       }
     }
 
-    this->GenerateLocalDecls(used_regs, scalar_op_outputs);
+    this->GenerateLocalDecls(used_regs, scalar_outs_of_tensor_ops);
 
     // std::cout << "[BT] Visiting BT" << std::endl;
     std::unordered_map<Index, std::string> targets;
@@ -542,7 +556,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
-    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
@@ -552,6 +565,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
+        if (print && instr.op == Opcode::Ret) {
+          std::cout << "[BT] MAIN RET" << std::endl;
+        }
+
         std::cout << "[BT]     " << instr << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
@@ -666,7 +683,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           case Opcode::InvokePacked: {
             auto get_scalar_var_for_reg = [&](Index reg) {
-              if (scalar_op_outputs.count(reg)) {
+              if (scalar_outs_of_tensor_ops.count(reg)) {
                 return GetVarForReg(reg, true);
               } else {
                 return GetVarForReg(reg);
@@ -701,12 +718,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 ICHECK_EQ(flattened_args.size(), 2);
                 ICHECK_EQ(scalar_op_call->args.size(), 2);
                 if (auto cn = scalar_op_call->args[0].as<ConstantNode>()) {
-                  auto op1 = backend::NDToInt64(cn->data);
+                  auto op1 = backend::NDToInt(cn->data);
                   auto op2 = flattened_args[0];
                   stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
                 } else if (auto cn = scalar_op_call->args[1].as<ConstantNode>()) {
                   auto op1 = flattened_args[0];
-                  auto op2 = backend::NDToInt64(cn->data);
+                  auto op2 = backend::NDToInt(cn->data);
                   stream_ << dst_var << " = (" << op1 << " " << op_str << " " << op2 << ");\n";
                 }
               }
@@ -874,6 +891,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::AllocTensor: {
+            if (scalar_outs_of_scalar_ops.count(instr.dst)) {
+              break;
+            }
             auto dst_var = GetVarForReg(instr.dst);
             auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
             auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
@@ -922,6 +942,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           case Opcode::AllocTensorReg: {
             ICHECK(!lazy_execution());
+            if (scalar_outs_of_scalar_ops.count(instr.dst)) {
+              break;
+            }
             auto dst_var = GetVarForReg(instr.dst);
             auto storage_var = GetVarForReg(instr.alloc_tensor_reg.storage);
             auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
@@ -1279,6 +1302,14 @@ void VMAOTCompiler::EmitUtilFunctions(
       "}\n";
   os << nd_to_int64_func << "\n" << std::endl;
 
+  auto random_func =
+      "int32_t GetRandom(int32_t lo, int32_t hi) {\n"
+      "  static std::random_device rd;\n"
+      "  static std::mt19937 gen(rd());\n"
+      "  return std::uniform_int_distribution<>(lo, hi)(gen);\n"
+      "}\n";
+  os << random_func << "\n" << std::endl;
+
   if (invoke_reduce_sum_types.size() > 0) {
     auto list_append_func =
         "template <class A>\n"
@@ -1576,6 +1607,7 @@ void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <tvm/runtime/vm/arena.h>\n";
   os << "#include <stdexcept>\n";
   os << "#include <vector>\n";
+  os << "#include <random>\n";
   os << "#include <fstream>\n";
   os << "#include <functional>\n";
   os << "#include <array>\n\n";
