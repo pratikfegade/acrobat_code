@@ -30,9 +30,13 @@ namespace contrib {
 #ifdef USE_CUDA
 void reduce_sum_wrapper(float** input, float** output, int* input_indices, int batch_size,
                         int hidden_size);
+
+void db_concat_copy_wrapper(float** input, float* output, int batch_size, int flat_size);
 #else
 inline void reduce_sum_wrapper(float** input, float** output, int* input_indices, int batch_size,
                                int hidden_size) {}
+
+inline void db_concat_copy_wrapper(float** input, float* output, int batch_size, int flat_size) {}
 #endif
 }  // namespace contrib
 }  // namespace tvm

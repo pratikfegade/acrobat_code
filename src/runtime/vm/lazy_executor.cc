@@ -40,7 +40,7 @@
 #include <vector>
 
 #include "../../support/utils.h"
-#include "../contrib/thrust/reduce_sum.h"
+#include "../contrib/thrust/db_kernels.h"
 #include "../file_utils.h"
 #include "vm_utils.h"
 
@@ -309,7 +309,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     int ctr = 1;
 
     // std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " <<
-    // func_nodes.size() << std::endl;
+    // func_nodes.size()
+    // << std::endl;
     auto& allocator = vm_shared_state.allocators_[executor.accelerator_device_];
     for (size_t i = 0; i < arity; ++i) {
       switch (arg_modes[i]) {
@@ -347,6 +348,10 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         case kConcat: {
           auto tensor = CreateConcatenatedDLTensor(func_nodes, i, allocator);
           setter(ctr, tensor);
+
+          // std::cout << "[LZ]   Arg3 " << ctr << " " << GetDLTensorInfo(tensor) << " "
+          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+
           ctr += 1;
           break;
         }

@@ -37,6 +37,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "../contrib/thrust/db_kernels.h"
 #include "../file_utils.h"
 
 // //////////////////////////////////////////////////
@@ -323,26 +324,27 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
   auto& accelerator_device = first_arg->device;
 
   DLTensor* result = Arena::Current()->allocate_<DLTensor>();
-  int64_t ub_flat_bytes = 4;
+  int64_t ub_flat_size = 1;
   {
     int64_t* shape_data = Arena::Current()->allocate_<int64_t>(ub_ndim + 1);
     shape_data[0] = size;
     for (int i = 0; i < ub_ndim; ++i) {
       auto dim_ext = first_arg->shape[i];
       shape_data[i + 1] = dim_ext;
-      ub_flat_bytes *= dim_ext;
+      ub_flat_size *= dim_ext;
     }
-    int64_t b_flat_bytes = ub_flat_bytes * size;
+    int64_t b_flat_bytes = ub_flat_size * 4 * size;
 
     auto& dtype = first_arg->dtype;
     result->device = accelerator_device;
     result->data = allocator->ArenaAlloc(b_flat_bytes, 256, dtype).data;
     result->strides = nullptr;
-    result->ndim = 1;
+    result->ndim = ub_ndim + 1;
     result->dtype = dtype;
     result->shape = shape_data;
     result->byte_offset = 0;
   }
+  int64_t ub_flat_bytes = ub_flat_size * 4;
 
   if (first_arg->data == nullptr) {
     void* start = result->data;
@@ -351,13 +353,30 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
       nodes[j]->args_[arg_num]->data = static_cast<char*>(start) + j * ub_flat_bytes;
     }
   } else {
-    auto dev_api = DeviceAPI::Get(accelerator_device);
+    void** input_raw_ptrs = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
+#pragma GCC ivdep
     for (int j = 0; j < size; ++j) {
-      result->byte_offset = j * ub_flat_bytes;
-      dev_api->CopyDataFromTo(nodes[j]->args_[arg_num], result, nullptr);
+      input_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
+
+    DLTensor* input_ptrs_device = Arena::Current()->allocate_<DLTensor>();
+    {
+      int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
+      shape_data[0] = size;
+      auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+      input_ptrs_device->device = accelerator_device;
+      input_ptrs_device->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
+      input_ptrs_device->strides = nullptr;
+      input_ptrs_device->ndim = 1;
+      input_ptrs_device->dtype = dtype;
+      input_ptrs_device->shape = shape_data;
+      input_ptrs_device->byte_offset = 0;
+    }
+
+    ArrayCopyFromBytesAsync(input_ptrs_device, input_raw_ptrs, sizeof(void*) * size);
+    contrib::db_concat_copy_wrapper(static_cast<float**>(input_ptrs_device->data),
+                                    static_cast<float*>(result->data), size, ub_flat_size);
   }
-  result->byte_offset = 0;
 
   return result;
 }
