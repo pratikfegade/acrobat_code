@@ -31,7 +31,6 @@ concurrent_execution=False
 use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False
-use_autoscheduler=True
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
 generate_aot_code=True
@@ -40,8 +39,6 @@ dynamic_batch_size_estimate=256
 tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
-print(mod)
-exit()
 
 trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
 
@@ -115,11 +112,11 @@ def execute():
                 for tree in trees: params_list += [tree]
 
                 executor.vm.set_input("main", batch_size, *params_list)
-                exit()
+                # exit()
                 # fin_executor()
-                # iters = 100
-                # timeit.timeit(fin_executor, number=50)
-                # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
+                iters = 100
+                timeit.timeit(fin_executor, number=50)
+                print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)

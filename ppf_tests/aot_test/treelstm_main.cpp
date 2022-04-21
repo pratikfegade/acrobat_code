@@ -195,7 +195,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     lines = read_sst_dataset(data_file);
     num_batches = std::min((int)(lines.size() / batch_size), num_batches);
   }
-  bool profile = true;
+  bool profile = false;
   bool debug = false;
 
   auto trees = complete_trees<TensorType>(theight, bsize);
@@ -254,7 +254,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     all_gen_time_ms /= num_batches;
     all_exe_time_ms /= num_batches;
     if (profile) {
-      std::cout << VMDBProfiler::GetReport(1000) << std::endl;
+      std::cout << VMDBProfiler::GetReport(100) << std::endl;
     }
     std::cout << "RESULTS," << all_gen_time_ms << "," << all_exe_time_ms << ","
               << (all_exe_time_ms + all_gen_time_ms) << std::endl;

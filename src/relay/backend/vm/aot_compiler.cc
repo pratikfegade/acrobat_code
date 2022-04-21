@@ -104,6 +104,14 @@ bool lazy_execution() {
   return lazy_execution_;
 }
 
+bool concurrent_execution() {
+  static bool concurrent_execution_ =
+      tvm::transform::PassContext::Current()
+          ->GetConfig<Bool>("relay.db_concurrent_execution", Bool(false))
+          .value();
+  return concurrent_execution_;
+}
+
 bool use_depth_tracking_executor() {
   static bool use_depth_tracking_executor_ =
       tvm::transform::PassContext::Current()
@@ -401,6 +409,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
         stream_ << ", ";
       }
     }
+    if (concurrent_execution()) {
+      stream_ << ", int fiber_id";
+    }
     if (use_depth_tracking_executor()) {
       stream_ << ", int& depth";
     }
@@ -672,6 +683,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
                   if (i < instr.num_args - 1) {
                     stream_ << ",";
                   }
+                }
+                if (concurrent_execution()) {
+                  stream_ << ", fiber_id";
                 }
                 if (use_depth_tracking_executor()) {
                   stream_ << ", " << depth_var;
@@ -1030,6 +1044,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 stream_ << ", ";
               }
             }
+            if (concurrent_execution()) {
+              stream_ << ", int fiber_id";
+            }
             if (use_depth_tracking_executor()) {
               stream_ << ", int& depth";
             }
@@ -1138,7 +1155,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         "template <class A, class B>\n"
         "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, "
         "std::shared_ptr<List<A>> "
-        "local_1, int& depth)";
+        "local_1, int fiber_id, int& depth)";
     stream_ << pmap_func_declaration;
     if (definition) {
       auto pmap_func_body =
@@ -1282,34 +1299,6 @@ std::string replace_all(const std::string& str, const std::string& find,
 
 void VMAOTCompiler::EmitUtilFunctions(
     std::ostream& os, const std::unordered_set<const TensorTypeNode*>& invoke_reduce_sum_types) {
-  auto max_func =
-      "int max(std::initializer_list<int> numbers) {\n"
-      "  int res = std::numeric_limits<int>::min();\n"
-      "  for (auto& num : numbers) {\n"
-      "    res = (res > num) ? res : num;\n"
-      "  }\n"
-      "  return res;\n"
-      "}\n";
-  os << max_func << "\n" << std::endl;
-
-  auto nd_to_int64_func =
-      "int64_t NDToInt64(const NDArray& nd) {\n"
-      "  static auto int64_dtype = DataType::Int(64);\n"
-      "  DLDevice cpu_ctx{kDLCPU, 0};\n"
-      "  NDArray cpu_array = nd.CopyTo(cpu_ctx);\n"
-      "  CHECK_EQ(DataType(cpu_array->dtype), int64_dtype);\n"
-      "  return reinterpret_cast<int64_t*>(cpu_array->data)[0];\n"
-      "}\n";
-  os << nd_to_int64_func << "\n" << std::endl;
-
-  auto random_func =
-      "int32_t GetRandom(int32_t lo, int32_t hi) {\n"
-      "  static std::random_device rd;\n"
-      "  static std::mt19937 gen(rd());\n"
-      "  return std::uniform_int_distribution<>(lo, hi)(gen);\n"
-      "}\n";
-  os << random_func << "\n" << std::endl;
-
   if (invoke_reduce_sum_types.size() > 0) {
     auto list_append_func =
         "template <class A>\n"
@@ -1386,21 +1375,43 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   this->BeginScope();
   this->PrintIndent(os);
   os << "auto batch_size = " << GetVarForReg(0) << ".size();\n";
+
+  if (concurrent_execution()) {
+    this->PrintIndent(os);
+    os << "tvm::runtime::vm::FiberRuntime::Init(batch_size);\n";
+  }
+
   this->PrintIndent(os);
   os << "std::vector<";
   RelayTypeToCppStr(os, function_type->ret_type);
-  os << "> res;\n";
-  this->PrintIndent(os);
-  os << "res.reserve(batch_size);\n";
+  os << "> res(batch_size);\n";
   this->PrintIndent(os);
   os << "for (size_t b = 0; b < batch_size; ++b) {\n";
+
+  if (concurrent_execution()) {
+    this->PrintIndent(os);
+    os << "auto run_func = [b, &res, ";
+
+    for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
+      auto arg_type = function_type->arg_types[i];
+      os << "&" << GetVarForReg(i);
+      if (i != function_type->arg_types.size() - 1) {
+        os << ", ";
+      }
+    }
+
+    os << "]() {\n";
+
+    this->BeginScope();
+  }
+
   this->BeginScope();
   this->PrintIndent(os);
   if (use_depth_tracking_executor()) {
     os << "int depth = " << start_depth << ";\n";
   }
   this->PrintIndent(os);
-  os << "res.push_back(" << GetCppFunctionName("main") << "(";
+  os << "res[b] = " << GetCppFunctionName("main") << "(";
   for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
     auto arg_type = function_type->arg_types[i];
     os << " " << GetVarForReg(i) << "[b]";
@@ -1408,18 +1419,42 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
       os << ", ";
     }
   }
+  if (concurrent_execution()) {
+    os << ", b";
+  }
   if (use_depth_tracking_executor()) {
     os << ", depth";
   }
-  os << "));\n";
+  os << ");\n";
+
+  if (concurrent_execution()) {
+    this->PrintIndent(os);
+    os << "tvm::runtime::vm::FiberRuntime::Current().WorkerEnd(b);\n";
+    this->EndScope();
+    os << "};\n";
+    this->PrintIndent(os);
+    os << "auto fiber = new fiber_t(run_func);\n";
+    os << "tvm::runtime::vm::FiberRuntime::Current().AddFiber(b, fiber);\n";
+  }
+
   this->EndScope();
   this->PrintIndent(os);
   os << "}\n";
-  auto pass_ctx = transform::PassContext::Current();
-  // if (lazy_execution()) {
-  //   this->PrintIndent(os);
-  //   os << GetRuntimeType() << "::Current()->LazyExecute();\n";
-  // }
+
+  if (concurrent_execution()) {
+    this->PrintIndent(os);
+    os << "while (tvm::runtime::vm::FiberRuntime::Current().ContinueExecution()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
+    this->PrintIndent(os);
+    os << "DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->LazyExecute();\n";
+    this->PrintIndent(os);
+    os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
+    this->EndScope();
+    os << "}\n";
+  }
+
   this->PrintIndent(os);
   os << "return res;\n";
   this->EndScope();
@@ -1604,10 +1639,13 @@ void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <dlpack/dlpack.h>\n";
   os << "#include <tvm/runtime/vm/vm_profiling.h>\n";
   os << "#include <tvm/runtime/vm/db_runtime.h>\n";
+  os << "#include <tvm/runtime/vm/db_execution_utils.h>\n";
   os << "#include <tvm/runtime/vm/arena.h>\n";
+  if (concurrent_execution()) {
+    os << "#include <tvm/runtime/vm/fiber_runtime.h>\n";
+  }
   os << "#include <stdexcept>\n";
   os << "#include <vector>\n";
-  os << "#include <random>\n";
   os << "#include <fstream>\n";
   os << "#include <functional>\n";
   os << "#include <array>\n\n";

@@ -16,6 +16,8 @@ using namespace tvm;
 using namespace tvm::runtime;
 using namespace tvm::runtime::vm;
 
+tvm::runtime::vm::FiberRuntime* tvm::runtime::vm::FiberRuntime::instance_{nullptr};
+
 DLDevice dev{kDLCPU, 0};
 DLDevice gpu_dev{kDLCUDA, 0};
 DLDataType dtype{kDLFloat, 32, 1};
@@ -41,6 +43,24 @@ DLTensor* GetRandomTensor<DLTensor*>(std::initializer_list<int64_t> shape, DLDev
   return const_cast<DLTensor*>(array.operator->());
 }
 
+template <class TensorType>
+std::shared_ptr<List<TensorType>> create_list(int length) {
+  if (length == 0) {
+    auto nil_node = std::static_pointer_cast<List<TensorType>>(std::make_shared<Nil<TensorType>>());
+    nil_node->tag = LIST_NIL_TAG;
+    return nil_node;
+  } else {
+    auto tail = create_list<TensorType>(length - 1);
+    auto new_node =
+        std::static_pointer_cast<List<TensorType>>(std::make_shared<Cons<TensorType>>());
+    new_node->tag = LIST_CONS_TAG;
+    static_cast<Cons<TensorType>*>(new_node.get())->field_0 =
+        GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+    static_cast<Cons<TensorType>*>(new_node.get())->field_1 = tail;
+    return new_node;
+  }
+}
+
 using ExecutorType = DepthTrackingExecutor;
 // using ExecutorType = LazyExecutor<DLTensor*>;
 
@@ -53,11 +73,11 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int edges_hi = atoi(argv[4]);
   int num_batches = 1;
   bool profile = false;
-  bool debug = false;
+  bool debug = true;
 
-  std::vector<TensorType> inits;
+  std::vector<std::shared_ptr<List<TensorType>>> inits;
   for (int i = 0; i < batch_size; ++i) {
-    inits.push_back(GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype));
+    inits.push_back(create_list<TensorType>(GetRandom(nodes_lo, nodes_hi)));
   }
 
   DeviceAPI::Get(gpu_dev)->StreamSync(gpu_dev, nullptr);

@@ -315,7 +315,6 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     for (size_t i = 0; i < arity; ++i) {
       switch (arg_modes[i]) {
         case kIgnore: {
-          ICHECK(false);
           break;
         }
         case kReuse: {

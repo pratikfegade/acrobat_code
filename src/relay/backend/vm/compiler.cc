@@ -1444,7 +1444,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::PlanDevices(config_));
 
   pass_seqs.push_back(transform::InferType());
-  pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
+  // pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   // pass_seqs.push_back(transform::PrintCurrentIR("MarkScalarCalls", true, true));

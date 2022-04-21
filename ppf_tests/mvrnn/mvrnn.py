@@ -39,9 +39,9 @@ weights_dict = {
 }
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
-scattered_kernels=False
+scattered_kernels=True
 concurrent_execution=False
 use_autoscheduler=True
 use_depth_tracking=True
@@ -114,11 +114,9 @@ def execute():
                 for tree in trees: params_list += [tree]
 
                 executor.vm.set_input("main", batch_size, *params_list)
-                exit()
-                # fin_executor()
-                # iters = 100
-                # timeit.timeit(fin_executor, number=50)
-                # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
+                iters = 100
+                timeit.timeit(fin_executor, number=50)
+                print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)

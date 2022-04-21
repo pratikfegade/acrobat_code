@@ -1,5 +1,5 @@
-#ifdef USE_CUDA
-#include "reduce_sum.h"
+// #ifdef USE_CUDA
+#include "db_kernels.h"
 
 #define CEIL(a, b) (((a) + (b)-1) / (b))
 #define FLOOR(a, b) ((a) / (b))
@@ -34,22 +34,17 @@ __global__ void reduce_sum(float** input, float** output, int* input_indices, in
 __global__ void db_concat_copy(float** input, float* output, int batch_size, int flat_size) {
   int b = blockIdx.x;
   int ii = threadIdx.x;
-  for (int io = 0; io < FLOOR(hidden_size, CONCAT_COPY_THREAD_COUNT); ++io) {
+  for (int io = 0; io < FLOOR(flat_size, CONCAT_COPY_THREAD_COUNT); ++io) {
     int i = io * CONCAT_COPY_THREAD_COUNT + ii;
     output[b * flat_size + i] = input[b][i];
   }
 
-  int io = CEIL(hidden_size, CONCAT_COPY_THREAD_COUNT) - 1;
+  int io = CEIL(flat_size, CONCAT_COPY_THREAD_COUNT) - 1;
   int i = io * CONCAT_COPY_THREAD_COUNT + ii;
-  if (i < hidden_size) {
+  if (i < flat_size) {
     output[b * flat_size + i] = input[b][i];
   }
 }
-
-#undef CEIL
-#undef FLOOR
-#undef CONCAT_COPY_THREAD_COUNT
-#undef REDUCE_SUM_THREAD_COUNT
 
 namespace tvm {
 namespace contrib {
@@ -64,6 +59,11 @@ void db_concat_copy_wrapper(float** input, float* output, int batch_size, int fl
   db_concat_copy<<<batch_size, CONCAT_COPY_THREAD_COUNT>>>(input, output, batch_size, flat_size);
 }
 
+#undef CEIL
+#undef FLOOR
+#undef CONCAT_COPY_THREAD_COUNT
+#undef REDUCE_SUM_THREAD_COUNT
+
 }  // namespace contrib
 }  // namespace tvm
-#endif
+// #endif
