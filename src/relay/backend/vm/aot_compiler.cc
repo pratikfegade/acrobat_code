@@ -314,7 +314,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         max_static_depth = this->VisitBytecode();
 
         this->EndScope();
-        stream_ << "}\n";
+        stream_ << "}\n\n";
       } else {
         stream_ << ";\n";
       }

@@ -53,7 +53,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int edges_hi = atoi(argv[4]);
   int num_batches = 1;
   bool profile = false;
-  bool debug = true;
+  bool debug = false;
 
   std::vector<TensorType> inits;
   for (int i = 0; i < batch_size; ++i) {
@@ -62,9 +62,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
 
   DeviceAPI::Get(gpu_dev)->StreamSync(gpu_dev, nullptr);
   if (debug) {
-    // batched_main(inits);
-    int depth = 3;
-    model_main(inits[0], depth);
+    batched_main(inits);
     DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
   } else {
     if (profile) {
