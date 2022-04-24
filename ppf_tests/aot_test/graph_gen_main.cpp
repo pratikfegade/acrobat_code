@@ -72,7 +72,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int edges_lo = atoi(argv[3]);
   int edges_hi = atoi(argv[4]);
   int num_batches = 1;
-  bool profile = true;
+  bool profile = false;
   bool debug = false;
 
   std::vector<std::shared_ptr<List<TensorType>>> inits;
