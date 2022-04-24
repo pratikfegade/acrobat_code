@@ -36,11 +36,11 @@ weights_dict = {
     main_func.params[6].name_hint: get_random_tensor((256, 512)),
     main_func.params[7].name_hint: get_random_tensor((1, 256)),
 }
-for i in range(8):
-    weights_list.append(weights_dict[main_func.params[0].name_hint])
+for i in range(len(weights_dict)):
+    weights_list.append(weights_dict[main_func.params[i].name_hint])
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
@@ -90,7 +90,7 @@ def auto_schedule(tune):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=12,
+                num_measure_trials=20,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )

@@ -1145,6 +1145,7 @@ PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Obje
 }
 
 void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
+  std::cout << "SP " << name << std::endl;
   params_[name] = data_in;
 }
 
@@ -1479,6 +1480,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::LabelOps());
 
   // lower all functions annotated as "primitive" by FuseOps.
+  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1505,7 +1507,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    pass_seqs.push_back(transform::PrintCurrentIR("Before hoisting", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
   }
 

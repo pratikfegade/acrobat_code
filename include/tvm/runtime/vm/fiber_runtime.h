@@ -43,19 +43,19 @@ class FiberRuntime {
         alive_num_(num_fibers) {}
 
   void WorkerYield(int idx) {
-    std::cout << "[" << idx << "] Worker yielding" << std::endl;
+    /* std::cout << "[" << idx << "] Worker yielding" << std::endl; */
     stop_channels_[idx].push(kYield);
     FiberState state;
     start_channels_[idx].pop(state);
   }
 
   void WorkerEnd(int idx) {
-    std::cout << "[" << idx << "] Worker ending" << std::endl;
+    /* std::cout << "[" << idx << "] Worker ending" << std::endl; */
     stop_channels_[idx].push(kEnd);
   }
 
   void MainWaitForWorkers() {
-    std::cout << "[M] Main waiting" << std::endl;
+    // std::cout << "[M] Main waiting" << std::endl;
     for (int i = 0; i < num_fibers_; ++i) {
       if (alive_[i]) {
         FiberState state;
@@ -69,7 +69,7 @@ class FiberRuntime {
   }
 
   void MainResumeWorkers() {
-    std::cout << "[M] Main resuming workers" << std::endl;
+    // std::cout << "[M] Main resuming workers" << std::endl;
     for (int i = 0; i < num_fibers_; ++i) {
       if (alive_[i]) {
         start_channels_[i].push(kResume);
@@ -82,6 +82,12 @@ class FiberRuntime {
   bool ContinueExecution() { return alive_num_ > 0; }
 
   bool IsAlive(int idx) { return alive_[idx]; }
+
+  void MainEndFiberExecution() {
+    for (auto fiber : fibers_) {
+      fiber->join();
+    }
+  }
 
   inline static void Init(int num_fibers) {
     if (instance_) {

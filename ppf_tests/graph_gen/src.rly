@@ -66,7 +66,16 @@ def @gru_cell(
   let %r = %rz_func(%input, %state, %rweight, %rbias);
   let %hp = %hp_func(%input, %state, %hweight, %hbias, %r);
 
-  ((1f - %z) * %state) + (%z * %hp)
+  let %fin_func = fn(
+    %_z: Tensor[(1, 256), float32],
+    %_state: Tensor[(1, 256), float32],
+    %_hp: Tensor[(1, 256), float32],
+    Primitive=1
+  ) -> Tensor[(1, 256), float32] {
+    ((1f - %_z) * %_state) + (%_z * %_hp)
+  };
+
+  %fin_func(%z, %state, %hp)
 }
 
 def @create_edges(
@@ -106,7 +115,7 @@ def @create_nodes(
     Cons(%input, %input_tail) => {
       let %num_edges = random.db_uniform(20, 50, out_shape=[], out_dtype="int32");
       let %updated_node_state = @gru_cell(
-        %node_state, %input,
+        %input, %node_state,
         %node_rnn_zweight, %node_rnn_rweight,
         %node_rnn_hweight, %node_rnn_zbias,
         %node_rnn_rbias, %node_rnn_hbias
@@ -123,7 +132,7 @@ def @create_nodes(
         %edge_rnn_weight, %edge_rnn_bias
       );
 
-      Cons(NodeCons(%updated_node_state, %create_edges_res.0), %tail)
+      Cons(NodeCons(%create_edges_res.1, %create_edges_res.0), %tail)
     },
     Nil => {
       Nil

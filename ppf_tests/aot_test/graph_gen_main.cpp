@@ -72,12 +72,13 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int edges_lo = atoi(argv[3]);
   int edges_hi = atoi(argv[4]);
   int num_batches = 1;
-  bool profile = false;
-  bool debug = true;
+  bool profile = true;
+  bool debug = false;
 
   std::vector<std::shared_ptr<List<TensorType>>> inits;
   for (int i = 0; i < batch_size; ++i) {
-    inits.push_back(create_list<TensorType>(GetRandom(nodes_lo, nodes_hi)));
+    // inits.push_back(create_list<TensorType>(GetRandom(nodes_lo, nodes_hi)));
+    inits.push_back(create_list<TensorType>(20));
   }
 
   DeviceAPI::Get(gpu_dev)->StreamSync(gpu_dev, nullptr);
@@ -127,7 +128,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     all_gen_time_ms /= num_batches;
     all_exe_time_ms /= num_batches;
     if (profile) {
-      std::cout << VMDBProfiler::GetReport() << std::endl;
+      std::cout << VMDBProfiler::GetReport(100) << std::endl;
     }
     std::cout << "RESULTS," << all_gen_time_ms << "," << all_exe_time_ms << ","
               << (all_exe_time_ms + all_gen_time_ms) << std::endl;

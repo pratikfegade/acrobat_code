@@ -199,8 +199,8 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
 
   FunctionSet VisitBody(const Function& func) {
     stack_.push_back(func.get());
-    std::cout << "[FPA]  Visiting function body " << func_name_map_[func.get()] << " in context "
-              << func_name_map_[GetCurrentContext()] << std::endl;
+    // std::cout << "[FPA]  Visiting function body " << func_name_map_[func.get()] << " in context "
+    // << func_name_map_[GetCurrentContext()] << std::endl;
     auto res = VisitExpr(func->body);
     stack_.pop_back();
     return res;
@@ -276,9 +276,9 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     auto callee_set = VisitExpr(op->op);
     callees_map_[OpKey(GetCurrentContext(), op)] =
         Merge(callees_map_[OpKey(GetCurrentContext(), op)], callee_set).first;
-    std::cout << "[FPA]   Setting callee " << func_name_map_[GetCurrentContext()] << " "
-              << GetCurrentContext() << " " << op->op << " " << FunctionSetToStr(callee_set)
-              << std::endl;
+    // std::cout << "[FPA]   Setting callee " << func_name_map_[GetCurrentContext()] << " "
+    // << GetCurrentContext() << " " << op->op << " " << FunctionSetToStr(callee_set)
+    // << std::endl;
     if (callee_set.empty()) {
       for (auto arg : op->args) {
         this->VisitExpr(arg);

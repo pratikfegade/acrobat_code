@@ -58,7 +58,8 @@ inline int64_t NDToInt64(const NDArray& nd) {
 
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
   static std::random_device rd;
-  static std::mt19937 gen(rd());
+  /* static std::mt19937 gen(rd()); */
+  static std::mt19937 gen(0);
   return std::uniform_int_distribution<>(lo, hi)(gen);
 }
 

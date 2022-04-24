@@ -146,6 +146,33 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
   TestPointerNDArray(ptr_array, total_nums, batch_size);
 }
 
+void FillInPointers(void** host_raw_ptrs, size_t size, const std::vector<OpNode<DLTensor*>*>& nodes,
+                    int arg_num, Allocator* allocator) {
+  auto first_arg = nodes[0]->args_[arg_num];
+  auto data_size = GetDataSize(*first_arg);
+  if (first_arg->data != nullptr) {
+#pragma GCC ivdep
+    for (size_t j = 0; j < size; ++j) {
+#ifdef DEBUG_CHECKS
+      ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+#endif
+      host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
+    }
+  } else {
+    void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
+#pragma GCC ivdep
+    for (size_t j = 0; j < size; ++j) {
+      auto ptr = static_cast<char*>(start) + j * data_size;
+      host_raw_ptrs[j] = ptr;
+      nodes[j]->args_[arg_num]->data = ptr;
+#ifdef DEBUG_CHECKS
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+#endif
+    }
+  }
+}
+
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num) {
   size_t size = nodes.size();
   NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
@@ -184,34 +211,6 @@ bool CheckEqualShape(DLTensor& t1, DLTensor& t2) {
     }
   }
   return true;
-}
-
-inline void FillInPointers(void** host_raw_ptrs, size_t size,
-                           const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
-                           Allocator* allocator) {
-  auto first_arg = nodes[0]->args_[arg_num];
-  auto data_size = GetDataSize(*first_arg);
-  if (first_arg->data != nullptr) {
-#pragma GCC ivdep
-    for (size_t j = 0; j < size; ++j) {
-#ifdef DEBUG_CHECKS
-      ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
-      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
-#endif
-      host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
-    }
-  } else {
-    void* start = allocator->ArenaAlloc(size * data_size, 256, first_arg->dtype).data;
-#pragma GCC ivdep
-    for (size_t j = 0; j < size; ++j) {
-      auto ptr = static_cast<char*>(start) + j * data_size;
-      host_raw_ptrs[j] = ptr;
-      nodes[j]->args_[arg_num]->data = ptr;
-#ifdef DEBUG_CHECKS
-      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
-#endif
-    }
-  }
 }
 
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,

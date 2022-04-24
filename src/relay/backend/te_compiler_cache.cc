@@ -43,6 +43,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../support/utils.h"
 #include "../op/memory/memory.h"
 #include "../transforms/pass_utils.h"
 #include "batch_te_graph.h"
@@ -131,7 +132,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
                                            std::function<std::string(std::string)> renamer,
                                            Array<Bool> model_parameter_taints, bool create_batched,
                                            bool scattered_kernels) {
-    // std::cout << "Lowering\n" << relay_func << "\n\n\n" << std::endl;
+    std::cout << "Lowering\n"
+              << relay_func.get() << " "
+              << "\n\n\n"
+              << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     int ctr = 0;
     for (Var param : relay_func->params) {
@@ -270,6 +274,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         }
       };
       std::vector<bool> reuse_taints;
+      std::cout << fn_inputs << " " << outputs << " " << support::PrintVector(reuse_taints)
+                << std::endl;
       construct_reuse_taints(fn_inputs, &reuse_taints, 0);
       construct_reuse_taints(outputs, &reuse_taints, fn_inputs.size());
 

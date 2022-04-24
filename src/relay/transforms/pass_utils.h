@@ -180,19 +180,42 @@ inline bool IsScalarTensorType(const Type& type) {
  * \return bool If all inputs and outputs are scalars
  */
 inline bool IsOpOnScalars(const CallNode* op) {
-  if (!IsScalarTensorType(op->checked_type())) {
-    return false;
-  }
-  size_t start = 0;
   if (op->op == GetInvokeTVMOp()) {
-    start = 1;
-  }
-  for (size_t i = start; i < op->args.size(); ++i) {
-    if (!IsScalarTensorType(op->args[i]->checked_type())) {
+    auto check_tuple = [&](const Expr& e) {
+      for (auto f : e.as<TupleNode>()->fields) {
+        if (!IsScalarTensorType(e->checked_type())) {
+          return false;
+        }
+      }
+      return true;
+    };
+    return check_tuple(op->args[1]) && check_tuple(op->args[2]);
+  } else {
+    if (!IsScalarTensorType(op->checked_type())) {
       return false;
+    }
+    size_t start = 0;
+    for (size_t i = start; i < op->args.size(); ++i) {
+      if (!IsScalarTensorType(op->args[i]->checked_type())) {
+        return false;
+      }
     }
   }
   return true;
+}
+
+inline bool IsMarkedScalarOp(const CallNode* op) {
+  if (!op->attrs.defined()) {
+    return false;
+  }
+  if (!op->attrs->IsInstance<DictAttrsNode>()) {
+    return false;
+  }
+  auto opt_op = Downcast<DictAttrs>(op->attrs).GetAttr(tir::attr::kDBScalarCall, NullValue<Expr>());
+  if (opt_op) {
+    return opt_op.value().as<CallNode>() != nullptr;
+  }
+  return false;
 }
 
 template <typename ConditionObjectPtr>

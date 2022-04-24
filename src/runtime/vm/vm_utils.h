@@ -84,6 +84,9 @@ void TestNDArray(DLTensor* array);
  *
  * \return The created gathered array
  */
+void FillInPointers(void** host_raw_ptrs, size_t size, const std::vector<OpNode<DLTensor*>*>& nodes,
+                    int arg_num, Allocator* allocator);
+
 NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg_num);
 NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                              Allocator* allocator);

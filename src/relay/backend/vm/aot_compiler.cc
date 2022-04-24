@@ -1389,6 +1389,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   os << "for (size_t b = 0; b < batch_size; ++b) {\n";
 
   if (concurrent_execution()) {
+    this->BeginScope();
     this->PrintIndent(os);
     os << "auto run_func = [b, &res, ";
 
@@ -1401,8 +1402,6 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     }
 
     os << "]() {\n";
-
-    this->BeginScope();
   }
 
   this->BeginScope();
@@ -1431,9 +1430,11 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().WorkerEnd(b);\n";
     this->EndScope();
+    this->PrintIndent(os);
     os << "};\n";
     this->PrintIndent(os);
     os << "auto fiber = new fiber_t(run_func);\n";
+    this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().AddFiber(b, fiber);\n";
   }
 
@@ -1452,7 +1453,10 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
     this->EndScope();
+    this->PrintIndent(os);
     os << "}\n";
+    this->PrintIndent(os);
+    os << "tvm::runtime::vm::FiberRuntime::Current().MainEndFiberExecution();\n";
   }
 
   this->PrintIndent(os);

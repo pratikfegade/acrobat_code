@@ -898,7 +898,8 @@ class Coarsener : public ExprMutator {
           if (in_group && in_static_group) {
             static_group_depth = std::min(static_group_depth, static_depth);
           }
-        } else if (vn->op == GetInvokeTVMOp() && !IsOpOnScalars(vn)) {
+        } else if (vn->op == GetInvokeTVMOp() && !IsMarkedScalarOp(vn)) {
+          std::cout << "[CG] Marked scalar op " << value << std::endl;
           if (in_static_group) {
             end_group(i);
           }
