@@ -6,6 +6,9 @@ def @compute_probabilities(
   %x_sibling: Tensor[(1, 256), float32],
   %h_f_sibling: Tensor[(1, 256), float32],
 
+  %tree_depth: Tensor[(), int32],
+  %sibling_depth: Tensor[(), int32],
+
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
   %f_rnn_weight: Tensor[(256, 512), float32],
@@ -59,16 +62,20 @@ def @compute_probabilities(
 
   let %h_pred_i = %h_pred_func(%h_a_i, %h_f_i, %ufa_pred_weight);
 
-  let %p_af_i = %dot_sigmoid_func(%h_pred_i, %dot_uaf_weight);
-  let %p_af_i_split = split(reshape(%p_af_i, newshape=[2]), indices_or_sections=2);
+  let %p_af_i_split = split(
+    reshape(
+      %dot_sigmoid_func(%h_pred_i, %dot_uaf_weight),
+      newshape=[2]
+    ), indices_or_sections=2
+  );
 
   let %x_i = nn.softmax(nn.dense(%h_pred_i, %out_weight, units=256) +
     %p_af_i_split.0 * %va_bias +
     %p_af_i_split.1 * %vf_bias
   );
 
-  let %have_children = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
-  let %have_sibling = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
+  let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
+  let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
 
   (%x_i, %h_a_i, %h_f_i, %have_children, %have_sibling)
 }
@@ -78,6 +85,9 @@ def @create_siblings(
   %h_a_parent: Tensor[(1, 256), float32],
   %x_sibling: Tensor[(1, 256), float32],
   %h_f_sibling: Tensor[(1, 256), float32],
+
+  %tree_depth: Tensor[(), int32],
+  %sibling_depth: Tensor[(), int32],
 
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
@@ -90,13 +100,14 @@ def @create_siblings(
   %dot_uaf_weight: Tensor[(2, 256), float32],
 ) -> List[(Tensor[(1, 256), float32], Tensor[(1, 256), float32], Tensor[(), int32])] {
   let %cp_res = @compute_probabilities(
-    %x_parent, %h_a_parent, %x_sibling, %h_f_sibling,
+    %x_parent, %h_a_parent, %x_sibling, %h_f_sibling, %tree_depth, %sibling_depth,
     %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
     %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
   );
-  if (%cp_res.4 == 0) {
+  let %have_sibling = %cp_res.4;
+  if (%have_sibling != 0) {
     let %cc_res = @create_siblings(
-      %x_parent, %h_a_parent, %cp_res.0, %cp_res.2,
+      %x_parent, %h_a_parent, %cp_res.0, %cp_res.2, %tree_depth, %sibling_depth + 1,
       %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
       %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
     );
@@ -124,6 +135,8 @@ def @create_tree(
   %x_parent: Tensor[(1, 256), float32],
   %h_a_parent: Tensor[(1, 256), float32],
 
+  %tree_depth: Tensor[(), int32],
+
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
   %f_rnn_weight: Tensor[(256, 512), float32],
@@ -135,7 +148,7 @@ def @create_tree(
   %dot_uaf_weight: Tensor[(2, 256), float32],
 ) -> Tree[(Tensor[(1, 256), float32], Tensor[(1, 256), float32])] {
   let %children_res = @create_siblings(
-    %x_parent, %h_a_parent, %x_parent, %h_a_parent,
+    %x_parent, %h_a_parent, %x_parent, %h_a_parent, %tree_depth, 0,
     %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
     %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
   );
@@ -147,10 +160,10 @@ def @create_tree(
     let %h_a_node = %input.1;
     let %have_children = %input.2;
 
-    if (%have_children == 0) {
+    if (%have_children != 0) {
       Some(
         @create_tree(
-          %x_node, %h_a_node,
+          %x_node, %h_a_node, %tree_depth + 1,
           %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
           %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
         )
@@ -180,7 +193,7 @@ def @main(
   %h_a_parent: Tensor[(1, 256), float32],
 ) -> Tree[(Tensor[(1, 256), float32], Tensor[(1, 256), float32])] {
   @create_tree(
-    %x_parent, %h_a_parent,
+    %x_parent, %h_a_parent, 0,
     %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
     %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
   )

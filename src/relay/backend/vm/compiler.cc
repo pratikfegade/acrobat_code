@@ -1450,7 +1450,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   // pass_seqs.push_back(transform::PrintCurrentIR("MarkScalarCalls", true, true));
   pass_seqs.push_back(transform::FuseOps());
-  // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
 
   // Do layout rewrite for auto-scheduler.
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
@@ -1480,7 +1479,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::LabelOps());
 
   // lower all functions annotated as "primitive" by FuseOps.
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1525,7 +1524,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

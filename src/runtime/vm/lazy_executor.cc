@@ -790,7 +790,7 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
-  std::cout << "[LZ] Total nodes " << total_nodes << std::endl;
+  // std::cout << "[LZ] Total nodes " << total_nodes << std::endl;
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();

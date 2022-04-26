@@ -326,7 +326,6 @@ inline relay::Function BindParamsByName(
   std::unordered_set<relay::Var, ObjectPtrHash, ObjectPtrEqual> repeat_var;
   for (auto arg : func->params) {
     const auto& name = arg->name_hint();
-    std::cout << "[BPN] " << name << std::endl;
     if (name_dict.count(name)) {
       repeat_var.insert(name_dict[name]);
     } else {
@@ -344,7 +343,6 @@ inline relay::Function BindParamsByName(
       LOG(FATAL) << "Multiple args in the function have name " << kv.first;
     }
     bind_dict[arg] = Constant(kv.second);
-    std::cout << "[BPN] Bind dict " << arg << std::endl;
   }
   Expr bound_expr = relay::Bind(func, bind_dict);
   Function ret = Downcast<Function>(bound_expr);

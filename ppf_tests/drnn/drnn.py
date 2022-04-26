@@ -18,6 +18,7 @@ mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
 mod._import(TVM_HOME + "/ppf_tests/drnn/drnn.rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
+
 main_func = mod["main"]
 
 batch_size=8
@@ -44,7 +45,7 @@ lazy_execution=True
 coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
-concurrent_execution=True
+concurrent_execution=False
 use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False

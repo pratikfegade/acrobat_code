@@ -169,6 +169,9 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
         os << ",";
       }
     }
+    if (concurrent_execution()) {
+      os << ", int";
+    }
     if (use_depth_tracking_executor()) {
       os << ", int&";
     }
@@ -303,6 +306,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     inbuilt_ops_.insert({"subtract", "-"});
     inbuilt_ops_.insert({"add", "+"});
     inbuilt_ops_.insert({"equal", "=="});
+    inbuilt_ops_.insert({"not_equal", "!="});
     inbuilt_ops_.insert({"greater_equal", ">="});
   }
 
@@ -488,7 +492,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   int VisitBytecode() {
-    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     bool print = (vm_func_.name == "main");
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
@@ -497,9 +501,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
         continue;
       }
       if (print && instr.op == Opcode::Ret) {
-        std::cout << "[BT]  Read registers instruction " << instr << std::endl;
-        std::cout << "[BT]    " << support::PrintVector(Instruction::ReadRegisters(instr))
-                  << std::endl;
+        // std::cout << "[BT]  Read registers instruction " << instr << std::endl;
+        // std::cout << "[BT]    " << support::PrintVector(Instruction::ReadRegisters(instr))
+        // << std::endl;
       }
       for (auto reg : Instruction::ReadRegisters(instr)) {
         used_regs[reg] = true;
@@ -577,10 +581,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
         if (print && instr.op == Opcode::Ret) {
-          std::cout << "[BT] MAIN RET" << std::endl;
+          // std::cout << "[BT] MAIN RET" << std::endl;
         }
 
-        std::cout << "[BT]     " << instr << std::endl;
+        // std::cout << "[BT]     " << instr << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
           continue;
@@ -1067,6 +1071,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 stream_ << ", ";
               }
             }
+            if (concurrent_execution()) {
+              stream_ << ", fiber_id";
+            }
             if (use_depth_tracking_executor()) {
               stream_ << ", depth";
             }
@@ -1151,44 +1158,55 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   void EmitPMapCPP(bool definition) {
-    auto pmap_func_declaration =
-        "template <class A, class B>\n"
-        "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, "
-        "std::shared_ptr<List<A>> "
-        "local_1, int fiber_id, int& depth)";
-    stream_ << pmap_func_declaration;
+    stream_ << "template <class A, class B>\n";
+    if (concurrent_execution()) {
+      stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int, int&)> local_0, ";
+    } else {
+      stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, ";
+    }
+    stream_ << "std::shared_ptr<List<A>> ";
+    if (concurrent_execution()) {
+      stream_ << "local_1, int fiber_id, int& depth)";
+    } else {
+      stream_ << "local_1, int& depth)";
+    }
     if (definition) {
-      auto pmap_func_body =
-          "{\n"
-          "  auto current = local_1;\n"
-          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n"
-          "  nil_node->tag = LIST_NIL_TAG;\n"
-          "  auto new_list_head = nil_node;\n"
-          "  auto new_list_tail = nil_node;\n"
-          "  int map_depth_value = depth;\n"
-          "  while (true) {\n"
-          "    if (current->tag == LIST_NIL_TAG) {\n"
-          "      break;\n"
-          "    }\n"
-          "    int tmp_depth = map_depth_value;\n"
-          "    auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
-          "    new_node->tag = LIST_CONS_TAG;\n"
-          "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
-          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n"
-          "    depth = std::max(depth, tmp_depth);\n"
-          "    if (new_list_tail->tag != LIST_NIL_TAG) {\n"
-          "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
-          "    } else {\n"
-          "      new_list_head = new_node;\n"
-          "    }\n"
-          "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
-          "    new_list_tail = new_node;\n"
-          "    current = static_cast<Cons<A>*>(current.get())->field_1;\n"
-          "  }\n"
-          ""
-          "  return new_list_head;\n"
-          "}\n";
-      stream_ << pmap_func_body << "\n" << std::endl;
+      stream_ << "{\n";
+      stream_ << "  auto current = local_1;\n";
+      stream_
+          << "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n";
+      stream_ << "  nil_node->tag = LIST_NIL_TAG;\n";
+      stream_ << "  auto new_list_head = nil_node;\n";
+      stream_ << "  auto new_list_tail = nil_node;\n";
+      stream_ << "  int map_depth_value = depth;\n";
+      stream_ << "  while (true) {\n";
+      stream_ << "    if (current->tag == LIST_NIL_TAG) {\n";
+      stream_ << "      break;\n";
+      stream_ << "    }\n";
+      stream_ << "    int tmp_depth = map_depth_value;\n";
+      stream_ << "    auto new_node = "
+                 "std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n";
+      stream_ << "    new_node->tag = LIST_CONS_TAG;\n";
+      stream_ << "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n";
+      if (concurrent_execution()) {
+        stream_ << "        local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
+                   "tmp_depth);\n";
+      } else {
+        stream_ << "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n";
+      }
+      stream_ << "    depth = std::max(depth, tmp_depth);\n";
+      stream_ << "    if (new_list_tail->tag != LIST_NIL_TAG) {\n";
+      stream_ << "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n";
+      stream_ << "    } else {\n";
+      stream_ << "      new_list_head = new_node;\n";
+      stream_ << "    }\n";
+      stream_ << "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n";
+      stream_ << "    new_list_tail = new_node;\n";
+      stream_ << "    current = static_cast<Cons<A>*>(current.get())->field_1;\n";
+      stream_ << "  }\n";
+      stream_ << "";
+      stream_ << "  return new_list_head;\n";
+      stream_ << "}\n\n";
     } else {
       stream_ << ";";
     }

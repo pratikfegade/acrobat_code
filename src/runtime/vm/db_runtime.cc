@@ -156,6 +156,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::InvokePackedWithDepth(int64_t pa
                                                                       TensorType* args,
                                                                       int64_t num_args) {
   if (concurrent_execution_ || lazy_execution_) {
+    std::cout << "Depth " << depth << std::endl;
     shared_state_.lazy_executor_.AddPackedCallUnrolledWithDepth(packed_index, depth, args,
                                                                 num_args);
   } else {
