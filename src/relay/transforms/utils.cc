@@ -45,25 +45,45 @@ class LetLifter : public ExprMutator {
     auto outer_value = VisitExpr(outer_let->value);
     auto outer_body = VisitExpr(outer_let->body);
 
+    auto on_device_props = GetOnDeviceProps(outer_value);
+    if (on_device_props.body.defined()) {
+      outer_value = on_device_props.body;
+    }
+
     if (auto inner_let = outer_value.as<LetNode>()) {
       auto inner_var = inner_let->var;
       auto inner_value = inner_let->value;
       auto inner_body = inner_let->body;
 
+      Expr ret = NullValue<Expr>();
       if (StructuralEqual()(outer_var, outer_body)) {
-        auto ret = Let(inner_var, inner_value, inner_body);
+        ret = Let(inner_var, inner_value, inner_body);
+        if (on_device_props.body.defined()) {
+          ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
+                    WrapOnDevice(on_device_props, inner_body));
+        } else {
+          ret = Let(inner_var, inner_value, inner_body);
+        }
         // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
         // std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
-        return ret;
       } else {
-        auto ret = Let(inner_var, inner_value, Let(outer_var, inner_body, outer_body));
+        if (on_device_props.body.defined()) {
+          ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
+                    Let(outer_var, WrapOnDevice(on_device_props, inner_body), outer_body));
+        } else {
+          ret = Let(inner_var, inner_value, Let(outer_var, inner_body, outer_body));
+        }
         // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
         // std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
-        return ret;
       }
+      return ret;
     } else {
       return Let(outer_var, outer_value, outer_body);
     }
+  }
+
+  Expr WrapOnDevice(const OnDeviceProps& props, const Expr& e) {
+    return OnDevice(e, props.se_scope, props.constrain_result, props.constrain_body);
   }
 };
 

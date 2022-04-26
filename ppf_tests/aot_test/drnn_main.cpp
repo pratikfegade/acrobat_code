@@ -16,7 +16,7 @@ using namespace tvm;
 using namespace tvm::runtime;
 using namespace tvm::runtime::vm;
 
-// tvm::runtime::vm::FiberRuntime* tvm::runtime::vm::FiberRuntime::instance_{nullptr};
+tvm::runtime::vm::FiberRuntime* tvm::runtime::vm::FiberRuntime::instance_{nullptr};
 
 DLDevice dev{kDLCPU, 0};
 DLDevice gpu_dev{kDLCUDA, 0};
@@ -84,8 +84,8 @@ template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int batch_size = atoi(argv[0]);
   int num_batches = 1;
-  bool profile = false;
-  bool debug = true;
+  bool profile = true;
+  bool debug = false;
 
   std::vector<TensorType> input1 = create_vector<TensorType>(batch_size);
   std::vector<TensorType> input2 = create_vector<TensorType>(batch_size);
@@ -93,9 +93,11 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   DeviceAPI::Get(gpu_dev)->StreamSync(gpu_dev, nullptr);
   if (debug) {
     auto res = batched_main(input1, input2);
-    // DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
-    auto stats = tree_stats<TensorType>(res[0]);
-    std::cout << "STATS " << stats.first << " " << stats.second << std::endl;
+    DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
+    for (auto tree : res) {
+      auto stats = tree_stats<TensorType>(tree);
+      std::cout << "STATS " << stats.first << " " << stats.second << std::endl;
+    }
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});

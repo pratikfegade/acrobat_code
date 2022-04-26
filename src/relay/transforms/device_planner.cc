@@ -284,6 +284,7 @@
 #include "../op/memory/device_copy.h"
 #include "../op/memory/on_device.h"
 #include "./device_domains.h"
+#include "./pass_utils.h"
 
 namespace tvm {
 namespace relay {
@@ -1266,7 +1267,8 @@ class DeviceCapturer : public ExprMutator {
 /*! \brief Rewrite the "on_device" calls (and implicitly re-type-check). */
 tvm::transform::Pass Rewrite() {
   auto pass_func = [](Function f, IRModule m, transform::PassContext ctxt) {
-    return Downcast<Function>(RewriteOnDevices(std::move(m)).Mutate(f));
+    // return Downcast<Function>(RewriteOnDevices(std::move(m)).Mutate(f));
+    return Downcast<Function>(RewriteOnDevices(std::move(m)).Mutate(LiftLetsOutOfValues(f)));
   };
   return tvm::relay::transform::CreateFunctionPass(pass_func, 0, "PlanDevicesRewrite", {});
 }

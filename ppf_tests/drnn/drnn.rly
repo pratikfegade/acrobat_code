@@ -1,5 +1,84 @@
 #[version = "0.0.5"]
 
+// def @main(
+//   %a_rnn_weight: Tensor[(256, 512), float32],
+//   %a_rnn_bias: Tensor[(1, 256), float32],
+//   %f_rnn_weight: Tensor[(256, 512), float32],
+//   %f_rnn_bias: Tensor[(1, 256), float32],
+//   %ufa_pred_weight: Tensor[(256, 512), float32],
+//   %out_weight: Tensor[(256, 256), float32],
+//   %va_bias: Tensor[(1, 256), float32],
+//   %vf_bias: Tensor[(1, 256), float32],
+//   %dot_uaf_weight: Tensor[(2, 256), float32],
+
+//   %x_parent: Tensor[(1, 256), float32],
+//   %h_a_parent: Tensor[(1, 256), float32],
+//   %x_sibling: Tensor[(1, 256), float32],
+//   %h_f_sibling: Tensor[(1, 256), float32],
+
+//   %tree_depth: Tensor[(), int32],
+//   %sibling_depth: Tensor[(), int32],
+// ) -> (
+//   Tensor[(1, 256), float32], // 0
+//   Tensor[(1, 256), float32], // 1
+//   Tensor[(1, 256), float32], // 2
+//   Tensor[(), int32],         // 3
+//   Tensor[(), int32]          // 4
+// ) {
+//   let %rnn_func = fn(
+//     %_input: Tensor[(1, 256), float32],
+//     %_state: Tensor[(1, 256), float32],
+//     %_weight: Tensor[(256, 512), float32],
+//     %_bias: Tensor[(1, 256), float32],
+//     Primitive = 1
+//   ) {
+//     sigmoid(
+//       %_bias + nn.dense(concatenate((%_input, %_state), axis=1), %_weight, units=256)
+//     )
+//   };
+
+//   let %h_pred_func = fn(
+//     %_input1: Tensor[(1, 256), float32],
+//     %_input2: Tensor[(1, 256), float32],
+//     %_weight: Tensor[(256, 512), float32],
+//     Primitive = 1
+//   ) {
+//     tanh(
+//       nn.dense(concatenate((%_input1, %_input2), axis=1), %_weight, units=256)
+//     )
+//   };
+
+//   let %dot_sigmoid_func = fn(
+//     %_input: Tensor[(1, 256), float32],
+//     %_weight: Tensor[(2, 256), float32],
+//     Primitive = 1
+//   ) {
+//     sigmoid(nn.dense(%_input, %_weight, units=2))
+//   };
+
+//   let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
+//   let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
+
+//   let %h_a_i = %rnn_func(%x_parent, %h_a_parent, %a_rnn_weight, %a_rnn_bias);
+//   let %h_f_i = %rnn_func(%x_sibling, %h_f_sibling, %f_rnn_weight, %f_rnn_bias);
+
+//   let %h_pred_i = %h_pred_func(%h_a_i, %h_f_i, %ufa_pred_weight);
+
+//   let %p_af_i_split = split(
+//     reshape(
+//       %dot_sigmoid_func(%h_pred_i, %dot_uaf_weight),
+//       newshape=[2]
+//     ), indices_or_sections=2
+//   );
+
+//   let %x_i = nn.softmax(nn.dense(%h_pred_i, %out_weight, units=256) +
+//     %p_af_i_split.0 * %va_bias +
+//     %p_af_i_split.1 * %vf_bias
+//   );
+
+//   (%x_i, %h_a_i, %h_f_i, %have_children, %have_sibling)
+// }
+
 def @compute_probabilities(
   %x_parent: Tensor[(1, 256), float32],
   %h_a_parent: Tensor[(1, 256), float32],
@@ -56,6 +135,8 @@ def @compute_probabilities(
     sigmoid(nn.dense(%_input, %_weight, units=2))
   };
 
+  let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
+  let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
 
   let %h_a_i = %rnn_func(%x_parent, %h_a_parent, %a_rnn_weight, %a_rnn_bias);
   let %h_f_i = %rnn_func(%x_sibling, %h_f_sibling, %f_rnn_weight, %f_rnn_bias);
@@ -73,9 +154,6 @@ def @compute_probabilities(
     %p_af_i_split.0 * %va_bias +
     %p_af_i_split.1 * %vf_bias
   );
-
-  let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
-  let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
 
   (%x_i, %h_a_i, %h_f_i, %have_children, %have_sibling)
 }

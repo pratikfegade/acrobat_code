@@ -57,8 +57,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       auto* node = static_cast<const ConstantNode*>(ref.get());
       const PackedFunc* fprint = Registry::Get("relay._constant_repr");
       ICHECK(fprint) << "unable to find printing function for constants";
-      std::string data = (*fprint)(GetRef<Constant>(node));
-      p->stream << "Constant(" << data << ")";
+      // std::string data = (*fprint)(GetRef<Constant>(node));
+      // p->stream << "Constant(" << data << ")";
+      p->stream << "Constant(NDArray)";
     });
 
 TensorType ConstantNode::tensor_type() const {

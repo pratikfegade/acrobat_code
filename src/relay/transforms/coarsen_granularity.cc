@@ -144,7 +144,7 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
   CoarsenedTensorAccessModeCalculator(const IRModule& mod) : mod_(mod) {}
 
   AccessModesMap Compute(const tir::Stmt& body) {
-    std::cout << "[COR] Computing access modes\n" << body << std::endl;
+    // std::cout << "[COR] Computing access modes\n" << body << std::endl;
     body_ = body;
     VisitStmt(body);
     return access_modes_map_;
@@ -177,6 +177,7 @@ class CoarsenedTensorAccessModeCalculator : public tir::StmtExprVisitor {
     auto res = ComputeAndVerifyAccessModes(leaf_callee);
     auto func_access_modes = res.first;
     auto func_access_modes_map = res.second;
+    // std::cout << "[COR]   Callee " << leaf_callee << std::endl;
 
     size_t ctr = 1;
     for (size_t i = 1; i <= leaf_callee->params.size(); ++i) {
@@ -274,6 +275,10 @@ class AbstractTIRLowerer {
       } else {
         tir_fields.push_back(expr);
       }
+    } else if (expr.as<relay::ConstantNode>()) {
+      tir_fields.push_back(expr);
+    } else {
+      ICHECK(false) << "Don't know how to flatten " << expr;
     }
     return tir_fields;
   }
@@ -443,6 +448,7 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
   PrimExpr ConvertTVMOpInvoke(const relay::CallNode* call) final { return {}; }
 
   Expr HandleTVMOpInvoke(const relay::CallNode* call) {
+    // std::cout << "[CG] Lowering call " << GetRef<Expr>(call) << std::endl;
     auto callee_gv = Downcast<GlobalVar>(call->args[0]);
     auto callee = Downcast<tir::PrimFunc>(mod_->Lookup(callee_gv));
     ICHECK(prim_funcs_access_modes_.count(callee_gv)) << callee_gv << " " << callee_gv.get();
@@ -454,9 +460,9 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
     auto push_args = [&](const Expr& tuple) {
       Array<Expr> fields;
       for (auto arg : FlattenTuple(tuple)) {
+        // std::cout << "[CG]  arg " << arg << std::endl;
         if (access_modes_map.count(callee->params[ctr++])) {
-          ICHECK(arg.as<relay::VarNode>());
-          fields.push_back(Downcast<relay::Var>(arg));
+          fields.push_back(arg);
         }
       }
       args.push_back(Tuple(fields));

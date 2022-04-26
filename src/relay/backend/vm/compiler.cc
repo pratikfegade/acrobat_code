@@ -1510,6 +1510,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
+    pass_seqs.push_back(transform::PrintCurrentIR("Before coarsen", true, false));
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
