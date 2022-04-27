@@ -1145,7 +1145,6 @@ PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Obje
 }
 
 void VMCompiler::SetParam(const std::string& name, runtime::NDArray data_in) {
-  std::cout << "SP " << name << std::endl;
   params_[name] = data_in;
 }
 
@@ -1439,16 +1438,14 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   Array<Pass> pass_seqs = relay::backend::GetPassPrefix(
       /*is_homogenous=*/config_->optional_homogeneous_target.defined(), /*is_vm=*/true);
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Beginning", true, true));// Always plan devices
-  // so the remaining passes don't need to distinguish homogeneous vs
-  // hetrogeneous execution.
+  // Always plan devices so the remaining passes don't need to
+  // distinguish homogeneous vs hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
 
   pass_seqs.push_back(transform::InferType());
   // pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
   pass_seqs.push_back(transform::MarkScalarCalls());
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("MarkScalarCalls", true, true));
   pass_seqs.push_back(transform::FuseOps());
 
   // Do layout rewrite for auto-scheduler.
@@ -1510,7 +1507,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
-    pass_seqs.push_back(transform::PrintCurrentIR("Before coarsen", true, false));
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));

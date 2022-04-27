@@ -52,6 +52,7 @@
 #include "../transforms/device_aware_visitors.h"
 #include "./te_compiler_cache.h"
 #include "./utils.h"
+#include "control_flow_task_weights.h"
 #include "model_parameter_taint_analysis.h"
 
 namespace tvm {
@@ -68,8 +69,9 @@ TVM_REGISTER_OBJECT_TYPE(TECompilerNode);
 class TECompilerImpl : public TECompilerNode {
  public:
   explicit TECompilerImpl(Optional<IRModule> opt_mod,
-                          Map<Function, Array<Bool>> model_parameter_taints)
-      : model_parameter_taints_(model_parameter_taints) {
+                          Map<Function, Array<Bool>> model_parameter_taints,
+                          Map<Function, Integer> task_weights)
+      : model_parameter_taints_(model_parameter_taints), task_weights_(task_weights) {
     // Make sure we don't collide with any existing globals in the module.
     if (opt_mod) {
       for (const auto& kv : opt_mod.value()->functions) {
@@ -285,18 +287,41 @@ class TECompilerImpl : public TECompilerNode {
             << PrettyPrint(key->source_func) << std::endl
             << "for target:" << std::endl
             << key->target->ToDebugString();
+
+    bool batched_execution =
+        PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
+    bool scattered_kernels =
+        PassContext::Current()->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
+
     std::lock_guard<std::mutex> lock(mutex_);
     CCacheValue value;
     auto it = cache_.find(key);
+
+    auto iiit = task_weights_.find(key->source_func);
+    ICHECK(iiit != task_weights_.end());
+    auto func_task_weight = (*iiit).second->value;
+
     if (it != cache_.end()) {
       VLOG(1) << "already lowered to name:" << std::endl
               << PrettyPrint(it->second->cached_func->prim_fn_var);
       it->second->use_count += 1;
+      if (batched_execution) {
+        it->second->autosched_weight += 1;
+        it->second->batched_autosched_weight += func_task_weight;
+      } else {
+        it->second->autosched_weight += func_task_weight;
+      }
       if (it->second->cached_func.defined()) return it->second;
       value = it->second;
     } else {
       value = CCacheValue(make_object<CCacheValueNode>());
       value->use_count = 1;
+      if (batched_execution) {
+        value->autosched_weight = 1;
+        value->batched_autosched_weight = func_task_weight;
+      } else {
+        value->autosched_weight = func_task_weight;
+      }
       cache_[key] = value;
     }
     cur_ccache_key_ = key;
@@ -333,10 +358,6 @@ class TECompilerImpl : public TECompilerNode {
     // Enforce use the target.
     With<Target> target_scope(key->target);
 
-    bool batched_execution =
-        PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
-    bool scattered_kernels =
-        PassContext::Current()->GetConfig<Bool>("relay.db_scattered_kernels", Bool(false)).value();
     ICHECK(!value->cached_func.defined());
     auto iit = model_parameter_taints_.find(key->source_func);
     ICHECK(iit != model_parameter_taints_.end());
@@ -347,7 +368,7 @@ class TECompilerImpl : public TECompilerNode {
           auto mangled = mangle_fn(name);
           return GetUniqueName(mangled, &name_map_);
         },
-        func_model_parameter_taints, batched_execution, scattered_kernels);
+        func_model_parameter_taints, func_task_weight, batched_execution, scattered_kernels);
     value->cached_func = lowered_cached_funcs.first;
     value->batched_cached_func = lowered_cached_funcs.second;
 
@@ -507,6 +528,7 @@ class TECompilerImpl : public TECompilerNode {
     auto it = shape_func_cache_.find(key);
     if (it != shape_func_cache_.end()) {
       it->second->use_count += 1;
+      it->second->autosched_weight += 1;
       if (it->second->cached_func.defined()) return it->second;
       value = it->second;
     } else {
@@ -542,10 +564,10 @@ class TECompilerImpl : public TECompilerNode {
     for (const auto& kv : cache_) {
       auto value = kv.second;
       auto name = value->cached_func->prim_fn_var->name_hint;
-      weights.Set(name, value->use_count);
+      weights.Set(name, value->autosched_weight);
       if (batched_execution) {
         auto batched_name = value->batched_cached_func->prim_fn_var->name_hint;
-        weights.Set(batched_name, value->use_count);
+        weights.Set(batched_name, value->batched_autosched_weight);
       }
     }
     return weights;
@@ -570,19 +592,24 @@ class TECompilerImpl : public TECompilerNode {
   // parameters and hence can be reused across batch elements in
   // dynamic batching
   Map<Function, Array<Bool>> model_parameter_taints_;
+  // Control flow aware task weights computed for autoscheduler
+  // prioritization
+  Map<Function, Integer> task_weights_;
 };
 
 TECompiler::TECompiler(Optional<IRModule> opt_mod,
-                       Map<Function, Array<Bool>> model_parameter_taints) {
-  auto object = make_object<TECompilerImpl>(std::move(opt_mod), model_parameter_taints);
+                       Map<Function, Array<Bool>> model_parameter_taints,
+                       Map<Function, Integer> task_weights) {
+  auto object =
+      make_object<TECompilerImpl>(std::move(opt_mod), model_parameter_taints, task_weights);
   data_ = object;
 }
 
 /*! \brief The global TE compiler */
 // TODO(mbs): To be terminated with extreme prejudice.
 TECompiler& TECompiler::Global() {
-  static TECompiler* inst = new TECompiler(
-      make_object<TECompilerImpl>(Optional<IRModule>(), Map<Function, Array<Bool>>()));
+  static TECompiler* inst = new TECompiler(make_object<TECompilerImpl>(
+      Optional<IRModule>(), Map<Function, Array<Bool>>(), Map<Function, Integer>()));
   return *inst;
 }
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.backend.use_auto_scheduler", Bool);
@@ -1013,7 +1040,8 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function func, IRModule module, PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
-        // std::cout << "[Lowering] Fubnc  " << func << std::endl;
+        auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
+        std::cout << "[Lowering] Func  " << func->params << std::endl;
         return Downcast<Function>(lower_te.Mutate(func));
       };
   return CreateFunctionPass(pass_func, 0, "LowerTensorExpr", {});
@@ -1249,8 +1277,9 @@ void UpdateFunctionMetadata(BaseFunc func,
 IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn process_fn,
                  SEScope host_se_scope) {
   auto parameter_taints = ModelParameterTaintAnalysis(module);
+  auto control_flow_weights = InferTaskWeights(module);
 
-  TECompiler compiler(module, parameter_taints);
+  TECompiler compiler(module, parameter_taints, control_flow_weights);
 
   // TODO(mbs): This is all unnecessarily convoluted. Better would be to accumulate the rewritten
   // module as we go (including rewritten Functions, lowered primitives, and runtime modules

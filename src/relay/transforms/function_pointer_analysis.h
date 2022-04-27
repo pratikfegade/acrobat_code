@@ -56,6 +56,8 @@ using CallDepthMap = std::unordered_map<const CallNode*, int>;
 
 std::pair<FunctionSet, CalleesMap> GetRecursiveFunctions(const IRModule& mod);
 
+PreciseCallGraph GetPreciseCallGraph(const IRModule& mod);
+
 CalleesMap GetCalleesMap(const IRModule& mod);
 
 FPAVarStateMap GetVarPointsToMap(const IRModule& mod);

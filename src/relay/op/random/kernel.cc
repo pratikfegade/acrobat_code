@@ -238,6 +238,7 @@ RELAY_REGISTER_OP("random.db_uniform")
     .add_argument("low", "Tensor", "Lower bound of the distribution")
     .add_argument("high", "Tensor", "Higher bound of the distribution")
     .set_attr<TOpPattern>("TOpPattern", kOpaque)
+    .set_attr<TOpIsStateful>("TOpIsStateful", true)
     .add_type_rel("DBUniform", DBUniformRel);
 
 const Op& GetDBRandomUniformOp() {

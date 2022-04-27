@@ -130,12 +130,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
   std::pair<CachedFunc, CachedFunc> Create(const Function& relay_func,
                                            std::function<std::string(std::string)> renamer,
-                                           Array<Bool> model_parameter_taints, bool create_batched,
-                                           bool scattered_kernels) {
-    // std::cout << "Lowering\n"
-    //           << relay_func.get() << " "
-    //           << "\n\n\n"
-    //           << std::endl;
+                                           Array<Bool> model_parameter_taints, int task_weight,
+                                           bool create_batched, bool scattered_kernels) {
+    std::cout << "Lowering " << task_weight << "\n" << relay_func.get() << "\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     int ctr = 0;
     for (Var param : relay_func->params) {
@@ -186,6 +183,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
+    int batched_task_weight = task_weight;
+    int unbatched_task_weight = 1;
+    if (!create_batched) {
+      unbatched_task_weight = task_weight;
+    }
+
     te::Schedule schedule{nullptr};
     tir::PrimFunc prim_func{nullptr};
     // No need to register schedule for device copy op.
@@ -201,7 +204,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         //   std::cout << "[TCC]   Tensor: " << to << std::endl;
         // }
 
-        ObjectRef obj = (*fauto_schedule)(prim_fn_var->name_hint, tensor_outs);
+        ObjectRef obj =
+            (*fauto_schedule)(prim_fn_var->name_hint, tensor_outs, unbatched_task_weight);
         if (obj.defined()) {
           schedule = Downcast<te::Schedule>(obj);
         }
@@ -349,7 +353,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
           // for (auto to : batched_outputs) {
           //   std::cout << "[TCC]    Tensor: " << to << " " << to->op.get() << std::endl;
           // }
-          ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs, vmap);
+          ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs,
+                                            batched_task_weight, vmap);
           if (obj.defined()) {
             batched_schedule = Downcast<te::Schedule>(obj);
           }
@@ -538,9 +543,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
  */
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
-                                              Array<Bool> model_parameter_taints,
+                                              Array<Bool> model_parameter_taints, int task_weight,
                                               bool create_batched, bool scattered_kernels) {
-  return ScheduleBuilder(target).Create(source_func, renamer, model_parameter_taints,
+  return ScheduleBuilder(target).Create(source_func, renamer, model_parameter_taints, task_weight,
                                         create_batched, scattered_kernels);
 }
 
@@ -918,7 +923,7 @@ std::string GetUniqueName(std::string name, std::unordered_map<std::string, int>
 TVM_REGISTER_GLOBAL("relay.backend.LowerToTE").set_body_typed([](Function prim_func) {
   return ScheduleBuilder(tvm::Target("ext_dev"), false)
       .Create(
-          prim_func, [&](std::string name) { return name; }, {}, false, false)
+          prim_func, [&](std::string name) { return name; }, {}, 1, false, false)
       .first;
 });
 

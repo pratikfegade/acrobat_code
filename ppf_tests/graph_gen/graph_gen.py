@@ -16,7 +16,7 @@ from utils import get_ansor_log_file, get_random_tensor
 
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
-mod._import(TVM_HOME + "/ppf_tests/graph_gen/src.rly")
+mod._import(TVM_HOME + "/ppf_tests/graph_gen/graph_gen.rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 main_func = mod["main"]
 
@@ -40,7 +40,7 @@ for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
 
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True

@@ -191,10 +191,16 @@ class CCacheValueNode : public Object {
   CachedFunc batched_cached_func;
   /*! \brief usage statistics */
   int use_count{0};
+  /*! \brief autoscheduler priority weight for the unbatched function */
+  int autosched_weight{0};
+  /*! \brief autoscheduler priority weight for the batched function */
+  int batched_autosched_weight{0};
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("cached_func", &cached_func);
     v->Visit("use_count", &use_count);
+    v->Visit("autosched_weight", &autosched_weight);
+    v->Visit("batched_autosched_weight", &batched_autosched_weight);
     v->Visit("batched_cached_func", &batched_cached_func);
   }
   static constexpr const char* _type_key = "relay.CCacheValue";
@@ -223,7 +229,7 @@ Array<IndexExpr> GetShape(const Array<IndexExpr>& shape);
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
                                               Array<Bool> model_parameter_taints = {},
-                                              bool create_batched = false,
+                                              int task_weight = 1, bool create_batched = false,
                                               bool scattered_kernels = false);
 
 CachedFunc ShapeFuncFor(const Function& prim_func, const Target& target,

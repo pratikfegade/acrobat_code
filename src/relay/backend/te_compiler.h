@@ -143,7 +143,8 @@ class TECompilerNode : public Object {
 class TECompiler : public ObjectRef {
  public:
   explicit TECompiler(Optional<IRModule> opt_mod = {},
-                      Map<Function, Array<Bool>> model_parameter_taints = {});
+                      Map<Function, Array<Bool>> model_parameter_taints = {},
+                      Map<Function, Integer> task_weights = {});
   explicit TECompiler(ObjectPtr<Object> n) : ObjectRef(n) {}
   TECompilerNode* operator->() { return static_cast<TECompilerNode*>(get_mutable()); }
   using ContainerType = TECompilerNode;

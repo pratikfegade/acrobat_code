@@ -162,7 +162,7 @@ def extract_tasks(
             task_inputs_save_to_file=True,
             desc=",".join(func_names),
         )
-        # print(" TASK: ", task.compute_dag)
+        print("EXTRACT TASK: ", func_names, weight)
         tasks.append(task)
         weights.append(int(weight))
 
@@ -202,7 +202,7 @@ class TracingEnvironment:
     def __exit__(self, exc_type, exc_val, exc_tb):
         TracingEnvironment.current = None
 
-    def add_workload_key(self, func_name, workload_key):
+    def add_workload_key(self, func_name, workload_key, weight_incr=1):
         """Add the workload key of a search task.
 
         Parameters
@@ -213,13 +213,13 @@ class TracingEnvironment:
         workload_key: str
             The workload key of a task.
         """
-        # print("   Adding key", func_name, workload_key, len(self.wkl_key_to_weight))
+        print("ADDING KEY", func_name, workload_key, weight_incr, flush=True)
         self.func_name_to_wkl_key[func_name] = workload_key
         if workload_key not in self.wkl_key_to_weight:
             self.wkl_key_to_weight[workload_key] = (0, set())
         weight, func_names = self.wkl_key_to_weight[workload_key]
         func_names.add(func_name)
-        self.wkl_key_to_weight[workload_key] = (weight + 1, func_names)
+        self.wkl_key_to_weight[workload_key] = (weight + weight_incr, func_names)
 
     def add_workload_input_names(self, workload_key, input_names):
         """Add special task inputs to this workload.
@@ -311,7 +311,7 @@ def traverse_to_get_io_tensors(outs):
 
 
 @tvm._ffi.register_func("auto_scheduler.relay_integration.auto_schedule_topi_compute")
-def auto_schedule_topi(func_name, outs, vmap={}):
+def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
     """Use auto-scheduler to schedule any topi compute function.
 
     Note: This is used internally for relay integration. Do
@@ -389,7 +389,7 @@ def auto_schedule_topi(func_name, outs, vmap={}):
     if env.tracing_mode in [TracingMode.EXTRACT_TASK, TracingMode.EXTRACT_COMPLEX_TASK_ONLY]:
         # in the task extraction mode
         if has_complex_op or env.tracing_mode == TracingMode.EXTRACT_TASK:
-            env.add_workload_key(func_name, key)
+            env.add_workload_key(func_name, key, weight_incr=weight)
             input_map = prepare_input_map(io_tensors)
             if input_map:
                 env.add_workload_input_names(key, list(input_map.values()))
@@ -431,7 +431,7 @@ def te_compiler_update_weights(function_weights):
     """
     env = TracingEnvironment.current
     if env is not None:
-        # print("Resetting the map")
+        print("Resetting the map")
         # Override this map with the weights in the TE compiler.
         env.wkl_key_to_weight = {}
 

@@ -105,7 +105,7 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     }
   }
 
-  FunctionSet GetRecursiveFunctions() {
+  PreciseCallGraph GetPreciseCallGraph() {
     PreciseCallGraph call_graph;
     for (auto kv : mod_->functions) {
       if (auto fn = kv.second.as<FunctionNode>()) {
@@ -120,11 +120,16 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
             for (auto kvkv : callees_per_context) {
               callees.insert(kvkv.second.begin(), kvkv.second.end());
             }
-            call_graph[fn] = callees;
+            call_graph[fn].insert(callees.begin(), callees.end());
           }
         });
       }
     }
+    return call_graph;
+  }
+
+  FunctionSet GetRecursiveFunctions() {
+    auto call_graph = GetPreciseCallGraph();
 
     FunctionSet recursive_functions;
     for (auto kv : mod_->functions) {
@@ -395,6 +400,12 @@ std::pair<FunctionSet, CalleesMap> GetRecursiveFunctions(const IRModule& mod) {
   auto recursive_functions = analysis.GetRecursiveFunctions();
   auto callees_map = analysis.GetCalleesMap();
   return std::make_pair(recursive_functions, callees_map);
+}
+
+PreciseCallGraph GetPreciseCallGraph(const IRModule& mod) {
+  FunctionPointerAnalysis analysis(mod);
+  analysis.PerformAnalysis();
+  return analysis.GetPreciseCallGraph();
 }
 
 CalleesMap GetCalleesMap(const IRModule& mod) {
