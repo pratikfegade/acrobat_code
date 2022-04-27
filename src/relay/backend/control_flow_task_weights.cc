@@ -81,13 +81,13 @@ class TarjansAlgorithm {
       UFunctionSet scc;
       while (stk.top() != u) {
         poppedItem = stk.top();
-        std::cout << func_name_map_[poppedItem] << " " << poppedItem << " ";
+        // std::cout << func_name_map_[poppedItem] << " " << poppedItem << " ";
         scc.insert(poppedItem);
         stkItem[poppedItem] = false;
         stk.pop();
       }
       poppedItem = stk.top();
-      std::cout << func_name_map_[poppedItem] << " " << poppedItem << std::endl;
+      // std::cout << func_name_map_[poppedItem] << " " << poppedItem << std::endl;
       scc.insert(poppedItem);
       stkItem[poppedItem] = false;
       stk.pop();
@@ -141,20 +141,21 @@ void AssignLevelsSCC(std::vector<std::unordered_set<int>>& scc_graph, std::vecto
 }  // namespace
 
 Map<Function, Integer> InferTaskWeights(const IRModule& mod) {
-  std::cout << "Determining weights" << std::endl;
+  // std::cout << "Determining weights" << std::endl;
   std::unordered_map<const BaseFuncNode*, std::string> func_name_map;
   for (auto kv : mod->functions) {
     func_name_map[kv.second.get()] = kv.first->name_hint;
   }
 
   auto call_graph = GetPreciseCallGraph(mod);
-  std::cout << "[SCC] CALL GRAPH" << std::endl;
-  for (auto kv : call_graph) {
-    std::cout << "[SCC] " << func_name_map[kv.first] << std::endl;
-    for (auto fn : kv.second) {
-      std::cout << "[SCC]   " << func_name_map[fn] << std::endl;
-    }
-  }
+
+  // std::cout << "[SCC] CALL GRAPH" << std::endl;
+  // for (auto kv : call_graph) {
+  //   std::cout << "[SCC] " << func_name_map[kv.first] << std::endl;
+  //   for (auto fn : kv.second) {
+  //     std::cout << "[SCC]   " << func_name_map[fn] << std::endl;
+  //   }
+  // }
 
   TarjansAlgorithm scc_creator(call_graph, func_name_map);
   scc_creator.Run();
@@ -178,25 +179,25 @@ Map<Function, Integer> InferTaskWeights(const IRModule& mod) {
     }
   }
 
-  std::cout << "[SCC] SCC GRAPH" << std::endl;
-  for (size_t i = 0; i < sccs.size(); ++i) {
-    std::cout << "[SCC] " << i << ": "
-              << support::PrintVector(std::vector<int>(scc_graph[i].begin(), scc_graph[i].end()))
-              << std::endl;
-  }
+  // std::cout << "[SCC] SCC GRAPH" << std::endl;
+  // for (size_t i = 0; i < sccs.size(); ++i) {
+  //   std::cout << "[SCC] " << i << ": "
+  //             << support::PrintVector(std::vector<int>(scc_graph[i].begin(), scc_graph[i].end()))
+  //             << std::endl;
+  // }
 
   int entry_scc = node2scc[mod->Lookup("main").as<FunctionNode>()];
   std::vector<bool> visited(sccs.size(), false);
   std::vector<int> weights(sccs.size(), 0);
   AssignLevelsSCC(scc_graph, visited, weights, entry_scc);
 
-  std::cout << "[SCC] SCC WEIGHTS" << std::endl;
-  for (size_t i = 0; i < sccs.size(); ++i) {
-    std::cout << "[SCC] " << i << " SCC " << weights[i] << std::endl;
-    for (auto fn : sccs[i]) {
-      std::cout << "[SCC]     " << func_name_map[fn] << std::endl;
-    }
-  }
+  // std::cout << "[SCC] SCC WEIGHTS" << std::endl;
+  // for (size_t i = 0; i < sccs.size(); ++i) {
+  //   std::cout << "[SCC] " << i << " SCC " << weights[i] << std::endl;
+  //   for (auto fn : sccs[i]) {
+  //     std::cout << "[SCC]     " << func_name_map[fn] << std::endl;
+  //   }
+  // }
 
   std::unordered_map<NodeT, int> prim_func_weights;
   for (size_t i = 0; i < sccs.size(); ++i) {

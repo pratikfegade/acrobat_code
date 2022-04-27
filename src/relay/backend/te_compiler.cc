@@ -1041,7 +1041,7 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
       [=](Function func, IRModule module, PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
         auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
-        std::cout << "[Lowering] Func  " << func->params << std::endl;
+        // std::cout << "[Lowering] Func  " << func->params << std::endl;
         return Downcast<Function>(lower_te.Mutate(func));
       };
   return CreateFunctionPass(pass_func, 0, "LowerTensorExpr", {});

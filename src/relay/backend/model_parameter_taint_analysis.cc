@@ -82,12 +82,16 @@ using MPTAInvokeTVMOpDepthMap =
 using MPTAFunctionStateMap =
     std::unordered_map<MPTAFunctionKey, std::vector<bool>, PairHash, PairEquals>;
 
-std::vector<bool> CreateStateForType(const Type& type, bool value) {
+int GetTypeSize(const Type& type) {
   size_t state_size = 1;
   if (auto ttn = type.as<TupleTypeNode>()) {
     state_size = ttn->fields.size();
   }
-  return ConstructBoolArray(state_size, value);
+  return state_size;
+}
+
+std::vector<bool> CreateStateForType(const Type& type, bool value) {
+  return ConstructBoolArray(GetTypeSize(type), value);
 }
 
 class MPTAnalysis : public MPTABaseExprFunctor {
@@ -176,6 +180,8 @@ class MPTAnalysis : public MPTABaseExprFunctor {
         }
         auto arg_state = merged_var_states[arg.get()];
 
+        ICHECK_EQ(arg_state.size(), GetTypeSize(arg->checked_type())) << arg->checked_type();
+
         for (auto s : arg_state) {
           param_states.push_back(Bool(s));
         }
@@ -190,8 +196,8 @@ class MPTAnalysis : public MPTABaseExprFunctor {
         param_states.push_back(Bool(s));
       }
 
-      // std::cout << "[MPTA] Function " << func_name_map_[fn.get()] << " " << fn.get() << " "
-      // << support::PrintVector(param_names) << " " << param_states << std::endl;
+      std::cout << "[MPTA] Function " << fn << " " << support::PrintVector(param_names) << " "
+                << param_states << std::endl;
       results_map.Set(fn, param_states);
     }
 
@@ -243,6 +249,11 @@ class MPTAnalysis : public MPTABaseExprFunctor {
   std::vector<bool> Add(const MPTAVarKey& var, const std::vector<bool>& to_add,
                         const std::string& reason) {
     auto res = Add<MPTAVarKey, MPTAVarStateMap>(var_states_, var, to_add);
+    ICHECK_EQ(GetTypeSize(var.second->checked_type()), to_add.size())
+        << "[MPTA]    Setting " << func_name_map_[var.first] << " " << var.second->vid->name_hint
+        << " " << support::PrintVector(to_add) << " " << support::PrintVector(res) << " " << reason
+        << " " << var.second->checked_type() << std::endl;
+
     // std::cout << "[MPTA]    Setting " << func_name_map_[var.first] << " "
     // << var.second->vid->name_hint << " " << support::PrintVector(to_add) << " "
     // << support::PrintVector(res) << " " << reason << " " << changed_ << std::endl;
@@ -332,7 +343,8 @@ class MPTAnalysis : public MPTABaseExprFunctor {
       bool old_changed = false;
       std::swap(old_changed, changed_);
       auto param_key = VarKey(lambda_context, callee->params[0].get());
-      auto res = Add(param_key, {false}, "Map list param arg");
+      auto res = Add(param_key, CreateStateForType(callee->params[0]->checked_type(), false),
+                     "Map list param arg");
       std::swap(old_changed, changed_);
       changed_ = changed_ || old_changed;
       args_changed = args_changed || old_changed;
@@ -342,11 +354,11 @@ class MPTAnalysis : public MPTABaseExprFunctor {
         visited_functions_.insert(fn_key);
         auto res = VisitBody(callee_fn);
         res = Add(fn_key, res);
-        ret = Merge(res, ret).first;
+        ret = Merge({Collapse(res)}, ret).first;
       } else if (visited) {
         auto it = function_states_.find(fn_key);
         if (it != function_states_.end()) {
-          ret = Merge(it->second, ret).first;
+          ret = Merge({Collapse(it->second)}, ret).first;
         }
       }
     }
