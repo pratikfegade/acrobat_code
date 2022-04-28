@@ -111,13 +111,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
 
         auto start = std::chrono::system_clock::now();
 
-        if (VMDBProfiler::DoProfile()) {
-          VMDBProfiler::ProfileHostStartCall("graph_construction");
-        }
         batched_main(input1, input2);
-        if (VMDBProfiler::DoProfile()) {
-          VMDBProfiler::ProfileHostStopCall();
-        }
 
         auto mid = std::chrono::system_clock::now();
 

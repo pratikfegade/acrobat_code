@@ -42,7 +42,7 @@ for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
@@ -88,13 +88,11 @@ def auto_schedule(tune):
         tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                            include_simple_tasks=True)
 
-        print(task_weights)
-        exit(0)
         if tune:
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
             tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
             tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20,
+                num_measure_trials=20000,
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )

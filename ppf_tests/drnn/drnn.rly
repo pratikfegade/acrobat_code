@@ -73,10 +73,10 @@ def @compute_probabilities(
     %p_af_i_split.1 * %vf_bias
   );
 
-  // let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
-  // let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
-  let %have_children = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
-  let %have_sibling = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
+  let %have_children = random.db_uniform(0, 5 - %tree_depth, out_shape=[], out_dtype="int32");
+  let %have_sibling = random.db_uniform(0, 5 - %sibling_depth, out_shape=[], out_dtype="int32");
+  // let %have_children = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
+  // let %have_sibling = random.db_uniform(0, 5, out_shape=[], out_dtype="int32");
   (%x_i, %h_a_i, %h_f_i, %have_children, %have_sibling)
 }
 

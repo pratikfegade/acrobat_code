@@ -905,7 +905,7 @@ class Coarsener : public ExprMutator {
             static_group_depth = std::min(static_group_depth, static_depth);
           }
         } else if (vn->op == GetInvokeTVMOp() && !IsMarkedScalarOp(vn)) {
-          std::cout << "[CG] Marked scalar op " << value << std::endl;
+          // std::cout << "[CG] Marked scalar op " << value << std::endl;
           if (in_static_group) {
             end_group(i);
           }
@@ -989,12 +989,12 @@ class Coarsener : public ExprMutator {
         for (int k = static_cast<int>(call_groups.size()) - 1; k >= 0; --k) {
           auto group = call_groups[k];
 
-          for (auto call : group) {
-            std::cout << PrettyPrint(call) << std::endl;
-          }
+          // for (auto call : group) {
+          //   std::cout << PrettyPrint(call) << std::endl;
+          // }
           std::string name = "prim_func" + std::to_string(prim_func_ctr++);
-          std::cout << "Creating prim function " << name << " " << groups_increment_depth[k]
-                    << std::endl;
+          // std::cout << "Creating prim function " << name << " " << groups_increment_depth[k]
+          // << std::endl;
           auto group_free_vars_set = GetFreeVarsInGroup(group);
           std::vector<Var> group_flattened_free_vars;
           std::vector<Expr> group_call_args_unsorted;
@@ -1046,7 +1046,7 @@ class Coarsener : public ExprMutator {
             }
 
             std::string batched_name = runtime::vm::GetBatchedName(name);
-            std::cout << "Creating batched prim function " << batched_name << std::endl;
+            // std::cout << "Creating batched prim function " << batched_name << std::endl;
             auto batched_res =
                 TIRLowererBatched(mod_, prim_funcs_access_modes_, tuple_var_values,
                                   var_to_var_mapping, batched_name, scattered_kernels_)

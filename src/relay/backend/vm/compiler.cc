@@ -1251,10 +1251,10 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   }
 
   auto arg_modes = context_.module->batched_arg_modes;
-  // std::cout << "[CO] ARGMODES2" << std::endl;
-  // for (auto it : arg_modes) {
-  //   std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
-  // }
+  std::cout << "[CO] ARGMODES" << std::endl;
+  for (auto it : arg_modes) {
+    std::cout << "[CO]  " << it.first->name_hint << " " << it.second << std::endl;
+  }
   // update batched arg modes
   for (auto pair : arg_modes) {
     ICHECK(exec_->primitive_map.count(pair.first->name_hint)) << pair.first->name_hint;
@@ -1476,7 +1476,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::LabelOps());
 
   // lower all functions annotated as "primitive" by FuseOps.
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1521,7 +1521,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

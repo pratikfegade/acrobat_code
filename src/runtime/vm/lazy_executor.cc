@@ -240,7 +240,7 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();
-    VMDBProfiler::ProfileDeviceStartCall("kernel");
+    VMDBProfiler::ProfileDeviceStartCall("reduce_sum");
   }
 #endif
   tvm::contrib::reduce_sum_wrapper(
@@ -283,7 +283,7 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
       VMDBProfiler::ProfileHostStopCall();
-      VMDBProfiler::ProfileDeviceStartCall("kernel");
+      VMDBProfiler::ProfileDeviceStartCall("ukernel_" + std::to_string(func_idx));
     }
 #endif
     TVMRetValue rv;
@@ -324,22 +324,22 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     DLDataType dtype{kDLFloat, 32, 1};
     int scattered_ctr = 0;
 
-    // int num_scattered_args = 0;
-    // for (size_t i = 0; i < arity; ++i) {
-    // num_scattered_args += (arg_modes[i] == kScatter);
-    // }
+    int num_scattered_args = 0;
+    for (size_t i = 0; i < arity; ++i) {
+      num_scattered_args += (arg_modes[i] == kScatter);
+    }
 
-    // void** host_scattered_ptrs = nullptr;
-    // void** device_scattered_ptrs = nullptr;
-    // size_t nbytes_scattered_ptrs = 0;
-    // if (num_scattered_args > 0) {
-    // size_t num_scattered_ptrs = num_scattered_args * batch_size;
-    // nbytes_scattered_ptrs = num_scattered_ptrs * sizeof(void*);
-    // host_scattered_ptrs =
-    // static_cast<void**>(Arena::Current()->allocate_<void*>(num_scattered_ptrs));
-    // device_scattered_ptrs =
-    // static_cast<void**>(allocator->ArenaAlloc(nbytes_scattered_ptrs, 256, dtype).data);
-    // }
+    void** host_scattered_ptrs = nullptr;
+    void** device_scattered_ptrs = nullptr;
+    size_t nbytes_scattered_ptrs = 0;
+    if (num_scattered_args > 0) {
+      size_t num_scattered_ptrs = num_scattered_args * batch_size;
+      nbytes_scattered_ptrs = num_scattered_ptrs * sizeof(void*);
+      host_scattered_ptrs =
+          static_cast<void**>(Arena::Current()->allocate_<void*>(num_scattered_ptrs));
+      device_scattered_ptrs =
+          static_cast<void**>(allocator->ArenaAlloc(nbytes_scattered_ptrs, 256, dtype).data);
+    }
     for (size_t i = 0; i < arity; ++i) {
       switch (arg_modes[i]) {
         case kIgnore: {
@@ -363,29 +363,26 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           break;
         }
         case kScatter: {
-          auto tensor = CreatePointerDLTensor(func_nodes, i, allocator);
-          setter(ctr, tensor);
+          auto arg_host_raw_ptrs = reinterpret_cast<char*>(host_scattered_ptrs) +
+                                   scattered_ctr * batch_size * sizeof(void*);
+          FillInPointers(reinterpret_cast<void**>(arg_host_raw_ptrs), batch_size, func_nodes, i,
+                         allocator);
 
-          // auto arg_host_raw_ptrs = reinterpret_cast<char*>(host_scattered_ptrs) +
-          // scattered_ctr * batch_size * sizeof(void*);
-          // FillInPointers(reinterpret_cast<void**>(arg_host_raw_ptrs), batch_size, func_nodes, i,
-          // allocator);
-
-          // DLTensor* result = Arena::Current()->allocate_<DLTensor>();
-          // {
-          // int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-          // shape_data[0] = batch_size;
-          // auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-          // result->device = accelerator_device;
-          // result->data = reinterpret_cast<void**>(reinterpret_cast<char*>(device_scattered_ptrs)
-          // + scattered_ctr * batch_size * sizeof(void*));
-          // result->strides = nullptr;
-          // result->ndim = 1;
-          // result->dtype = dtype;
-          // result->shape = shape_data;
-          // result->byte_offset = 0;
-          // }
-          // setter(ctr, result);
+          DLTensor* result = Arena::Current()->allocate_<DLTensor>();
+          {
+            int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
+            shape_data[0] = batch_size;
+            auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+            result->device = accelerator_device;
+            result->data = reinterpret_cast<void**>(reinterpret_cast<char*>(device_scattered_ptrs) +
+                                                    scattered_ctr * batch_size * sizeof(void*));
+            result->strides = nullptr;
+            result->ndim = 1;
+            result->dtype = dtype;
+            result->shape = shape_data;
+            result->byte_offset = 0;
+          }
+          setter(ctr, result);
 
           // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(tensor) << " "
           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
@@ -407,29 +404,28 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
       }
     }
 
-    // if (num_scattered_args > 0) {
-    // DLTensor* device_scattered_ptrs_dltensor = Arena::Current()->allocate_<DLTensor>();
-    // {
-    // int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-    // shape_data[0] = batch_size * num_scattered_args;
-    // auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-    // device_scattered_ptrs_dltensor->device = accelerator_device;
-    // device_scattered_ptrs_dltensor->data = device_scattered_ptrs;
-    // device_scattered_ptrs_dltensor->strides = nullptr;
-    // device_scattered_ptrs_dltensor->ndim = 1;
-    // device_scattered_ptrs_dltensor->dtype = dtype;
-    // device_scattered_ptrs_dltensor->shape = shape_data;
-    // device_scattered_ptrs_dltensor->byte_offset = 0;
-    // }
-
-    // ArrayCopyFromBytesAsync(device_scattered_ptrs_dltensor, host_scattered_ptrs,
-    // nbytes_scattered_ptrs);
-    // }
+    if (num_scattered_args > 0) {
+      DLTensor* device_scattered_ptrs_dltensor = Arena::Current()->allocate_<DLTensor>();
+      {
+        int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
+        shape_data[0] = batch_size * num_scattered_args;
+        auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+        device_scattered_ptrs_dltensor->device = accelerator_device;
+        device_scattered_ptrs_dltensor->data = device_scattered_ptrs;
+        device_scattered_ptrs_dltensor->strides = nullptr;
+        device_scattered_ptrs_dltensor->ndim = 1;
+        device_scattered_ptrs_dltensor->dtype = dtype;
+        device_scattered_ptrs_dltensor->shape = shape_data;
+        device_scattered_ptrs_dltensor->byte_offset = 0;
+      }
+      ArrayCopyFromBytesAsync(device_scattered_ptrs_dltensor, host_scattered_ptrs,
+                              nbytes_scattered_ptrs);
+    }
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
       VMDBProfiler::ProfileHostStopCall();
-      VMDBProfiler::ProfileDeviceStartCall("kernel_" + std::to_string(batched_func_idx));
+      VMDBProfiler::ProfileDeviceStartCall("bkernel_" + std::to_string(batched_func_idx));
     }
 #endif
     TVMRetValue rv;
