@@ -449,6 +449,14 @@ Doc RelayTextPrinter::PrintFunc(const Doc& prefix, const relay::Function& fn) {
   for (Var param : fn->params) {
     params.push_back(AllocVar(param));
   }
+  {
+    Doc doc;
+    auto name = fn->GetAttr<String>("db.function_name");
+    if (name) {
+      doc << "db.function_name=" << PrintAttributeValue(name.value());
+      params.push_back(doc);
+    }
+  }
   if (VERBOSE_PRINT) {
     for (const Doc& d : PrintDictAttrs(fn->attrs)) {
       params.push_back(d);

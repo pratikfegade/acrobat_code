@@ -120,6 +120,13 @@ TVM_DLL Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device = fals
                             bool clean_up_prim_funcs = false);
 
 /*!
+ * \brief Name functions for debugging purposes
+ *
+ * \return The Pass
+ */
+TVM_DLL Pass NameAllFunctions();
+
+/*!
  * \brief Split function with huge number of arguments to smaller pieces.
  *
  * \return The pass.

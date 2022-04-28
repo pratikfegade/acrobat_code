@@ -1475,6 +1475,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
 
+  pass_seqs.push_back(transform::NameAllFunctions());
+
   // lower all functions annotated as "primitive" by FuseOps.
   pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",

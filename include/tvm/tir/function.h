@@ -336,6 +336,9 @@ constexpr const char* kDBFoldReduction = "db.fold_reduction";
 /*! \brief Whether or not to increment depth for this call when using
     a depth tracking executor. */
 constexpr const char* kDBIncrementDepth = "db.increment_depth";
+
+/*! \brief Name given to a anonymous lambda for ease of debugging. */
+constexpr const char* kDBFunctionName = "db.function_name";
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm
