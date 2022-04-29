@@ -17,8 +17,6 @@
  * under the License.
  */
 
-#include "model_parameter_taint_analysis.h"
-
 #include <tvm/ir/attrs.h>
 #include <tvm/ir/function.h>
 #include <tvm/relay/analysis.h>
@@ -39,6 +37,7 @@
 #include "../op/memory/on_device.h"
 #include "../transforms/function_pointer_analysis.h"
 #include "../transforms/pass_utils.h"
+#include "model_parameter_taint_analysis.h"
 
 namespace tvm {
 namespace relay {
@@ -97,7 +96,7 @@ ExecutableFunction::ExecutableFunction(Function function, Map<Var, ObjectRef> en
   data_ = std::move(n);
 }
 
-using ExecutableFunctionSet = Map<Function, Bool>;
+using ExecutableFunctionSet = StructuralMap<ExecutableFunction, Bool>;
 
 class FullTaint;
 /*!
@@ -151,7 +150,6 @@ using VarStateMap =
     std::unordered_map<std::pair<ContextT, const VarNode*>, FullTaint, PairHash, PairEquals>;
 using FunctionStateMap =
     std::unordered_map<std::pair<ContextT, const FunctionNode*>, FullTaint, PairHash, PairEquals>;
-using FunctionEnvironmentMap = std::unordered_map<const FunctionNode*, Map<Var, FullTaint>>;
 using OnStackSet =
     std::unordered_set<std::pair<ContextT, const FunctionNode*>, PairHash, PairEquals>;
 
@@ -192,12 +190,12 @@ class TaintAnalysis : public BaseExprFunctor {
           "Main param");
     }
 
-    for (size_t i = 0; i < 10; ++i) {
+    for (size_t i = 0; i < 1; ++i) {
       std::cout << "[MPT] ITERATION " << i << std::endl;
 
       this->Reset();
       type_environment_stack_.push_back(Map<TypeVar, Type>());
-      environment_stack_.push_back(Map<Var, FullTaint>());
+      environment_stack_.push_back(Map<Var, ObjectRef>());
       auto context_fn_key = std::make_pair(GetInitialContext(), main_func.get());
       on_stack_.insert(context_fn_key);
       function_stack_.push_back(main_func);
@@ -458,7 +456,7 @@ class TaintAnalysis : public BaseExprFunctor {
     auto current_environment = environment_stack_.back();
     auto it = current_environment.find(var);
     if (it != current_environment.end()) {
-      auto full_taint = (*it).second;
+      auto full_taint = Downcast<FullTaint>((*it).second);
       if (print) {
         std::cout << "[MPT]  In env " << full_taint->taint << std::endl;
       }
@@ -489,7 +487,7 @@ class TaintAnalysis : public BaseExprFunctor {
 
     auto base_func = mod_->Lookup(GetRef<GlobalVar>(op));
     if (base_func.as<FunctionNode>()) {
-      function_points_to.Set(Downcast<Function>(base_func), Bool(true));
+      function_points_to.Set(ExecutableFunction(Downcast<Function>(base_func)), Bool(true));
     }
     return FullTaint(taint, function_points_to);
   }
@@ -508,29 +506,30 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint VisitExpr_(const FunctionNode* op, ContextT current_context) {
     auto function = GetRef<Function>(op);
     auto free_vars = GetFreeVars(function);
+    Map<Var, ObjectRef> environment;
     for (auto free_var : free_vars) {
-      function_environments_[op].Set(free_var, this->VisitExpr(free_var, current_context));
+      environment.Set(free_var, this->VisitExpr(free_var, current_context));
     }
-
+    ExecutableFunction executable_function = ExecutableFunction(function, environment);
     ExecutableFunctionSet function_points_to;
-    function_points_to.Set(function, Bool(true));
+    function_points_to.Set(executable_function, Bool(true));
     TaintT taint = SingletonArray(false);
     return FullTaint(taint, function_points_to);
   }
 
-  FullTaint VisitBody(const Function& fn, ContextT context, const CallNode* call) {
+  FullTaint VisitBody(const ExecutableFunction& fn, ContextT context, const CallNode* call) {
     Map<TypeVar, Type> type_environment;
-    ICHECK_EQ(fn->type_params.size(), call->type_args.size());
+    ICHECK_EQ(fn->function->type_params.size(), call->type_args.size());
     for (size_t i = 0; i < call->type_args.size(); ++i) {
-      type_environment.Set(fn->type_params[i], call->type_args[i]);
+      type_environment.Set(fn->function->type_params[i], call->type_args[i]);
     }
 
     type_environment_stack_.push_back(type_environment);
-    environment_stack_.push_back(function_environments_[fn.get()]);
-    auto context_fn_key = std::make_pair(context, fn.get());
+    environment_stack_.push_back(fn->environment);
+    auto context_fn_key = std::make_pair(context, fn->function.get());
     on_stack_.insert(context_fn_key);
-    function_stack_.push_back(fn);
-    auto full_taint = this->VisitExpr(fn->body, context);
+    function_stack_.push_back(fn->function);
+    auto full_taint = this->VisitExpr(fn->function->body, context);
     function_stack_.pop_back();
     on_stack_.erase(context_fn_key);
     environment_stack_.pop_back();
@@ -556,10 +555,12 @@ class TaintAnalysis : public BaseExprFunctor {
     auto op_full_taint = this->VisitExpr(op->op, current_context);
     auto callees = op_full_taint->function_points_to;
     Array<FullTaint> callee_taints;
-    // std::cout << "[MPT] Call " << op->op << " " << callees.size() << std::endl;
+    std::cout << "[MPT] Call " << op->op << " " << callees.size() << std::endl;
     for (auto kv : callees) {
-      auto callee_fn = kv.first;
-      // std::cout << "[MPT]  Callee " << GetFunctionName(callee_fn) << std::endl;
+      auto executable_callee = kv.first;
+      auto callee_fn = executable_callee->function;
+      std::cout << "[MPT]  Callee " << GetFunctionName(callee_fn) << " "
+                << executable_callee->environment << std::endl;
 
       //////////////////////////////
       callees_[op].insert(callee_fn.get());
@@ -606,15 +607,15 @@ class TaintAnalysis : public BaseExprFunctor {
                     << callee_return_full_taint->taint << std::endl;
         }
       } else {
-        callee_return_full_taint = VisitBody(callee_fn, callee_context, op);
+        callee_return_full_taint = VisitBody(executable_callee, callee_context, op);
         callee_return_full_taint = Add(callee_fn, callee_context, callee_return_full_taint);
         if (print) {
           std::cout << "[MPT] Return value 2 " << callee_name << " "
                     << callee_return_full_taint->taint << std::endl;
         }
       }
-      auto call_full_taint =
-          ResizeTaint(callee_return_full_taint, callee_fn->ret_type, op->checked_type());
+      auto call_full_taint = ResizeTaint(callee_return_full_taint,
+                                         executable_callee->function->ret_type, op->checked_type());
       callee_taints.push_back(call_full_taint);
     }
 
@@ -701,10 +702,9 @@ class TaintAnalysis : public BaseExprFunctor {
 
   VarStateMap var_states_;
   FunctionStateMap function_states_;
-  FunctionEnvironmentMap function_environments_;
   std::unordered_map<const FunctionNode*, VarSet> free_vars_map_;
   OnStackSet on_stack_;
-  std::vector<Map<Var, FullTaint>> environment_stack_;
+  std::vector<Map<Var, ObjectRef>> environment_stack_;
   std::vector<Map<TypeVar, Type>> type_environment_stack_;
 
   std::vector<Function> function_stack_;
