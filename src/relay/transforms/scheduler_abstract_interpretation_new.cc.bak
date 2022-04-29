@@ -17,36 +17,500 @@
  * under the License.
  */
 
-#include "model_parameter_taint_analysis.h"
-
-#include <tvm/ir/attrs.h>
-#include <tvm/ir/function.h>
+/*!
+ *
+ * \file src/relay/transforms/fuse_ops.cc
+ *
+ * \brief This is a backend-aware optimization pass.
+ *   Fuse necessary ops into a single one.
+ */
 #include <tvm/relay/analysis.h>
-#include <tvm/relay/attrs/annotation.h>
-#include <tvm/relay/attrs/call.h>
-#include <tvm/relay/expr.h>
 #include <tvm/relay/expr_functor.h>
-#include <tvm/relay/op.h>
-#include <tvm/runtime/container/structural_map.h>
-#include <tvm/runtime/device_api.h>
-#include <tvm/runtime/registry.h>
+#include <tvm/relay/op_attr_types.h>
+#include <tvm/relay/transform.h>
 #include <tvm/runtime/vm/dynamic_batching.h>
-#include <tvm/te/schedule.h>
-#include <tvm/te/schedule_pass.h>
+#include <tvm/tir/builtin.h>
+#include <tvm/tir/expr.h>
+#include <tvm/tir/op.h>
+#include <tvm/tir/stmt.h>
 
-#include "../../support/utils.h"
+#include <limits>
+
+#include "../../printer/text_printer.h"
+#include "../../support/arena.h"
 #include "../analysis/call_graph.h"
-#include "../op/memory/on_device.h"
-#include "../transforms/function_pointer_analysis.h"
-#include "../transforms/pass_utils.h"
+#include "../op/annotation/annotation.h"
+#include "../op/memory/memory.h"
+#include "../op/vm/vm.h"
+#include "./function_pointer_analysis.h"
+#include "./pass_utils.h"
+#include "./pattern_utils.h"
 
 namespace tvm {
 namespace relay {
-namespace tec {
+
+using SAIVarKey = std::pair<const FunctionNode*, const VarNode*>;
+using SAIFunctionKey = std::pair<const FunctionNode*, const FunctionNode*>;
+using SAIOpKey = std::pair<const FunctionNode*, const CallNode*>;
+
+using SAIBaseExprFunctor = ExprFunctor<int(const Expr& n)>;
+using SAIVarStateMap = std::unordered_map<SAIVarKey, int, PairHash, PairEquals>;
+using SAIInvokeTVMOpDepthMap = std::unordered_map<SAIOpKey, int, PairHash, PairEquals>;
+using SAIFunctionStateMap = std::unordered_map<SAIFunctionKey, int, PairHash, PairEquals>;
+
+constexpr int MAX_DEPTH_VALUE = 1 << 4;
+class SchedulingAbstractInterpreter : public SAIBaseExprFunctor {
+ public:
+  SchedulingAbstractInterpreter(IRModule& mod, const FunctionSet& recursive_functions,
+                                const CalleesMap& callees_map)
+      : mod_(mod), recursive_functions_(recursive_functions), callees_map_(callees_map) {
+    for (auto kv : mod_->functions) {
+      func_name_map_[kv.second.get()] = kv.first->name_hint;
+      // std::cout << "[FUNC_NAME] " << kv.second.get() << " " << kv.first->name_hint << std::endl;
+    }
+    func_name_map_[nullptr] = "START";
+    stack_.push_back(nullptr);
+
+    if (mod->ContainGlobalVar("map")) {
+      map_fun_node_ = mod->Lookup("map").as<FunctionNode>();
+    }
+  }
+
+  IRModule PerformAnalysis() {
+    auto main_func = Downcast<Function>(mod_->Lookup("main"));
+    for (auto arg : main_func->params) {
+      var_states_[VarKey(nullptr, arg.get())] = 0;
+    }
+
+    auto call_graph = CallGraph(mod_);
+    size_t i = 0;
+    for (; i < max_iterations_; ++i) {
+      // std::cout << "[SAI] ITERATION " << i << std::endl;
+      visited_functions_.clear();
+      changed_ = false;
+      auto entry_func = Downcast<Function>(mod_->Lookup("main"));
+      VisitBody(entry_func);
+      if (!changed_) {
+        break;
+      }
+    }
+
+    std::unordered_map<const VarNode*, int> merged_var_states;
+    for (auto kv : var_states_) {
+      merged_var_states[kv.first.second] =
+          Merge(merged_var_states[kv.first.second], kv.second).first;
+    }
+
+    std::unordered_map<const FunctionNode*, int> merged_function_states;
+    for (auto kv : function_states_) {
+      merged_function_states[kv.first.second] =
+          Merge(merged_function_states[kv.first.second], kv.second).first;
+    }
+
+    CallDepthMap merged_op_depths;
+    for (auto kv : prim_func_call_depths_) {
+      merged_op_depths[kv.first.second] = Merge(merged_op_depths[kv.first.second], kv.second).first;
+    }
+
+    if (false) {
+      for (auto kv : merged_var_states) {
+        std::cout << "[SAI]  Var Depths: " << kv.first->vid->name_hint << " " << kv.second
+                  << std::endl;
+      }
+
+      for (auto kv : merged_function_states) {
+        std::cout << "[SAI]  Function Depths: " << func_name_map_[kv.first] << " " << kv.second
+                  << std::endl;
+      }
+
+      std::cout << "[SAI] Iterations: " << i << std::endl;
+      for (auto kv : merged_op_depths) {
+        if (kv.second < MAX_DEPTH_VALUE) {
+          std::cout << "[SAI]  Call Depths: " << PrettyPrint(GetRef<Expr>(kv.first)) << " "
+                    << kv.second << std::endl;
+        }
+      }
+    }
+
+    class AddDepthToCalls : public ExprMutator {
+     public:
+      AddDepthToCalls(const CallDepthMap& merged_op_depths) : merged_op_depths_(merged_op_depths) {}
+
+      Expr VisitExpr_(const CallNode* op) {
+        auto it = merged_op_depths_.find(op);
+        auto call = ExprMutator::VisitExpr_(op);
+        if (it != merged_op_depths_.end() && it->second < MAX_DEPTH_VALUE) {
+          auto new_op = call.as<CallNode>();
+          auto depth = it->second;
+          ICHECK(new_op->attrs.defined() && new_op->attrs.as<DictAttrsNode>());
+          auto attrs = Downcast<DictAttrs>(new_op->attrs);
+          auto new_attrs = attrs.WithAttr(tir::attr::kDBGraphDepth, Integer(depth));
+          return Call(new_op->op, new_op->args, new_attrs, new_op->type_args, new_op->span);
+        }
+        return call;
+      }
+
+      const CallDepthMap& merged_op_depths_;
+    };
+
+    AddDepthToCalls mutator(merged_op_depths);
+    Map<GlobalVar, Function> new_funcs;
+    for (const auto& it : mod_->functions) {
+      if (it.second.as<FunctionNode>()) {
+        auto func = Downcast<Function>(it.second);
+        func = Downcast<Function>(mutator(func));
+        new_funcs.Set(it.first, func);
+      }
+    }
+    for (auto pair : new_funcs) {
+      mod_->Add(pair.first, pair.second, true);
+    }
+
+    return mod_;
+  }
+
+ private:
+  const FunctionNode* GetCurrentContext() { return stack_[stack_.size() - 2]; }
+
+  const FunctionNode* GetCurrentFunction() { return stack_.back(); }
+
+  std::pair<int, bool> Merge(const int& vals1, const int& vals2) {
+    bool changed = false;
+    int result = std::max(vals1, vals2);
+    if (result != vals1) {
+      changed = true;
+    }
+    return std::make_pair(result, changed);
+  }
+
+  int Collapse(const int& vals) { return vals; }
+
+  template <typename T, typename MapType>
+  int Add(MapType& map, const T& key, const int& to_add) {
+    auto it = map.find(key);
+    if (it == map.end()) {
+      map[key] = to_add;
+      changed_ = true;
+    } else {
+      auto res = Merge(map[key], to_add);
+      map[key] = res.first;
+      changed_ |= res.second;
+    }
+    return map.at(key);
+  }
+
+  int Add(const SAIVarKey& var, const int& to_add, const std::string& reason) {
+    // if (to_add == MAX_DEPTH_VALUE) {
+    // std::cout << "Capping " << func_name_map_[var.first] << " " << var.second->vid->name_hint
+    // << " " << reason << std::endl;
+    // }
+    return Add<SAIVarKey, SAIVarStateMap>(var_states_, var, to_add);
+  }
+
+  int Add(const SAIFunctionKey& func, const int& to_add) {
+    return Add<SAIFunctionKey, SAIFunctionStateMap>(function_states_, func, to_add);
+  }
+
+  SAIVarKey VarKey(const FunctionNode* ctx, const VarNode* var) { return std::make_pair(ctx, var); }
+
+  SAIFunctionKey FunctionKey(const FunctionNode* ctx, const FunctionNode* func) {
+    return std::make_pair(ctx, func);
+  }
+
+  SAIOpKey OpKey(const FunctionNode* ctx, const CallNode* op) { return std::make_pair(ctx, op); }
+
+  int CappedIncr(int n) {
+    if (n >= MAX_DEPTH_VALUE) {
+      return n;
+    } else {
+      ICHECK_LE(static_cast<long>(n) + static_cast<long>(1), static_cast<long>(MAX_DEPTH_VALUE));
+      return n + 1;
+    }
+  }
+
+  int VisitBody(const Function& func) {
+    stack_.push_back(func.get());
+    auto res = VisitExpr(func->body);
+    stack_.pop_back();
+    return res;
+  }
+
+  int VisitExpr_(const ConstantNode* op) { return 0; }
+
+  int VisitExpr_(const TupleNode* op) {
+    int tuple_depth = 0;
+    for (size_t i = 0; i < op->fields.size(); ++i) {
+      tuple_depth = Merge(tuple_depth, VisitExpr(op->fields[i])).first;
+    }
+    return tuple_depth;
+  }
+
+  int VisitExpr_(const VarNode* op) {
+    if (function_environments_[GetCurrentFunction()].count(op)) {
+      return function_environments_[GetCurrentFunction()][op];
+    }
+
+    auto key = VarKey(GetCurrentContext(), op);
+    auto var = GetRef<Var>(op);
+    auto it = var_states_.find(key);
+    if (it == var_states_.end()) {
+      var_states_[key] = 0;
+      changed_ = true;
+    }
+    return var_states_[key];
+  }
+
+  int VisitExpr_(const GlobalVarNode* op) { return 0; }
+
+  int VisitExpr_(const FunctionNode* op) {
+    auto free_vars = FreeVarsDedup(op->body);
+    for (auto param : op->params) {
+      free_vars.erase(param);
+    }
+    int depth = 0;
+    for (auto var : free_vars) {
+      auto res = VisitExpr(var);
+      depth = Merge(depth, res).first;
+
+      int old_val = function_environments_[op][var.get()];
+      auto merge_res = Merge(old_val, res);
+      function_environments_[op][var.get()] = merge_res.first;
+      // std::cout << "[SAI] FuncEnv " << var->vid->name_hint << " " << var.get() << " "
+      // << merge_res.first << " " << function_environments_[op][var.get()] << std::endl;
+      changed_ = changed_ || merge_res.second;
+    }
+    return depth;
+  }
+
+  bool IsMapFuncInModule() { return map_fun_node_ != nullptr; }
+
+  const FunctionNode* GetMapFuncNode() { return map_fun_node_; }
+
+  int VisitMapBody(const int input_depth, const int lambda_depth, const FunctionNode* map_context) {
+    auto map_fn_node = GetMapFuncNode();
+    auto lambda_var = map_fn_node->params[0];
+    FunctionSet lambda_callees;
+    PostOrderVisit(map_fn_node->body, [&](const Expr& expr) {
+      if (auto cn = expr.as<CallNode>()) {
+        if (cn->op == lambda_var) {
+          auto it = callees_map_.find(OpKey(map_context, cn));
+          if (it != callees_map_.end()) {
+            auto callees = it->second;
+            lambda_callees.insert(callees.begin(), callees.end());
+          }
+        }
+      }
+    });
+
+    stack_.push_back(map_fn_node);
+
+    auto lambda_context = map_fn_node;
+    int ret = 0;
+    for (auto callee : lambda_callees) {
+      auto name = func_name_map_[callee];
+      auto callee_fn = GetRef<Function>(callee);
+      ICHECK_EQ(callee->params.size(), 1);
+      auto fn_key = FunctionKey(lambda_context, callee);
+
+      bool args_changed = false;
+      bool old_changed = false;
+      std::swap(old_changed, changed_);
+      auto param_key = VarKey(lambda_context, callee->params[0].get());
+      auto res = Add(param_key, input_depth, "Map list param arg");
+      std::swap(old_changed, changed_);
+      changed_ = changed_ || old_changed;
+      args_changed = args_changed || old_changed;
+
+      bool visited = visited_functions_.count(fn_key);
+      if (args_changed || !visited) {
+        visited_functions_.insert(fn_key);
+        auto res = VisitBody(callee_fn);
+        res = Add(fn_key, res);
+        ret = Merge(res, ret).first;
+      } else if (visited) {
+        auto it = function_states_.find(fn_key);
+        if (it != function_states_.end()) {
+          ret = Merge(it->second, ret).first;
+        }
+      }
+    }
+    stack_.pop_back();
+    return ret;
+  }
+
+  int VisitExpr_(const CallNode* op) {
+    auto on_device_props = GetOnDeviceProps(op);
+    if (on_device_props.body.defined()) {
+      return VisitExpr(on_device_props.body);
+    }
+
+    if (op->op == GetInvokeTVMOp()) {
+      auto callee_prim_func = mod_->Lookup(Downcast<GlobalVar>(op->args[0]));
+
+      auto inputs_depth = VisitExpr(op->args[1]);
+
+      auto max_inputs_depth = Collapse(inputs_depth);
+      auto output_depth = CappedIncr(max_inputs_depth);
+      auto outputs_tuple = op->args[2].as<TupleNode>();
+      for (auto output : outputs_tuple->fields) {
+        ICHECK(output.as<VarNode>());
+        auto var = Downcast<Var>(output);
+        auto res = Add(VarKey(GetCurrentContext(), var.get()), output_depth, "OpOutput");
+      }
+      prim_func_call_depths_[OpKey(GetCurrentContext(), op)] =
+          std::max(prim_func_call_depths_[OpKey(GetCurrentContext(), op)], max_inputs_depth);
+      return output_depth;
+    } else if (op->op.as<OpNode>()) {
+      return 0;
+    } else if (op->op.as<ConstructorNode>()) {
+      int args_depth = 0;
+      for (auto arg : op->args) {
+        args_depth = Merge(args_depth, VisitExpr(arg)).first;
+      }
+      return args_depth;
+    } else {
+      auto callee_context = GetCurrentFunction();
+      auto it = callees_map_.find(OpKey(GetCurrentContext(), op));
+      if (it == callees_map_.end()) {
+        for (auto kv : callees_map_) {
+          std::cout << func_name_map_[kv.first.first] << " " << kv.first.second->op << std::endl;
+        }
+      }
+      ICHECK(it != callees_map_.end())
+          << func_name_map_[GetCurrentContext()] << " " << GetCurrentContext() << " " << op->op;
+      auto callees = it->second;
+      bool callee_may_be_recursive = false;
+
+      int ret = 0;
+      for (auto callee : callees) {
+        if (IsMapFuncInModule() && callee == GetMapFuncNode()) {
+          auto lambda_state = VisitExpr(op->args[0]);
+          auto list_state = VisitExpr(op->args[1]);
+          return VisitMapBody(list_state, lambda_state, GetCurrentFunction());
+        }
+
+        auto name = func_name_map_[callee];
+        bool print = false;  //(name == "map");
+        if (print) {
+          std::cout << "[SAI]  map call " << PrettyPrint(RemoveOnDeviceCalls(GetRef<Expr>(op)))
+                    << std::endl;
+        }
+        auto callee_fn = GetRef<Function>(callee);
+        auto fn_key = FunctionKey(callee_context, callee);
+        bool args_changed = false;
+        auto op_state = VisitExpr(op->op);
+        for (size_t i = 0; i < op->args.size(); ++i) {
+          auto param_state = VisitExpr(op->args[i]);
+          bool old_changed = false;
+          std::swap(old_changed, changed_);
+          auto param_key = VarKey(callee_context, callee->params[i].get());
+          std::stringstream arg_str;
+          arg_str << op->args[i];
+          auto res = Add(
+              param_key, param_state,
+              "Function param arg " + arg_str.str() + " in " + func_name_map_[GetCurrentContext()]);
+
+          // res = Add(param_key, op_state, "OpState");
+          std::swap(old_changed, changed_);
+          changed_ = changed_ || old_changed;
+          args_changed = args_changed || old_changed;
+          if (print && i == op->args.size() - 1) {
+            std::cout << "[SAI]    map list depth " << param_state << " " << res << " "
+                      << op->args[i] << " " << callee->params[i] << std::endl;
+          }
+        }
+
+        bool visited = visited_functions_.count(fn_key);
+        int path = -1;
+        if (args_changed || !visited) {
+          path = 1;
+          visited_functions_.insert(fn_key);
+          auto res = VisitBody(callee_fn);
+          res = Add(fn_key, res);
+          ret = Merge(res, ret).first;
+        } else if (visited) {
+          auto it = function_states_.find(fn_key);
+          if (it != function_states_.end()) {
+            path = 2;
+            ret = Merge(it->second, ret).first;
+          } else {
+            path = 3;
+          }
+        }
+
+        if (print) {
+          std::cout << "[SAI]   treelstm call ret " << ret << " " << args_changed << " " << path
+                    << std::endl;
+        }
+      }
+      return ret;
+    }
+  }
+
+  int VisitExpr_(const LetNode* op) {
+    auto value_res = VisitExpr(op->value);
+    Add(VarKey(GetCurrentContext(), op->var.get()), value_res, "Let value");
+    return VisitExpr(op->body);
+  }
+
+  int VisitExpr_(const IfNode* op) {
+    VisitExpr(op->cond);
+    auto then_ret = VisitExpr(op->true_branch);
+    auto else_ret = VisitExpr(op->false_branch);
+    return Merge(then_ret, else_ret).first;
+  }
+
+  int VisitExpr_(const OpNode* op) { return 0; }
+
+  int VisitExpr_(const TupleGetItemNode* op) {
+    auto tuple_res = VisitExpr(op->tuple);
+    return tuple_res;
+  }
+
+  int VisitExpr_(const RefCreateNode* op) { return 0; }
+
+  int VisitExpr_(const RefReadNode* op) { return 0; }
+
+  int VisitExpr_(const RefWriteNode* op) { return 0; }
+
+  int VisitExpr_(const ConstructorNode* op) { return 0; }
+
+  int VisitExpr_(const MatchNode* op) {
+    auto input_depth = Collapse(VisitExpr(op->data));
+    std::stringstream data_str;
+    data_str << op->data;
+    int ret = 0;
+    for (auto clause : op->clauses) {
+      auto pattern_vars = CollectPatternVars(clause->lhs);
+      for (auto& var : pattern_vars) {
+        Add(VarKey(GetCurrentContext(), var.get()), input_depth, "Match pattern " + data_str.str());
+      }
+      auto clause_ret = VisitExpr(clause->rhs);
+      ret = Merge(ret, clause_ret).first;
+    }
+    return ret;
+  }
+
+  const IRModule& mod_;
+  const FunctionSet& recursive_functions_;
+  const CalleesMap& callees_map_;
+
+  SAIVarStateMap var_states_;
+  SAIFunctionStateMap function_states_;
+  SAIInvokeTVMOpDepthMap prim_func_call_depths_;
+  std::unordered_set<SAIFunctionKey, PairHash, PairEquals> visited_functions_;
+  size_t max_iterations_{20};
+  bool changed_{false};
+  std::unordered_map<const BaseFuncNode*, std::string> func_name_map_;
+  std::vector<const FunctionNode*> stack_;
+  std::unordered_map<const FunctionNode*, std::unordered_map<const VarNode*, int>>
+      function_environments_;
+  const FunctionNode* map_fun_node_{nullptr};
+};
 
 namespace {
 using ContextT = const Object*;
-using TaintT = Array<Bool>;
+using TaintT = Integer;
 using VarSet = std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>;
 
 using FunctionSet = Map<Function, Bool>;
@@ -138,8 +602,7 @@ class TaintAnalysis : public BaseExprFunctor {
     ICHECK_EQ(main_func->type_params.size(), 0);
     for (auto param : main_func->params) {
       ICHECK(!param->checked_type().as<FuncTypeNode>());
-      Add(param, GetInitialContext(),
-          FullTaint(CreateStateForType(param->checked_type(), false), FunctionSet()), "Main param");
+      Add(param, GetInitialContext(), FullTaint(Integer(0), FunctionSet()), "Main param");
     }
 
     for (size_t i = 0; i < 10; ++i) {
@@ -158,28 +621,12 @@ class TaintAnalysis : public BaseExprFunctor {
       type_environment_stack_.pop_back();
     }
 
-    // for (auto kv : callees_) {
-    //   std::cout << "[MPT] CALLEE: " << kv.first->op << std::endl;
-    //   for (auto fn : kv.second) {
-    //     std::cout << "[MPT]   " << GetFunctionName(GetRef<Function>(fn)) << std::endl;
-    //   }
-    // }
-
     std::unordered_map<const VarNode*, FullTaint> merged_var_states;
     for (auto kv : var_states_) {
       auto merged_taint = kv.second;
-      bool print = kv.first.second->vid->name_hint == "xsm";
-      if (print) {
-        std::cout << "[MPT] CVar " << kv.first.second << " " << kv.first.second->vid->name_hint
-                  << " " << kv.second->taint << std::endl;
-      }
       auto it = merged_var_states.find(kv.first.second);
       if (it != merged_var_states.end()) {
         merged_taint = Merge(Array<FullTaint>({it->second, kv.second}));
-        if (print) {
-          std::cout << "[MPT]  Merging with " << it->second->taint << " " << merged_taint->taint
-                    << std::endl;
-        }
       }
       merged_var_states[kv.first.second] = merged_taint;
     }
@@ -195,52 +642,7 @@ class TaintAnalysis : public BaseExprFunctor {
       merged_function_states[kv.first.second] = merged_taint;
     }
 
-    if (true) {
-      // for (auto kv : merged_var_states) {
-      // std::cout << "[MPTA]  Merged Var: " << kv.first->vid->name_hint << " " << kv.second->taint
-      // << std::endl;
-      // }
-
-      // for (auto kv : merged_function_states) {
-      // std::cout << "[MPTA]  Function Depths: " << func_name_map_[kv.first] << " "
-      // << support::PrintVector(kv.second) << std::endl;
-      // }
-    }
-
-    Map<Function, Array<Bool>> results_map;
-    for (auto kv : merged_function_states) {
-      auto fn = GetRef<Function>(kv.first);
-      Array<Bool> param_states;
-      for (auto arg : fn->params) {
-        auto it = merged_var_states.find(arg.get());
-        if (it == merged_var_states.end()) {
-          merged_var_states[arg.get()] =
-              FullTaint(CreateStateForType(arg->checked_type(), false), FunctionSet());
-        }
-        auto arg_state = merged_var_states[arg.get()]->taint;
-
-        ICHECK_EQ(arg_state.size(), GetTypeSize(arg->checked_type())) << arg->checked_type();
-
-        for (auto s : arg_state) {
-          param_states.push_back(s);
-        }
-      }
-      auto iit = merged_function_states.find(fn.get());
-      if (iit == merged_function_states.end()) {
-        merged_function_states[fn.get()] =
-            FullTaint(CreateStateForType(fn->ret_type, false), FunctionSet());
-      }
-      auto fn_state = merged_function_states[fn.get()]->taint;
-      for (auto s : fn_state) {
-        param_states.push_back(s);
-      }
-
-      std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " "
-                << param_states << std::endl;
-      results_map.Set(fn, param_states);
-    }
-
-    return results_map;
+    return mod_;
   }
 
  private:
@@ -254,14 +656,8 @@ class TaintAnalysis : public BaseExprFunctor {
     type_environment_stack_.clear();
   }
 
-  Array<Bool> MergeTaints(const Array<Bool>& vals1, const Array<Bool>& vals2) {
-    ICHECK_EQ(vals1.size(), vals2.size());
-    Array<Bool> result;
-    for (size_t i = 0; i < vals1.size(); ++i) {
-      bool new_val = vals1[i].operator bool() && vals2[i].operator bool();
-      result.push_back(Bool(new_val));
-    }
-    return result;
+  TaintT MergeTaints(const TaintT& vals1, const TaintT& vals2) {
+    return TaintT(std::max(vals1.value(), vals2.value()));
   }
 
   FunctionSet MergeFunctionSets(const FunctionSet& set1, const FunctionSet& set2) {
@@ -276,7 +672,7 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   FullTaint Merge(const Array<FullTaint>& full_taints) {
-    TaintT taint = ConstructBoolArray(full_taints[0]->taint.size(), true);
+    TaintT taint = Integer(0);
     FunctionSet function_points_to;
     for (auto& full_taint : full_taints) {
       auto this_taint = full_taint->taint;
@@ -285,14 +681,6 @@ class TaintAnalysis : public BaseExprFunctor {
       function_points_to = MergeFunctionSets(function_points_to, this_function_points_to);
     }
     return FullTaint(taint, function_points_to);
-  }
-
-  Bool CollapseTaint(const Array<Bool>& vals) {
-    bool res = true;
-    for (auto b : vals) {
-      res = res && b.operator bool();
-    }
-    return Bool(res);
   }
 
   template <typename T, typename MapType>
@@ -311,24 +699,10 @@ class TaintAnalysis : public BaseExprFunctor {
 
   FullTaint Add(const Var& var, ContextT current_context, const FullTaint& to_add,
                 const std::string& reason) {
-    ICHECK_EQ(to_add->taint.size(), GetTypeSize(ConcretizeType(var->checked_type())))
-        << var << " " << to_add->taint;
-
-    // bool print = var->checked_type().as<TypeCallNode>() && current_context;
-
-    auto ret = Add<Var, VarStateMap>(var_states_, var, current_context, to_add);
-    // if (print) {
-    //   std::cout << "[MPT] Added var " << current_context << " " << var->vid->name_hint << " "
-    //             << to_add->taint << " " << ret->taint << " "
-    //             << var_states_.at(std::make_pair(current_context, var.get()))->taint <<
-    //             std::endl;
-    // }
-    return ret;
+    return Add<Var, VarStateMap>(var_states_, var, current_context, to_add);
   }
 
   FullTaint Add(const Function& fn, ContextT current_context, const FullTaint& to_add) {
-    ICHECK_EQ(to_add->taint.size(), GetTypeSize(ConcretizeType(fn->ret_type)))
-        << fn << " " << to_add->taint;
     return Add<Function, FunctionStateMap>(function_states_, fn, current_context, to_add);
   }
 
@@ -336,14 +710,10 @@ class TaintAnalysis : public BaseExprFunctor {
     auto key = std::make_pair(context, fn.get());
     auto it = function_states_.find(key);
     if (it == function_states_.end()) {
-      // auto taint = CreateStateForType(ConcretizeType(fn->ret_type), true);
-      auto taint =
-          CreateStateForType(ConcretizeType(fn->ret_type),
-                             fn->GetAttr<String>("db.function_name").value() != "lstm_cell");
+      auto taint = Integer(0);
 
       auto function_points_to = FunctionSet();
       auto full_taint = FullTaint(taint, function_points_to);
-      // function_states_[key] = full_taint;
       return full_taint;
     } else {
       return it->second;
@@ -658,16 +1028,26 @@ class TaintAnalysis : public BaseExprFunctor {
 
   std::vector<Function> function_stack_;
   std::unordered_map<const CallNode*, std::unordered_set<const FunctionNode*>> callees_;
-};
+};  // namespace
 
 }  // namespace
 
-Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod) {
-  TaintAnalysis analysis(mod);
-  auto ret = analysis.PerformAnalysis();
-  return ret;
+IRModule ComputeConstantDepths(IRModule& mod) {
+  std::cout << "[SAI] Starting hoisting" << std::endl;
+  SchedulingAbstractInterpreter analysis(mod);
+  return analysis.PerformAnalysis();
 }
 
-}  // namespace tec
+namespace transform {
+Pass HoistNonSequentialOps() {
+  runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func =
+      [=](IRModule m, PassContext pc) { return ComputeConstantDepths(m); };
+  return CreateModulePass(pass_func, 0, "HoistNonSequentialOps", {});
+}
+
+TVM_REGISTER_GLOBAL("relay._transform.HoistNonSequentialOps").set_body_typed(HoistNonSequentialOps);
+
+}  // namespace transform
+
 }  // namespace relay
 }  // namespace tvm
