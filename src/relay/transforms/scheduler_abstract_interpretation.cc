@@ -570,33 +570,15 @@ using FunctionEnvironmentMap = std::unordered_map<const FunctionNode*, Map<Var, 
 using OnStackSet =
     std::unordered_set<std::pair<ContextT, const FunctionNode*>, PairHash, PairEquals>;
 
-Array<Bool> ConstructBoolArray(size_t size, bool value) {
-  Array<Bool> result;
-  for (size_t i = 0; i < size; ++i) {
-    result.push_back(Bool(value));
-  }
-  return std::move(result);
-}
-
-int GetTypeSize(const Type& type) {
-  size_t state_size = 1;
-  if (auto ttn = type.as<TupleTypeNode>()) {
-    state_size = ttn->fields.size();
-  }
-  return state_size;
-}
-
-Array<Bool> CreateStateForType(const Type& type, bool value) {
-  return ConstructBoolArray(GetTypeSize(type), value);
-}
-
-Array<Bool> SingletonArray(bool value) { return ConstructBoolArray(1, value); }
-
 class TaintAnalysis : public BaseExprFunctor {
  public:
-  TaintAnalysis(const IRModule& mod) : mod_(mod) {}
+  TaintAnalysis(const IRModule& mod) : mod_(mod) {
+    if (mod->ContainGlobalVar("map")) {
+      map_fun_node_ = mod->Lookup("map").as<FunctionNode>();
+    }
+  }
 
-  Map<Function, Array<Bool>> PerformAnalysis() {
+  IRModule PerformAnalysis() {
     auto main_func = Downcast<Function>(mod_->Lookup("main"));
 
     ICHECK_EQ(main_func->type_params.size(), 0);
@@ -609,7 +591,6 @@ class TaintAnalysis : public BaseExprFunctor {
       // std::cout << "[MPT] ITERATION " << i << std::endl;
 
       this->Reset();
-      type_environment_stack_.push_back(Map<TypeVar, Type>());
       environment_stack_.push_back(Map<Var, FullTaint>());
       auto context_fn_key = std::make_pair(GetInitialContext(), main_func.get());
       on_stack_.insert(context_fn_key);
@@ -618,7 +599,6 @@ class TaintAnalysis : public BaseExprFunctor {
       function_stack_.pop_back();
       on_stack_.erase(context_fn_key);
       environment_stack_.pop_back();
-      type_environment_stack_.pop_back();
     }
 
     std::unordered_map<const VarNode*, FullTaint> merged_var_states;
@@ -642,6 +622,52 @@ class TaintAnalysis : public BaseExprFunctor {
       merged_function_states[kv.first.second] = merged_taint;
     }
 
+    std::unordered_map<const CallNode*, Integer> merged_op_depths;
+    for (auto kv : prim_func_call_depths_) {
+      auto it = merged_op_depths.find(kv.first.second);
+      if (it == merged_op_depths.end()) {
+        merged_op_depths[kv.first.second] = kv.second;
+      } else {
+        merged_op_depths[kv.first.second] = MergeTaints(it->second, kv.second);
+      }
+      merged_op_depths[kv.first.second] = MergeTaints(merged_op_depths[kv.first.second], kv.second);
+    }
+
+    class AddDepthToCalls : public ExprMutator {
+     public:
+      AddDepthToCalls(const std::unordered_map<const CallNode*, Integer>& merged_op_depths)
+          : merged_op_depths_(merged_op_depths) {}
+
+      Expr VisitExpr_(const CallNode* op) {
+        auto it = merged_op_depths_.find(op);
+        auto call = ExprMutator::VisitExpr_(op);
+        if (it != merged_op_depths_.end() && it->second->value < MAX_DEPTH_VALUE) {
+          auto new_op = call.as<CallNode>();
+          auto depth = it->second;
+          ICHECK(new_op->attrs.defined() && new_op->attrs.as<DictAttrsNode>());
+          auto attrs = Downcast<DictAttrs>(new_op->attrs);
+          auto new_attrs = attrs.WithAttr(tir::attr::kDBGraphDepth, depth);
+          return Call(new_op->op, new_op->args, new_attrs, new_op->type_args, new_op->span);
+        }
+        return call;
+      }
+
+      const std::unordered_map<const CallNode*, Integer>& merged_op_depths_;
+    };
+
+    AddDepthToCalls mutator(merged_op_depths);
+    Map<GlobalVar, Function> new_funcs;
+    for (const auto& it : mod_->functions) {
+      if (it.second.as<FunctionNode>()) {
+        auto func = Downcast<Function>(it.second);
+        func = Downcast<Function>(mutator(func));
+        new_funcs.Set(it.first, func);
+      }
+    }
+    for (auto pair : new_funcs) {
+      mod_->Add(pair.first, pair.second, true);
+    }
+
     return mod_;
   }
 
@@ -653,11 +679,20 @@ class TaintAnalysis : public BaseExprFunctor {
   void Reset() {
     on_stack_.clear();
     environment_stack_.clear();
-    type_environment_stack_.clear();
+  }
+
+  Integer CappedIncr(Integer n) {
+    if (n->value >= MAX_DEPTH_VALUE) {
+      return n;
+    } else {
+      ICHECK_LE(static_cast<long>(n->value) + static_cast<long>(1),
+                static_cast<long>(MAX_DEPTH_VALUE));
+      return Integer(n->value + 1);
+    }
   }
 
   TaintT MergeTaints(const TaintT& vals1, const TaintT& vals2) {
-    return TaintT(std::max(vals1.value(), vals2.value()));
+    return TaintT(std::max(vals1->value, vals2->value));
   }
 
   FunctionSet MergeFunctionSets(const FunctionSet& set1, const FunctionSet& set2) {
@@ -711,7 +746,6 @@ class TaintAnalysis : public BaseExprFunctor {
     auto it = function_states_.find(key);
     if (it == function_states_.end()) {
       auto taint = Integer(0);
-
       auto function_points_to = FunctionSet();
       auto full_taint = FullTaint(taint, function_points_to);
       return full_taint;
@@ -722,88 +756,42 @@ class TaintAnalysis : public BaseExprFunctor {
 
   ContextT GetInitialContext() { return nullptr; }
 
-  Type ConcretizeType(const Type& type) {
-    // auto current = type;
-    // auto it = type_environment_stack_.rbegin();
-    // while (it != type_environment_stack_.rend()) {
-    //   auto new_type = TypeSubst(current, *it);
-    //   if (new_type.same_as(current)) {
-    //     break;
-    //   }
-    //   current = new_type;
-    //   it++;
-    // }
-    // return current;
-    return type;
-  }
-
-  FullTaint ResizeTaint(const FullTaint& taint, const Type& from, const Type& to) {
-    size_t from_size = GetTypeSize(from);
-    size_t to_size = GetTypeSize(to);
-    if (from_size == to_size) {
-      return taint;
-    }
-    return FullTaint(ConstructBoolArray(to_size, CollapseTaint(taint->taint)),
-                     taint->function_points_to);
-  }
-
   FullTaint VisitExpr_(const ConstantNode* op, ContextT current_context) {
-    auto taint = Array<Bool>({Bool(true)});
+    auto taint = TaintT(0);
     auto function_points_to = FunctionSet();
     return FullTaint(taint, function_points_to);
   }
 
   FullTaint VisitExpr_(const TupleNode* op, ContextT current_context) {
-    TaintT taint;
-    FunctionSet function_points_to;
+    Array<FullTaint> field_taints;
     for (auto field : op->fields) {
-      auto field_full_taint = this->VisitExpr(field, current_context);
-      taint.push_back(CollapseTaint(field_full_taint->taint));
-      function_points_to =
-          MergeFunctionSets(function_points_to, field_full_taint->function_points_to);
+      field_taints.push_back(this->VisitExpr(field, current_context));
     }
-    return FullTaint(taint, function_points_to);
+    return Merge(field_taints);
   }
 
   FullTaint VisitExpr_(const VarNode* op, ContextT current_context) {
-    bool print = false;  // op->checked_type().as<TypeCallNode>();
-
-    if (print) {
-      std::cout << "[MPT] Getting var " << current_context << " " << op->vid->name_hint
-                << std::endl;
-    }
-
     auto var = GetRef<Var>(op);
     auto current_environment = environment_stack_.back();
     auto it = current_environment.find(var);
     if (it != current_environment.end()) {
       auto full_taint = (*it).second;
-      if (print) {
-        std::cout << "[MPT]  In env " << full_taint->taint << std::endl;
-      }
       return full_taint;
     }
 
     auto key = std::make_pair(current_context, op);
     auto iit = var_states_.find(key);
     if (iit == var_states_.end()) {
-      auto taint =
-          FullTaint(CreateStateForType(ConcretizeType(op->checked_type()), true), FunctionSet());
+      auto taint = FullTaint(Integer(0), FunctionSet());
       var_states_[key] = taint;
-      if (print) {
-        std::cout << "[MPT]  Not found" << std::endl;
-      }
       return taint;
     } else {
-      if (print) {
-        std::cout << "[MPT]  Found " << iit->second->taint << std::endl;
-      }
       return iit->second;
     }
   }
 
   FullTaint VisitExpr_(const GlobalVarNode* op, ContextT current_context) {
-    auto taint = Array<Bool>({Bool(false)});
+    auto taint = TaintT(0);
     auto function_points_to = FunctionSet();
 
     auto base_func = mod_->Lookup(GetRef<GlobalVar>(op));
@@ -827,24 +815,24 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint VisitExpr_(const FunctionNode* op, ContextT current_context) {
     auto function = GetRef<Function>(op);
     auto free_vars = GetFreeVars(function);
+    auto function_depth = TaintT(0);
     for (auto free_var : free_vars) {
-      function_environments_[op].Set(free_var, this->VisitExpr(free_var, current_context));
+      auto taint = this->VisitExpr(free_var, current_context);
+      auto it = function_environments_[op].find(free_var);
+      if (it != function_environments_[op].end()) {
+        auto preexisting_taint = (*it).second;
+        taint = Merge(Array<FullTaint>({taint, preexisting_taint}));
+      }
+      function_depth = MergeTaints(function_depth, taint->taint);
+      function_environments_[op].Set(free_var, taint);
     }
 
     FunctionSet function_points_to;
     function_points_to.Set(function, Bool(true));
-    TaintT taint = SingletonArray(false);
-    return FullTaint(taint, function_points_to);
+    return FullTaint(function_depth, function_points_to);
   }
 
-  FullTaint VisitBody(const Function& fn, ContextT context, const CallNode* call) {
-    Map<TypeVar, Type> type_environment;
-    ICHECK_EQ(fn->type_params.size(), call->type_args.size());
-    for (size_t i = 0; i < call->type_args.size(); ++i) {
-      type_environment.Set(fn->type_params[i], call->type_args[i]);
-    }
-
-    type_environment_stack_.push_back(type_environment);
+  FullTaint VisitBody(const Function& fn, ContextT context) {
     environment_stack_.push_back(function_environments_[fn.get()]);
     auto context_fn_key = std::make_pair(context, fn.get());
     on_stack_.insert(context_fn_key);
@@ -853,8 +841,51 @@ class TaintAnalysis : public BaseExprFunctor {
     function_stack_.pop_back();
     on_stack_.erase(context_fn_key);
     environment_stack_.pop_back();
-    type_environment_stack_.pop_back();
     return full_taint;
+  }
+
+  bool IsMapFuncInModule() { return map_fun_node_ != nullptr; }
+
+  const FunctionNode* GetMapFuncNode() { return map_fun_node_; }
+
+  ContextT GetMapLambdaContext(ContextT map_calling_context) {
+    return reinterpret_cast<ContextT>(
+        0x1000000000000000 | reinterpret_cast<uint64_t>(const_cast<Object*>(map_calling_context)));
+  }
+
+  FullTaint VisitMapBody(const CallNode* map_call, ContextT map_calling_context) {
+    auto map_fn_node = GetMapFuncNode();
+    auto map_lambda_var = map_fn_node->params[0];
+    auto map_list_var = map_fn_node->params[1];
+
+    auto map_list_taint = this->VisitExpr(map_list_var, map_calling_context);
+    auto lambda_callees = this->VisitExpr(map_lambda_var, map_calling_context)->function_points_to;
+    auto lambda_calling_context = GetMapLambdaContext(map_calling_context);
+
+    Array<FullTaint> callee_taints;
+    for (auto kv : lambda_callees) {
+      auto callee_fn = kv.first;
+      ICHECK_EQ(callee_fn->params.size(), 1);
+
+      {
+        auto param = callee_fn->params[0];
+        ICHECK(!param->checked_type().as<FuncTypeNode>());
+        auto lambda_arg_full_taint = map_list_taint;
+        auto lambda_param_full_taint = lambda_arg_full_taint;
+        Add(param, lambda_calling_context, lambda_param_full_taint, "map lambda param");
+      }
+
+      FullTaint callee_full_taint;
+      if (on_stack_.count(std::make_pair(lambda_calling_context, callee_fn.get()))) {
+        callee_full_taint = GetOrCreateFunctionState(callee_fn, lambda_calling_context);
+      } else {
+        callee_full_taint = VisitBody(callee_fn, lambda_calling_context);
+        callee_full_taint = Add(callee_fn, lambda_calling_context, callee_full_taint);
+      }
+      callee_taints.push_back(callee_full_taint);
+    }
+
+    return Merge(callee_taints);
   }
 
   FullTaint VisitExpr_(const CallNode* op, ContextT current_context) {
@@ -863,10 +894,38 @@ class TaintAnalysis : public BaseExprFunctor {
       return this->VisitExpr(on_device_props.body, current_context);
     }
 
-    if (op->op.as<OpNode>() || op->op.as<ConstructorNode>()) {
-      auto taint = CreateStateForType(ConcretizeType(op->checked_type()), false);
+    if (op->op == GetInvokeTVMOp()) {
+      auto callee_prim_func = mod_->Lookup(Downcast<GlobalVar>(op->args[0]));
+
+      auto inputs_full_taint = this->VisitExpr(op->args[1], current_context);
+      auto max_inputs_depth = inputs_full_taint->taint;
+      auto output_depth = CappedIncr(max_inputs_depth);
+      auto outputs_tuple = op->args[2].as<TupleNode>();
+      auto output_full_taint = FullTaint(output_depth, FunctionSet());
+      for (auto output : outputs_tuple->fields) {
+        ICHECK(output.as<VarNode>());
+        auto var = Downcast<Var>(output);
+        auto res = Add(var, current_context, output_full_taint, "OpOutput");
+      }
+      auto op_key = std::make_pair(current_context, op);
+      auto it = prim_func_call_depths_.find(op_key);
+      if (it == prim_func_call_depths_.end()) {
+        prim_func_call_depths_[op_key] = max_inputs_depth;
+
+      } else {
+        prim_func_call_depths_[op_key] = MergeTaints(it->second, max_inputs_depth);
+      }
+      return output_full_taint;
+    } else if (op->op.as<OpNode>()) {
+      auto taint = TaintT(0);
       auto function_points_to = FunctionSet();
       return FullTaint(taint, function_points_to);
+    } else if (op->op.as<ConstructorNode>()) {
+      Array<FullTaint> arg_taints;
+      for (auto arg : op->args) {
+        arg_taints.push_back(this->VisitExpr(arg, current_context));
+      }
+      return Merge(arg_taints);
     }
 
     auto caller_context = current_context;
@@ -875,66 +934,29 @@ class TaintAnalysis : public BaseExprFunctor {
     auto op_full_taint = this->VisitExpr(op->op, current_context);
     auto callees = op_full_taint->function_points_to;
     Array<FullTaint> callee_taints;
-    // std::cout << "[MPT] Call " << op->op << " " << callees.size() << std::endl;
     for (auto kv : callees) {
       auto callee_fn = kv.first;
-      // std::cout << "[MPT]  Callee " << GetFunctionName(callee_fn) << std::endl;
-
-      //////////////////////////////
-      callees_[op].insert(callee_fn.get());
-
-      auto callee_name = callee_fn->GetAttr<String>("db.function_name");
-      bool print = false;  //(callee_name == "map" || callee_name == "lstm_cell");
-      if (print) {
-        std::cout << "[MPT] Calling " << callee_name << " at " << GetRef<Expr>(op) << std::endl;
-      }
-      //////////////////////////////
 
       ICHECK_EQ(callee_fn->params.size(), op->args.size());
       for (size_t i = 0; i < callee_fn->params.size(); ++i) {
         auto arg = op->args[i];
         auto param = callee_fn->params[i];
-        // if (op->args.size() == 10) {
-        // this->VisitExpr(op->args[9], current_context);
-        // }
         auto arg_full_taint = this->VisitExpr(arg, current_context);
-        auto param_full_taint =
-            ResizeTaint(arg_full_taint, arg->checked_type(), param->checked_type());
-
-        //////////////////////////////
-        if (print) {
-          std::string arg_str = "";
-          if (auto vn = arg.as<VarNode>()) {
-            arg_str = vn->vid->name_hint;
-          }
-          std::cout << "[MPT]  Param " << current_context << " " << arg_str << " "
-                    << param->vid->name_hint << " " << param_full_taint->taint << std::endl;
-        }
-        //////////////////////////////
+        auto param_full_taint = arg_full_taint;
 
         Add(param, callee_context, param_full_taint, "function param");
       }
 
-      FullTaint callee_return_full_taint;
-      if (on_stack_.count(std::make_pair(callee_context, callee_fn.get())) ||
-          // callee_name == "lstm_cell") {
-          false) {
-        callee_return_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
-        if (print) {
-          std::cout << "[MPT] Return value 1 " << callee_name << " "
-                    << callee_return_full_taint->taint << std::endl;
-        }
+      FullTaint callee_full_taint;
+      if (IsMapFuncInModule() && callee_fn.get() == GetMapFuncNode()) {
+        callee_full_taint = VisitMapBody(op, callee_context);
+      } else if (on_stack_.count(std::make_pair(callee_context, callee_fn.get()))) {
+        callee_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
       } else {
-        callee_return_full_taint = VisitBody(callee_fn, callee_context, op);
-        callee_return_full_taint = Add(callee_fn, callee_context, callee_return_full_taint);
-        if (print) {
-          std::cout << "[MPT] Return value 2 " << callee_name << " "
-                    << callee_return_full_taint->taint << std::endl;
-        }
+        callee_full_taint = VisitBody(callee_fn, callee_context);
+        callee_full_taint = Add(callee_fn, callee_context, callee_full_taint);
       }
-      auto call_full_taint =
-          ResizeTaint(callee_return_full_taint, callee_fn->ret_type, op->checked_type());
-      callee_taints.push_back(call_full_taint);
+      callee_taints.push_back(callee_full_taint);
     }
 
     return Merge(callee_taints);
@@ -942,11 +964,7 @@ class TaintAnalysis : public BaseExprFunctor {
 
   FullTaint VisitExpr_(const LetNode* op, ContextT current_context) {
     auto value_res = this->VisitExpr(op->value, current_context);
-    auto added_res = Add(op->var, current_context, value_res, "Let value");
-    // if (op->var->checked_type().as<TypeCallNode>()) {
-    //   std::cout << "[MPT]   Let " << current_context << " " << op->var->vid->name_hint << " "
-    //             << value_res->taint << " " << added_res->taint << std::endl;
-    // }
+    Add(op->var, current_context, value_res, "Let value");
     return this->VisitExpr(op->body, current_context);
   }
 
@@ -958,17 +976,13 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   FullTaint VisitExpr_(const OpNode* op, ContextT current_context) {
-    auto taint = Array<Bool>({Bool(false)});
+    auto taint = TaintT(0);
     auto function_points_to = FunctionSet();
     return FullTaint(taint, function_points_to);
   }
 
   FullTaint VisitExpr_(const TupleGetItemNode* op, ContextT current_context) {
-    auto tuple_taint = this->VisitExpr(op->tuple, current_context);
-    ICHECK_GT(tuple_taint->taint.size(), op->index);
-    auto taint = Array<Bool>({tuple_taint->taint[op->index]});
-    auto function_points_to = tuple_taint->function_points_to;
-    return FullTaint(taint, function_points_to);
+    return this->VisitExpr(op->tuple, current_context);
   }
 
   FullTaint VisitExpr_(const RefCreateNode* op, ContextT current_context) {
@@ -985,13 +999,13 @@ class TaintAnalysis : public BaseExprFunctor {
 
   FullTaint UnsupportedFunction(const ExprNode* op, ContextT current_context) {
     ICHECK(false) << "Do not support " << op->GetTypeKey();
-    auto taint = Array<Bool>({Bool(false)});
+    auto taint = TaintT(MAX_DEPTH_VALUE);
     auto function_points_to = FunctionSet();
     return FullTaint(taint, function_points_to);
   }
 
   FullTaint VisitExpr_(const ConstructorNode* op, ContextT current_context) {
-    auto taint = Array<Bool>({Bool(false)});
+    auto taint = Integer(0);
     auto function_points_to = FunctionSet();
     return FullTaint(taint, function_points_to);
   }
@@ -999,16 +1013,12 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint VisitExpr_(const MatchNode* op, ContextT current_context) {
     ICHECK(!op->data->checked_type().as<TupleTypeNode>());
     auto data_full_taint = this->VisitExpr(op->data, current_context);
-    auto collapsed_data_taint = CollapseTaint(data_full_taint->taint);
 
     Array<FullTaint> clause_taints;
     for (auto clause : op->clauses) {
       auto pattern_vars = CollectPatternVars(clause->lhs);
       for (auto& var : pattern_vars) {
-        Add(var, current_context,
-            FullTaint(CreateStateForType(ConcretizeType(var->checked_type()), collapsed_data_taint),
-                      data_full_taint->function_points_to),
-            "Match pattern");
+        Add(var, current_context, data_full_taint, "Match pattern");
       }
       clause_taints.push_back(this->VisitExpr(clause->rhs, current_context));
     }
@@ -1020,21 +1030,22 @@ class TaintAnalysis : public BaseExprFunctor {
 
   VarStateMap var_states_;
   FunctionStateMap function_states_;
+  std::unordered_map<std::pair<ContextT, const CallNode*>, Integer, PairHash, PairEquals>
+      prim_func_call_depths_;
   FunctionEnvironmentMap function_environments_;
   std::unordered_map<const FunctionNode*, VarSet> free_vars_map_;
   OnStackSet on_stack_;
   std::vector<Map<Var, FullTaint>> environment_stack_;
-  std::vector<Map<TypeVar, Type>> type_environment_stack_;
 
   std::vector<Function> function_stack_;
-  std::unordered_map<const CallNode*, std::unordered_set<const FunctionNode*>> callees_;
-};  // namespace
+  const FunctionNode* map_fun_node_;
+};
 
 }  // namespace
 
 IRModule ComputeConstantDepths(IRModule& mod) {
   std::cout << "[SAI] Starting hoisting" << std::endl;
-  SchedulingAbstractInterpreter analysis(mod);
+  TaintAnalysis analysis(mod);
   return analysis.PerformAnalysis();
 }
 

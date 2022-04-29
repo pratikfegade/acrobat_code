@@ -537,9 +537,9 @@ Doc RelayTextPrinter::VisitExpr_(const CallNode* op) {
     args.push_back(Print(type_arg));
   }
 #endif
-  // for (const Doc& d : PrintCallAttrs(op->attrs, op->op)) {
-  // args.push_back(d);
-  // }
+  for (const Doc& d : PrintCallAttrs(op->attrs, op->op)) {
+    args.push_back(d);
+  }
   const auto* cons_node = op->op.as<ConstructorNode>();
   if (cons_node) {
     doc << cons_node->name_hint;

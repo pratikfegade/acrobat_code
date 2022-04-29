@@ -1478,7 +1478,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::NameAllFunctions());
 
   // lower all functions annotated as "primitive" by FuseOps.
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1506,6 +1506,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(transform::HoistNonSequentialOps());
+    pass_seqs.push_back(transform::PrintCurrentIR("HoistNonSequentialOps", true, true));
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
@@ -1523,7 +1524,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {
