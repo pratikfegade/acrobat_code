@@ -27,6 +27,7 @@
 #include <tvm/runtime/container/map.h>
 #include <tvm/runtime/container/shape_tuple.h>
 #include <tvm/runtime/container/string.h>
+#include <tvm/runtime/container/structural_map.h>
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/registry.h>
@@ -182,6 +183,7 @@ TVM_REGISTER_GLOBAL("runtime.MapItems").set_body([](TVMArgs args, TVMRetValue* r
 
 #if (USE_FALLBACK_STL_MAP == 0)
 TVM_DLL constexpr uint64_t DenseMapNode::kNextProbeLocation[];
+TVM_DLL constexpr uint64_t DenseStructuralMapNode::kNextProbeLocation[];
 #endif
 
 // Closure

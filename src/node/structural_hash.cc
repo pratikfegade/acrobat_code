@@ -24,6 +24,7 @@
 #include <tvm/node/reflection.h>
 #include <tvm/node/structural_hash.h>
 #include <tvm/runtime/container/adt.h>
+#include <tvm/runtime/container/structural_map.h>
 #include <tvm/runtime/profiling.h>
 #include <tvm/runtime/registry.h>
 
@@ -499,6 +500,122 @@ struct MapNodeTrait {
 };
 TVM_REGISTER_REFLECTION_VTABLE(MapNode, MapNodeTrait)
     .set_creator([](const std::string&) -> ObjectPtr<Object> { return MapNode::Empty(); });
+
+struct StructuralMapNodeTrait {
+  static constexpr const std::nullptr_t VisitAttrs = nullptr;
+
+  static void SHashReduceForOStructuralMap(const StructuralMapNode* key, SHashReducer hash_reduce) {
+    // SHash's var handling depends on the determinism of traversal.
+    // NOTE: only book-keep the mapped hash keys.
+    // This resolves common use cases where we want to store
+    // StructuralMap<Var, Value> where Var is defined in the function
+    // parameters.
+    using KV = std::pair<size_t, ObjectRef>;
+    std::vector<KV> temp;
+    for (const auto& kv : *key) {
+      size_t hashed_value;
+      if (hash_reduce->LookupHashedValue(kv.first, &hashed_value)) {
+        temp.emplace_back(hashed_value, kv.second);
+      }
+    }
+    // sort by the hash key of the keys.
+    std::sort(temp.begin(), temp.end(),
+              [](const KV& lhs, const KV& rhs) { return lhs.first < rhs.first; });
+    // add size to the hash
+    hash_reduce(static_cast<uint64_t>(key->size()));
+    // hash the content
+    for (size_t i = 0; i < temp.size();) {
+      size_t k = i + 1;
+      for (; k < temp.size() && temp[k].first == temp[i].first; ++k) {
+      }
+      // ties are rare, but we need to skip them to make the hash determinsitic
+      if (k == i + 1) {
+        hash_reduce->SHashReduceHashedValue(temp[i].first);
+        hash_reduce(temp[i].second);
+      }
+      i = k;
+    }
+  }
+
+  static void SHashReduceForSStructuralMap(const StructuralMapNode* key, SHashReducer hash_reduce) {
+    // NOTE: only book-keep the mapped hash keys.
+    // This resolves common use cases where we want to store
+    // StructuralMap<Var, Value> where Var is defined in the function
+    // parameters.
+    using KV = std::pair<String, ObjectRef>;
+    std::vector<KV> temp;
+    for (const auto& kv : *key) {
+      temp.push_back(std::make_pair(Downcast<String>(kv.first), kv.second));
+    }
+    // sort by the hash key of the keys.
+    std::sort(temp.begin(), temp.end(),
+              [](const KV& lhs, const KV& rhs) { return lhs.first < rhs.first; });
+    // NOTE: we won't have ties
+    // add size to the hash after sorting.
+    hash_reduce(static_cast<uint64_t>(key->size()));
+    // hash the content
+    for (size_t i = 0; i < temp.size(); ++i) {
+      hash_reduce(temp[i].first);
+      hash_reduce(temp[i].second);
+    }
+  }
+
+  static void SHashReduce(const StructuralMapNode* key, SHashReducer hash_reduce) {
+    bool is_str_map = std::all_of(key->begin(), key->end(), [](const auto& v) {
+      return v.first->template IsInstance<StringObj>();
+    });
+    if (is_str_map) {
+      SHashReduceForSStructuralMap(key, hash_reduce);
+    } else {
+      SHashReduceForOStructuralMap(key, hash_reduce);
+    }
+  }
+
+  static bool SEqualReduceForOStructuralMap(const StructuralMapNode* lhs,
+                                            const StructuralMapNode* rhs, SEqualReducer equal) {
+    for (const auto& kv : *lhs) {
+      // Only allow equal checking if the keys are already mapped
+      // This resolves common use cases where we want to store
+      // StructuralMap<Var, Value> where Var is defined in the function
+      // parameters.
+      ObjectRef rhs_key = equal->MapLhsToRhs(kv.first);
+      if (!rhs_key.defined()) return false;
+      auto it = rhs->find(rhs_key);
+      if (it == rhs->end()) return false;
+      if (!equal(kv.second, it->second)) return false;
+    }
+    return true;
+  }
+
+  static bool SEqualReduceForSStructuralMap(const StructuralMapNode* lhs,
+                                            const StructuralMapNode* rhs, SEqualReducer equal) {
+    for (const auto& kv : *lhs) {
+      auto it = rhs->find(kv.first);
+      if (it == rhs->end()) return false;
+      if (!equal(kv.second, it->second)) return false;
+    }
+    return true;
+  }
+
+  static bool SEqualReduce(const StructuralMapNode* lhs, const StructuralMapNode* rhs,
+                           SEqualReducer equal) {
+    if (rhs->size() != lhs->size()) return false;
+    if (rhs->size() == 0) return true;
+    bool ls = std::all_of(lhs->begin(), lhs->end(),
+                          [](const auto& v) { return v.first->template IsInstance<StringObj>(); });
+    bool rs = std::all_of(rhs->begin(), rhs->end(),
+                          [](const auto& v) { return v.first->template IsInstance<StringObj>(); });
+    if (ls != rs) {
+      return false;
+    }
+    return (ls && rs) ? SEqualReduceForSStructuralMap(lhs, rhs, equal)
+                      : SEqualReduceForOStructuralMap(lhs, rhs, equal);
+  }
+};
+TVM_REGISTER_REFLECTION_VTABLE(StructuralMapNode, StructuralMapNodeTrait)
+    .set_creator([](const std::string&) -> ObjectPtr<Object> {
+      return StructuralMapNode::Empty();
+    });
 
 struct ReportNodeTrait {
   static void VisitAttrs(runtime::profiling::ReportNode* report, AttrVisitor* attrs) {
