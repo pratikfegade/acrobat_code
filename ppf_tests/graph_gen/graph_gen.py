@@ -33,8 +33,10 @@ weights_dict = {
     main_func.params[3].name_hint: get_random_tensor((1, 256)),
     main_func.params[4].name_hint: get_random_tensor((1, 256)),
     main_func.params[5].name_hint: get_random_tensor((1, 256)),
-    main_func.params[6].name_hint: get_random_tensor((256, 512)),
+    main_func.params[6].name_hint: get_random_tensor((256, 256)),
     main_func.params[7].name_hint: get_random_tensor((1, 256)),
+    main_func.params[8].name_hint: get_random_tensor((256, 512)),
+    main_func.params[9].name_hint: get_random_tensor((1, 256)),
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
@@ -44,7 +46,7 @@ coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
-use_autoscheduler=True
+use_autoscheduler=False
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
