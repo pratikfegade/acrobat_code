@@ -466,6 +466,23 @@ Bool IRModuleNode::ShouldLinkParameters() const {
 
 std::unordered_set<String> IRModuleNode::Imports() const { return this->import_set_; }
 
+std::vector<std::pair<GlobalVar, BaseFunc>> IRModuleNode::OrderedFunctions() const {
+  std::vector<std::pair<GlobalVar, BaseFunc>> ordered_funcs;
+  for (auto kv : functions) {
+    ordered_funcs.push_back(kv);
+  }
+
+  struct less_than_key {
+    inline bool operator()(const std::pair<GlobalVar, BaseFunc>& p1,
+                           const std::pair<GlobalVar, BaseFunc>& p2) {
+      return (p1.first->name_hint < p2.first->name_hint);
+    }
+  };
+
+  std::sort(ordered_funcs.begin(), ordered_funcs.end(), less_than_key());
+  return ordered_funcs;
+}
+
 IRModule IRModule::FromText(const String& text, const String& source_path) {
   return tvm::parser::ParseModule(source_path, text);
 }

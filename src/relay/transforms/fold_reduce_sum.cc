@@ -45,16 +45,6 @@ namespace relay {
 constexpr int MAX_DEPTH_VALUE = 1 << 4;
 class FoldReduceSumsIdentifier : public ExprMutator {
  public:
-  // FoldReduceSumsIdentifier(const IRModule& mod, const FPAVarStateMap& var_points_to_with_context)
-  //     : mod_(mod) {
-  //   for (auto kv : var_points_to_with_context) {
-  //     auto ctx = kv.first.first;
-  //     auto var = kv.first.second;
-  //     auto points_to = kv.second;
-  //     var_points_to_map_[var].insert(points_to.begin(), points_to.end());
-  //   }
-  // }
-
   FoldReduceSumsIdentifier(const IRModule& mod) : mod_(mod) {}
 
   Function Visit(const Function& f) {
@@ -127,13 +117,11 @@ class FoldReduceSumsIdentifier : public ExprMutator {
     auto op = mutated.as<CallNode>();
     ICHECK(op);
     if (op->op == GetFoldlGlobalVar() || op->op == GetFoldrGlobalVar()) {
-      // std::cout << "[FRS] Calling fold" << std::endl;
       ICHECK_EQ(op->args.size(), 3);
       auto lambda_arg = op->args[0];
       auto init_arg = op->args[1];
       auto list_arg = op->args[2];
       if (IsTensorList(list_arg) && DoesPointToReductionLambda(lambda_arg)) {
-        // std::cout << "[FRS]  Is reduce sum!" << std::endl;
         auto new_attrs = DictAttrs::WithAttr(op->attrs, tir::attr::kDBFoldReduction, GetAddOp());
         mutated = Call(op->op, op->args, new_attrs, op->type_args, op->span);
         mutated->checked_type_ = old_op->checked_type_;
@@ -143,14 +131,10 @@ class FoldReduceSumsIdentifier : public ExprMutator {
   }
 
   const IRModule& mod_;
-  // std::unordered_map<const VarNode*, FunctionSet> var_points_to_map_;
 };
 
 Function IdentifyFoldReduceSums(const IRModule& mod, Function f) {
-  // auto var_points_to_map = GetVarPointsToMap(mod);
-  // FoldReduceSumsIdentifier analysis(mod, var_points_to_map);
-  FoldReduceSumsIdentifier analysis(mod);
-  return analysis.Visit(f);
+  return FoldReduceSumsIdentifier(mod).Visit(f);
 }
 
 namespace transform {

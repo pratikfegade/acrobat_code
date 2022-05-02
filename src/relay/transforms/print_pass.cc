@@ -46,7 +46,7 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
       std::cout << "[PRINT] IR after " << previous_pass << std::endl;
 
       if (clean_up_on_device) {
-        for (auto kv : m->functions) {
+        for (auto kv : m->OrderedFunctions()) {
           if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
             if (!clean_up_prim_funcs) {
               std::cout << kv.first << ": " << kv.second << std::endl;
@@ -58,7 +58,7 @@ Pass PrintCurrentIR(String previous_pass, bool clean_up_on_device, bool clean_up
           }
         }
       } else {
-        for (auto kv : m->functions) {
+        for (auto kv : m->OrderedFunctions()) {
           if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
             if (!clean_up_prim_funcs) {
               std::cout << kv.first << ": " << kv.second << std::endl;

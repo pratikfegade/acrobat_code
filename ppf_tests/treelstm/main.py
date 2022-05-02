@@ -28,7 +28,7 @@ coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=False
+use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
@@ -81,8 +81,22 @@ def print_time(time):
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True)
+        tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
+                                                                      include_simple_tasks=True,
+                                                                      execution_options=execution_options)
+
+        if executors:
+            print("Executing BRO")
+            executor, fin_executor = executors
+            params_list = []
+            for tree in trees: params_list += [tree]
+            executor.vm.set_input("main", batch_size, *params_list)
+            fin_executor()
+
+            stats = executor.vm.get_pgo_stats()
+            for i in range(len(tasks)):
+                key = tasks[i].compute_dag.workload_key()
+                task_weights[i] = int(stats.get(key, -1))
 
         if tune:
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
@@ -92,13 +106,14 @@ def auto_schedule(tune):
                 runner=measure_ctx.runner,
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
             )
-            tuner.tune(tune_option)
+            # tuner.tune(tune_option)
 
+        print(task_weights)
         # for task in tasks:
-        #     try:
-        #         print("YOLO", task.print_best(log_file))
-        #     except Exception:
-        #         pass
+            # try:
+                # print("YOLO", task.print_best(log_file))
+            # except Exception:
+                # pass
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
@@ -119,5 +134,5 @@ def execute():
                 print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
-print("===============================================================================", flush=True)
-execute()
+# print("===============================================================================", flush=True)
+# execute()

@@ -278,6 +278,9 @@ class Executable : public ModuleNode {
   std::vector<std::vector<DBBatchedArgMode>> batched_func_arg_mode;
   /*! \brief The arg_access_mode for all batched PrimFuncs. */
   std::vector<std::vector<DBArgAccessMode>> prim_func_arg_access_mode;
+  /*! \brief Unique autoschduler workload keys for all prim_funcs for
+      PGO purposes. */
+  std::vector<std::string> autosched_workload_keys;
 
  private:
   /*!

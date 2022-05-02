@@ -40,30 +40,47 @@ namespace relay {
 
 class FunctionNamer : public ExprMutator {
  public:
+  Expr NameFunctions(const Function& func, std::string name) {
+    prefix_ = name;
+    ctr_ = 0;
+    return this->VisitExpr(func);
+  }
+
   Expr VisitExpr_(const FunctionNode* op) override {
     auto fn = Downcast<Function>(ExprMutator::VisitExpr_(op));
     auto name = fn->GetAttr<String>(tir::attr::kDBFunctionName);
     if (!name) {
-      fn = WithAttr(fn, tir::attr::kDBFunctionName, String("function" + std::to_string(ctr_++)));
+      fn =
+          WithAttr(fn, tir::attr::kDBFunctionName, String(prefix_ + "_f" + std::to_string(ctr_++)));
     }
     return fn;
   }
 
  private:
+  std::string prefix_;
   int ctr_{0};
 };
 
 IRModule NameFunctions(IRModule& mod) {
   tvm::Map<GlobalVar, BaseFunc> new_funcs;
   auto funcs = mod->functions;
+  std::map<size_t, std::pair<GlobalVar, BaseFunc>> ordered_funcs;
+
+  StructuralHash hasher;
+  for (auto kv : funcs) {
+    ordered_funcs[hasher(kv.second)] = kv;
+  }
+
   FunctionNamer function_namer;
-  for (const auto& it : funcs) {
-    auto base_func = it.second;
+  for (const auto& kv : ordered_funcs) {
+    auto global_var = kv.second.first;
+    auto base_func = kv.second.second;
     if (base_func.as<FunctionNode>()) {
       auto func = Downcast<Function>(base_func);
-      func = WithAttr(func, tir::attr::kDBFunctionName, String(it.first->name_hint));
-      func = Downcast<Function>(function_namer(func));
-      new_funcs.Set(it.first, func);
+      func = WithAttr(func, tir::attr::kDBFunctionName, String(global_var->name_hint));
+      // std::cout << "[NF] FUNCTION: " << global_var->name_hint << std::endl;
+      func = Downcast<Function>(function_namer.NameFunctions(func, global_var->name_hint));
+      new_funcs.Set(global_var, func);
     }
   }
 

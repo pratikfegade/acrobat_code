@@ -48,7 +48,7 @@ from .workload_registry import register_workload_tensors
 logger = logging.getLogger("auto_scheduler")
 
 
-def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None):
+def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None, execution_options=None):
     """Call all TOPI compute to extract auto_scheduler tasks in a Relay program"""
     # pylint: disable=import-outside-toplevel
     from tvm import relay
@@ -63,17 +63,37 @@ def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None):
                                                  config={"relay.backend.use_auto_scheduler": True,
                                                          "relay.db_autoscheduler_pass": True})
 
+    # with pass_context:
+    #     compiler = relay.vm.VMCompiler()
+    #     if params:
+    #         compiler.set_params(params)
+    #     mod = tvm.IRModule.from_expr(mod) if isinstance(mod, relay.Function) else mod
+    #     try:
+    #         compiler.lower(mod, target)
+    #     except TVMError:
+    #         logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
+    #     finally:
+    #         autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
+
+    fin_executor = None
+    executor = None
     with pass_context:
-        compiler = relay.vm.VMCompiler()
-        if params:
-            compiler.set_params(params)
-        mod = tvm.IRModule.from_expr(mod) if isinstance(mod, relay.Function) else mod
+        device = tvm.runtime.device("cuda", 0)
+        executor = relay.backend.vm.VMExecutor(mod, device, target)
         try:
-            compiler.lower(mod, target)
+            fin_executor = executor._make_executor(execution_options=execution_options, params=params)
         except TVMError:
             logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
         finally:
             autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
+
+    return (executor, fin_executor)
+
+class ThreadWithResult(threading.Thread):
+    def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        def function():
+            self.result = target(*args, **kwargs)
+        super().__init__(group=group, target=function, name=name, daemon=daemon)
 
 def extract_tasks(
     mod,
@@ -84,6 +104,7 @@ def extract_tasks(
     hardware_params=None,
     include_simple_tasks=False,
     dump_workload_to_dag_log=None,
+    execution_options=None,
     opt_level=3,
 ):
     """Extract tuning tasks from a relay program.
@@ -134,18 +155,24 @@ def extract_tasks(
     with env:
         # Wrap build call in a new thread to avoid the conflict
         # between python's multiprocessing and tvm's thread pool
-        build_thread = threading.Thread(
-            target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context)
+        # build_thread = threading.Thread(
+            # target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context)
+        # )
+        build_thread = ThreadWithResult(
+            target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context, execution_options)
         )
         build_thread.start()
         build_thread.join()
+
+        fin_executor = build_thread.result
+
     dispatch_ctx.verbose = old_verbose
 
     # create search tasks
     tasks = []
     weights = []
     for wkl_key, (weight, func_names) in env.wkl_key_to_weight.items():
-        # print("EXTRACT TASKS:", wkl_key)
+        print("EXTRACT TASKS:", wkl_key, type(wkl_key))
         task = SearchTask(
             workload_key=wkl_key,
             target=target,
@@ -162,7 +189,7 @@ def extract_tasks(
             task_inputs_save_to_file=True,
             desc=",".join(func_names),
         )
-        print("EXTRACT TASK: ", func_names, weight)
+        # print("EXTRACT TASK: ", func_names, weight)
         tasks.append(task)
         weights.append(int(weight))
 
@@ -170,7 +197,7 @@ def extract_tasks(
         with open(dump_workload_to_dag_log, "w") as f:
             json.dump({task.workload_key: str(task.compute_dag) for task in tasks}, f)
 
-    return tasks, weights
+    return tasks, weights, fin_executor
 
 
 class TracingMode:
@@ -213,7 +240,7 @@ class TracingEnvironment:
         workload_key: str
             The workload key of a task.
         """
-        print("ADDING KEY", func_name, workload_key, weight_incr, flush=True)
+        # print("ADDING KEY", func_name, workload_key, weight_incr, flush=True)
         self.func_name_to_wkl_key[func_name] = workload_key
         if workload_key not in self.wkl_key_to_weight:
             self.wkl_key_to_weight[workload_key] = (0, set())
@@ -376,13 +403,14 @@ def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
 
     # print("KEY", (env is None), key, flush=True)
 
+    wkl_key_ret = None
     if env is None:
         # in the final build mode
         if state is None:
             return None
 
         schedule, _ = maybe_dynamic_dag.apply_steps_from_state(state)
-        return schedule
+        return [schedule, wkl_key_ret]
 
     # print(" Tracing DAG now")
 
@@ -393,6 +421,8 @@ def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
             input_map = prepare_input_map(io_tensors)
             if input_map:
                 env.add_workload_input_names(key, list(input_map.values()))
+            wkl_key_ret = key
+            print("GRINDELWALD", key)
     elif env.tracing_mode == TracingMode.PREPARE_LAYOUT_REWRITE:
         pass
         #######################################################################
@@ -414,7 +444,7 @@ def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
     else:
         raise ValueError("Invalid tracing mode: " + env.tracing_mode)
 
-    return schedule
+    return [schedule, wkl_key_ret]
 
 
 @tvm._ffi.register_func("auto_scheduler.relay_integration.te_compiler_update_weights")

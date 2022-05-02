@@ -450,11 +450,18 @@ Doc RelayTextPrinter::PrintFunc(const Doc& prefix, const relay::Function& fn) {
     params.push_back(AllocVar(param));
   }
   {
-    Doc doc;
+    Doc name_doc;
     auto name = fn->GetAttr<String>("db.function_name");
     if (name) {
-      doc << "db.function_name=" << PrintAttributeValue(name.value());
-      params.push_back(doc);
+      name_doc << "db.function_name=" << PrintAttributeValue(name.value());
+      params.push_back(name_doc);
+    }
+
+    Doc key_doc;
+    auto key = fn->GetAttr<String>("db.autosched_workload_keys");
+    if (key) {
+      key_doc << "db.autosched_workload_keys=" << PrintAttributeValue(key.value());
+      params.push_back(key_doc);
     }
   }
   if (VERBOSE_PRINT) {

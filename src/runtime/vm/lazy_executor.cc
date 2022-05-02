@@ -51,6 +51,24 @@ namespace runtime {
 namespace vm {
 VMDBProfiler* VMDBProfiler::instance_{nullptr};
 
+void GatherPGOStats(LazyExecutor<NDArray>* p_executor) {
+  LazyExecutor<NDArray>& executor = *p_executor;
+
+  std::vector<int> execution_counts_vec(executor.vm_shared_state_->packed_funcs_.size(), 0);
+  for (auto& node : executor.nodes_) {
+    execution_counts_vec[executor.vm_shared_state_->batched_funcs_[node.func_idx_]]++;
+  }
+  for (size_t i = 0; i < execution_counts_vec.size(); ++i) {
+    auto workload_key = executor.vm_shared_state_->exec_->autosched_workload_keys[i];
+    ICHECK_GT(workload_key.size(), 0);
+    executor.execution_counts_.Set(workload_key,
+                                   String(std::to_string(std::max(1, execution_counts_vec[i]))));
+  }
+  executor.nodes_.clear();
+}
+
+/*********************************************************************/
+
 template <>
 void EagerAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
                                                 const Index output_size, const ObjectRef* args,
@@ -450,6 +468,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
     VMDBProfiler::ProfileHostStopCall();
   }
 #endif
+  std::cout << "NAHT EXECUTING. WATCHA GONNA DO?" << std::endl;
   // std::cout << "[LE]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
   // if (func_nodes.size() == 1) {
   //   InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
@@ -508,7 +527,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
     for (auto kv : func_to_node) {
       executor->ExecuteOpNodeBatch(kv.first, kv.second);
     }
-  } else if (false) {
+  } else if (true) {
     std::unordered_map<TensorPtrType, int> output_tensor_to_node;
     size_t num_nodes = executor->nodes_.size();
     output_tensor_to_node.reserve(num_nodes * 2);
@@ -548,7 +567,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       graph_depth = std::max(graph_depth, node_depth);
     }
 
-    // std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
+    std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
     int nodes_executed = 0;
     std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
     for (int j = 0; j <= graph_depth; ++j) {
@@ -719,7 +738,11 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
 template <>
 void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                  bool all_nodes_same_depth) {
-  BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
+  if (pgo_) {
+    GatherPGOStats(this);
+  } else {
+    BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
+  }
   if (accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);

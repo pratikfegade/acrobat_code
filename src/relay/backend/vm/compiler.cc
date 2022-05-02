@@ -1277,6 +1277,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       ICHECK(it != exec_->primitive_map.end());
       auto index = (*it).second;
       if (static_cast<Index>(exec_->prim_func_arg_access_mode.size()) <= index) {
+        exec_->autosched_workload_keys.resize(index + 1);
         exec_->prim_func_arg_access_mode.resize(index + 1);
       }
       auto access_modes = pair.second->GetAttr<Array<Integer>>(tir::attr::kDBArgAccessModes);
@@ -1295,6 +1296,11 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
           }
           std::cout << "]" << std::endl;
         }
+      }
+
+      auto workload_key_opt = pair.second->GetAttr<String>(tir::attr::kDBAutoschedWorkloadKeys);
+      if (workload_key_opt) {
+        exec_->autosched_workload_keys[index] = workload_key_opt.value();
       }
     }
   }
@@ -1486,6 +1492,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
+  pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, false));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1506,7 +1513,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(transform::HoistNonSequentialOps());
-    pass_seqs.push_back(transform::PrintCurrentIR("HoistNonSequentialOps", true, true));
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
@@ -1524,6 +1530,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

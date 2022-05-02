@@ -136,8 +136,14 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
 
   void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
 
+  void SetPGO(bool value) { this->pgo_ = value; }
+
   /*! \brief list of nodes to execute */
   std::vector<OpNode<TensorType>> nodes_;
+  /*! \brief Whether to execute or to gather PGO stats */
+  bool pgo_{false};
+  /*! \brief Execution counts for PackedFuncs, for when pgo is turned on */
+  Map<String, String> execution_counts_;
 };
 
 typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;

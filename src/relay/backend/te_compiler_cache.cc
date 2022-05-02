@@ -76,7 +76,8 @@ CachedFunc::CachedFunc(tvm::Target target, GlobalVar prim_fn_var,
                        tvm::Array<tir::Var> input_variables, tvm::Array<te::Tensor> inputs,
                        tvm::Array<te::Tensor> outputs, tvm::Array<Integer> batched_arg_mode,
                        te::Schedule schedule, tir::PrimFunc prim_func,
-                       tvm::Array<Integer> shape_func_param_states, IRModule funcs) {
+                       tvm::Array<Integer> shape_func_param_states, IRModule funcs,
+                       tvm::String workload_key) {
   auto n = make_object<CachedFuncNode>();
   n->target = target;
   n->prim_fn_var = prim_fn_var;
@@ -87,6 +88,7 @@ CachedFunc::CachedFunc(tvm::Target target, GlobalVar prim_fn_var,
   n->schedule = schedule;
   n->shape_func_param_states = shape_func_param_states;
   n->funcs = funcs;
+  n->workload_key = workload_key;
   data_ = std::move(n);
 }
 
@@ -190,6 +192,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     }
 
     te::Schedule schedule{nullptr};
+    String workload_key = "";
     tir::PrimFunc prim_func{nullptr};
     // No need to register schedule for device copy op.
     if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
@@ -206,8 +209,15 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
         ObjectRef obj =
             (*fauto_schedule)(prim_fn_var->name_hint, tensor_outs, unbatched_task_weight);
+        // if (obj.defined()) {
+        // schedule = Downcast<te::Schedule>(obj);
+        // }
         if (obj.defined()) {
-          schedule = Downcast<te::Schedule>(obj);
+          auto arr = Downcast<Array<ObjectRef>>(obj);
+          schedule = Downcast<te::Schedule>(arr[0]);
+          if (arr[1].defined()) {
+            workload_key = Downcast<String>(arr[1]);
+          }
         }
       }
       if (use_meta_schedule_) {
@@ -251,8 +261,9 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
-    CachedFunc generated_prim_func = CachedFunc(target_, prim_fn_var, Array<tir::Var>(), fn_inputs,
-                                                outputs, Array<Integer>(), schedule, prim_func, {});
+    CachedFunc generated_prim_func =
+        CachedFunc(target_, prim_fn_var, Array<tir::Var>(), fn_inputs, outputs, Array<Integer>(),
+                   schedule, prim_func, {}, {}, workload_key);
     CachedFunc generated_batched_func;
 
     // std::cout << "[TCC] Create batched functions? " << create_batched << std::endl;
@@ -333,8 +344,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
                                                Array<TypeVar>(), Array<TypeConstraint>());
 
       te::Schedule batched_schedule{nullptr};
+      String batched_workload_key = "";
       // No need to register schedule for device copy op.
-      // std::cout << "[TCC]  Other conditions " << (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr)
+      // std::cout << "[TCC]  Other conditions " << (anchor_attrs_.as<DeviceCopyAttrs>() ==
+      // nullptr)
       // << " " << create_schedule_ << " " << use_auto_scheduler_ << std::endl;
       if (anchor_attrs_.as<DeviceCopyAttrs>() == nullptr && create_schedule_) {
         if (use_auto_scheduler_) {
@@ -353,8 +366,15 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
           // }
           ObjectRef obj = (*fauto_schedule)(batched_fn_var->name_hint, batched_outputs,
                                             batched_task_weight, vmap);
+          // if (obj.defined()) {
+          // batched_schedule = Downcast<te::Schedule>(obj);
+          // }
           if (obj.defined()) {
-            batched_schedule = Downcast<te::Schedule>(obj);
+            auto arr = Downcast<Array<ObjectRef>>(obj);
+            batched_schedule = Downcast<te::Schedule>(arr[0]);
+            if (arr[1].defined()) {
+              batched_workload_key = Downcast<String>(arr[1]);
+            }
           }
         }
         ICHECK(!use_meta_schedule_) << "Do not support meta-schedule for batched operators yet!";
@@ -383,7 +403,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       // std::cout << "[TEC] BatchedFnVar " << batched_fn_var << std::endl;
       generated_batched_func =
           CachedFunc(target_, batched_fn_var, Array<tir::Var>({batch_size_var}), batched_inputs,
-                     batched_outputs, arg_modes, batched_schedule, tir::PrimFunc{nullptr}, {});
+                     batched_outputs, arg_modes, batched_schedule, tir::PrimFunc{nullptr}, {}, {},
+                     batched_workload_key);
     }
 
     return std::make_pair(generated_prim_func, generated_batched_func);

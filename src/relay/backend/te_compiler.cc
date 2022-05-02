@@ -493,7 +493,10 @@ class TECompilerImpl : public TECompilerNode {
             }
             attrs.Set(tir::attr::kDBKernelPrimFunc, Integer(1));
             attrs.Set(tir::attr::kDBArgAccessModes, access_modes);
-            // std::cout << "DBKernelPrimFunc " << global_var->name_hint << std::endl;
+            if (cached_func->workload_key.size() > 0) {
+              attrs.Set(tir::attr::kDBAutoschedWorkloadKeys, cached_func->workload_key);
+            }
+            attrs.Set(tir::attr::kDBArgAccessModes, access_modes);
             func = WithAttrs(std::move(Downcast<tir::PrimFunc>(func)), attrs);
           }
           cached_func->funcs->Add(global_var, func);

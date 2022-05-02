@@ -419,6 +419,7 @@ class VirtualMachine(object):
         self._get_num_outputs = self.module["get_num_outputs"]
         self._get_input_index = self.module["get_input_index"]
         self._set_input = self.module["set_input"]
+        self._get_pgo_stats = self.module["get_pgo_stats"]
         self._setup_device(device, memory_cfg)
 
     def _setup_device(self, dev, memory_cfg):
@@ -576,6 +577,9 @@ class VirtualMachine(object):
           The input index. -1 will be returned if the given input name is not found.
         """
         return self._get_input_index(input_name, func_name)
+
+    def get_pgo_stats(self):
+        return self._get_pgo_stats()
 
     def benchmark(
         self,

@@ -106,6 +106,11 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
   if (name == "invoke") {
     return PackedFunc(
         [sptr_to_self, this](TVMArgs args, TVMRetValue* rv) { this->InvokeWrapper(args[0], rv); });
+  } else if (name == "get_pgo_stats") {
+    return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
+      ICHECK(shared_state_->lazy_executor_.pgo_);
+      *rv = shared_state_->lazy_executor_.execution_counts_;
+    });
   } else if (name == "invoke_stateful") {
     // TODO(tkonolige, jroesch, tqchen): invoke_stateful and get_output are
     // stop-gap measure to allow using vm over a remote connection.
@@ -252,6 +257,7 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, i
 void VirtualMachine::InitSharedState() {
   if (!shared_state_) {
     shared_state_ = new VMSharedState<EagerAllocationLazyExecutor>();
+    shared_state_->lazy_executor_.SetPGO(true);
   }
   this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
 }
@@ -347,6 +353,7 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
+  std::cout << "HELLO" << std::endl;
   for (int i = 0; i < batch_size_; ++i) {
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();
@@ -354,6 +361,7 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
 
   if (lazy_execution_) {
     if (batched_execution_) {
+      std::cout << "YOLO" << std::endl;
       shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();

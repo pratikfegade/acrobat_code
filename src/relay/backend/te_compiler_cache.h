@@ -150,6 +150,8 @@ struct CachedFuncNode : public Object {
   tvm::Array<Integer> shape_func_param_states;
   /*! \brief The lowered functions to support the function. */
   IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({}));
+  /*! \brief String autoscheduler workload key for unique identification. */
+  tvm::String workload_key;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("target", &target);
@@ -162,6 +164,7 @@ struct CachedFuncNode : public Object {
     v->Visit("prim_func", &prim_func);
     v->Visit("funcs", &funcs);
     v->Visit("shape_func_param_states", &shape_func_param_states);
+    v->Visit("workload_key", &workload_key);
   }
 
   static constexpr const char* _type_key = "relay.CachedFunc";
@@ -174,7 +177,8 @@ class CachedFunc : public ObjectRef {
              tvm::Array<te::Tensor> inputs, tvm::Array<te::Tensor> outputs,
              tvm::Array<Integer> batched_arg_mode, te::Schedule schedule, tir::PrimFunc prim_func,
              tvm::Array<Integer> shape_func_param_states,
-             IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({})));
+             IRModule funcs = IRModule(Map<GlobalVar, BaseFunc>({})),
+             tvm::String workload_key = "");
 
  public:
   TVM_DEFINE_OBJECT_REF_METHODS(CachedFunc, ObjectRef, CachedFuncNode);

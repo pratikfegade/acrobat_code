@@ -335,6 +335,11 @@ class IRModuleNode : public Object {
    */
   TVM_DLL std::unordered_set<String> Imports() const;
 
+  /*!
+   * \brief Returns all functions in a deterministic order.
+   */
+  TVM_DLL std::vector<std::pair<GlobalVar, BaseFunc>> OrderedFunctions() const;
+
   static constexpr const char* _type_key = "IRModule";
   static constexpr const bool _type_has_method_sequal_reduce = true;
   static constexpr const bool _type_has_method_shash_reduce = true;

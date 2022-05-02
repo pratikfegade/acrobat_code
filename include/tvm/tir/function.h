@@ -339,6 +339,9 @@ constexpr const char* kDBIncrementDepth = "db.increment_depth";
 
 /*! \brief Name given to a anonymous lambda for ease of debugging. */
 constexpr const char* kDBFunctionName = "db.function_name";
+
+/*! \brief Autosched unique workload keys. */
+constexpr const char* kDBAutoschedWorkloadKeys = "db.autosched_workload_keys";
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm
