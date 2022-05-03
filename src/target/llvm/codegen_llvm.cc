@@ -122,9 +122,9 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
       tvm::transform::PassContext::Current()
           ->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false))
           .value();
-  // bool is_execution_kernel = false;
-  bool is_execution_kernel = (support::StartsWith(name, "vm_mod_fused_subtract_batched") ||
-                              support::StartsWith(name, "prim_func"));
+  bool is_execution_kernel = false;
+  // bool is_execution_kernel = (support::StartsWith(name, "vm_mod_fused_subtract_batched") ||
+  // support::StartsWith(name, "prim_func"));
 
   this->InitFuncState();
 

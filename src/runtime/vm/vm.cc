@@ -23,6 +23,7 @@
  */
 
 #include <dmlc/memory_io.h>
+#include <tvm/node/reflection.h>
 #include <tvm/runtime/container/adt.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
@@ -110,9 +111,14 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
   } else if (name == "get_pgo_stats") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       ICHECK(shared_state_->lazy_executor_.pgo_);
-      Map<String, String> stats;
-      for (auto kv : shared_state_->lazy_executor_.execution_counts_) {
-        stats.Set(String(kv.first), String(std::to_string(kv.second)));
+      Map<String, Map<String, String>> stats;
+      for (auto kv : shared_state_->lazy_executor_.pgo_stats_) {
+        auto exe_count = kv.second.execution_counts_;
+        auto batch_size = (kv.second.average_dynamic_batch_size_ * 1.0) / std::max(exe_count, 1);
+        Map<String, String> this_stats;
+        this_stats.Set("exe_count", String(std::to_string(exe_count)));
+        this_stats.Set("batch_size", String(std::to_string(batch_size)));
+        stats.Set(String(kv.first), this_stats);
       }
       *rv = stats;
     });
@@ -1001,7 +1007,10 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
       //   } else {
       //     continue;
       //   }
-    } else if (vm->code_[vm->pc_ - 1].op == Opcode::InvokePacked) {
+      // } else if (vm->code_[vm->pc_ - 1].op == Opcode::InvokePacked) {
+    } else if ((vm->code_[vm->pc_].op == Opcode::Invoke &&
+                vm->code_[vm->pc_].func_index == DB_RANDOM_UNIFORM_INDEX) ||
+               vm->code_[vm->pc_].op == Opcode::If) {
       return kStageEnd;
     }
   }

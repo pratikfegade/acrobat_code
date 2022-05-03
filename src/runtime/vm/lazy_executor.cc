@@ -52,18 +52,6 @@ namespace runtime {
 namespace vm {
 VMDBProfiler* VMDBProfiler::instance_{nullptr};
 
-void GatherPGOStats(LazyExecutor<NDArray>* p_executor) {
-  LazyExecutor<NDArray>& executor = *p_executor;
-  auto& stats_map = executor.execution_counts_;
-  // std::cout << "[LZ] Gathering PGO Stats " << executor.nodes_.size() << std::endl;
-  for (auto& node : executor.nodes_) {
-    auto workload_key = executor.vm_shared_state_->exec_->autosched_workload_keys[node.func_idx_];
-    stats_map[workload_key]++;
-  }
-}
-
-/*********************************************************************/
-
 template <>
 void EagerAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Index arg_count,
                                                 const Index output_size, const ObjectRef* args,
@@ -450,11 +438,13 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
     VMDBProfiler::ProfileHostStopCall();
   }
 #endif
-  if (func_nodes.size() == 1) {
+  auto num_nodes = func_nodes.size();
+  if (num_nodes == 1) {
     InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
                            func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
   } else {
     auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
+    std::cout << "[VM] " << batched_func_idx << " " << num_nodes << std::endl;
     InvokePackedFnBatchedUnrolled(
         batched_func_idx, vm_shared_state_->packed_funcs_[batched_func_idx],
         func_nodes[0]->args_.size(), vm_shared_state_->batched_func_arg_mode_[batched_func_idx],
@@ -462,11 +452,14 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   }
   if (pgo_) {
     Index executed_func = func_idx;
-    if (func_nodes.size() > 1) {
+    if (num_nodes > 1) {
       executed_func = vm_shared_state_->batched_funcs_[func_idx];
     }
     auto workload_key = vm_shared_state_->exec_->autosched_workload_keys[executed_func];
-    execution_counts_[workload_key]++;
+    pgo_stats_[workload_key].execution_counts_++;
+    if (num_nodes > 1) {
+      pgo_stats_[workload_key].average_dynamic_batch_size_ += num_nodes;
+    }
   }
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
@@ -725,9 +718,6 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
 template <>
 void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                  bool all_nodes_same_depth) {
-  if (pgo_) {
-    GatherPGOStats(this);
-  }
   BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
 
   if (accelerator_device_ == GPU_INDEX) {

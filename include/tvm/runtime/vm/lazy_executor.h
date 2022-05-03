@@ -113,6 +113,11 @@ class AbstractExecutor {
   runtime::profiling::Profiler* profiler_{nullptr};
 };
 
+struct KernelPGOStats {
+  int execution_counts_{0};
+  int average_dynamic_batch_size_{0};
+};
+
 /*!
  * \brief A lazy tensor executor for the virtual machine.
  *
@@ -143,7 +148,7 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
   /*! \brief Whether to execute or to gather PGO stats */
   bool pgo_{false};
   /*! \brief Execution counts for PackedFuncs, for when pgo is turned on */
-  std::unordered_map<std::string, int> execution_counts_;
+  std::unordered_map<std::string, KernelPGOStats> pgo_stats_;
 };
 
 typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;

@@ -12,7 +12,7 @@ from tvm import relay
 from tvm import auto_scheduler
 import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
 
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
@@ -89,43 +89,8 @@ def print_time(time):
 
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
-    with pass_context:
-        def tune_fn(_tasks, _task_weights, _num_iterations):
-            if tune:
-                measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-                tuner = auto_scheduler.TaskScheduler(_tasks, _task_weights, load_log_file=log_file)
-                tune_option = auto_scheduler.TuningOptions(
-                    num_measure_trials=_num_iterations,
-                    runner=measure_ctx.runner,
-                    measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                )
-                tuner.tune(tune_option)
-
-        # Extract tasks
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True,
-                                                           execution_options=None)
-
-        # Build and execute on the CPU for PGO stats
-        tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                                      include_simple_tasks=True,
-                                                                      execution_options=execution_options)
-
-        executor, fin_executor = executors
-        params_list = inputs
-        executor.vm.set_input("main", batch_size, *params_list)
-        fin_executor()
-        stats = executor.vm.get_pgo_stats()
-        for i in range(len(tasks)):
-            key = tasks[i].compute_dag.workload_key()
-            task_weights[i] = int(stats.get(key, 1))
-
-        print(task_weights)
-        exit()
-
-        # Finally tune ops with updated weights
-        os.remove(log_file)
-        tune_fn(tasks, task_weights, 20000)
+    pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
+                          target, pass_context, execution_options)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):

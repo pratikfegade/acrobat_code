@@ -10,9 +10,9 @@ import numpy as np
 import tvm
 from tvm import relay
 from tvm import auto_scheduler
-from converter import initialize_tlstm, generate_random_trees_treelstm
+from converter import initialize_tlstm, generate_random_trees
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
 
 # target = "llvm -mcpu=core-avx2"
 target = "cuda"
@@ -40,7 +40,7 @@ tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
 
-trees = generate_random_trees_treelstm(num_nodes, batch_size, (1, hidden_size), prelude)
+trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
 
 weights_list = []
 weights_dict = {}
@@ -80,40 +80,43 @@ def print_time(time):
 
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
-    with pass_context:
-        tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                                      include_simple_tasks=True,
-                                                                      execution_options=execution_options)
+    pgo_and_auto_schedule(mod, weights_dict, trees, batch_size, log_file,
+                          target, pass_context, execution_options)
 
-        if executors:
-            print("Executing BRO")
-            executor, fin_executor = executors
-            params_list = []
-            for tree in trees: params_list += [tree]
-            executor.vm.set_input("main", batch_size, *params_list)
-            fin_executor()
+    # with pass_context:
+    #     tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
+    #                                                                   include_simple_tasks=True,
+    #                                                                   execution_options=execution_options)
 
-            stats = executor.vm.get_pgo_stats()
-            for i in range(len(tasks)):
-                key = tasks[i].compute_dag.workload_key()
-                task_weights[i] = int(stats.get(key, -1))
+    #     if executors:
+    #         print("Executing BRO")
+    #         executor, fin_executor = executors
+    #         params_list = []
+    #         for tree in trees: params_list += [tree]
+    #         executor.vm.set_input("main", batch_size, *params_list)
+    #         fin_executor()
 
-        if tune:
-            measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-            tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
-            tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=25000,
-                runner=measure_ctx.runner,
-                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-            )
-            # tuner.tune(tune_option)
+    #         stats = executor.vm.get_pgo_stats()
+    #         for i in range(len(tasks)):
+    #             key = tasks[i].compute_dag.workload_key()
+    #             task_weights[i] = int(stats.get(key, -1))
 
-        print(task_weights)
-        # for task in tasks:
-            # try:
-                # print("YOLO", task.print_best(log_file))
-            # except Exception:
-                # pass
+    #     if tune:
+    #         measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
+    #         tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
+    #         tune_option = auto_scheduler.TuningOptions(
+    #             num_measure_trials=25000,
+    #             runner=measure_ctx.runner,
+    #             measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+    #         )
+    #         # tuner.tune(tune_option)
+
+    #     print(task_weights)
+    #     # for task in tasks:
+    #         # try:
+    #             # print("YOLO", task.print_best(log_file))
+    #         # except Exception:
+    #             # pass
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):

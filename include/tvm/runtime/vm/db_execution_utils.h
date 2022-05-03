@@ -19,11 +19,8 @@
 
 /*!
  *
- * \file arena.h
+ * \file db_execution_utils.h
  * \brief Arena allocator that allocates memory chunks and frees them all during destruction time.
- *
- * NOTE: This file is portable to bare-metal embedded devices. Don't use operator new (without
- * placement parameters) or malloc.
  */
 #ifndef TVM_RUNTIME_VM_DB_EXECUTION_UTILS_H_
 #define TVM_RUNTIME_VM_DB_EXECUTION_UTILS_H_
@@ -59,7 +56,7 @@ inline int64_t NDToInt64(const NDArray& nd) {
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
   static std::random_device rd;
   /* static std::mt19937 gen(rd()); */
-  static std::mt19937 gen(0);
+  static std::mt19937 gen(4);
   return std::uniform_int_distribution<>(lo, hi)(gen);
 }
 
