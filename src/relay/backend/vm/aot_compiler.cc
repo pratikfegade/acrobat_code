@@ -1522,9 +1522,6 @@ void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
 inline std::string Bool2Str(bool a) { return a ? "true" : "false"; }
 
 void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
-  for (auto d : exec_.virtual_devices) {
-    std::cout << "DEVICE " << d << std::endl;
-  }
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> "
         "runner, bool profiling) {\n";
   os << "  int w_iters = 50;\n";

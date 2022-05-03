@@ -146,7 +146,6 @@ void InvokePackedFnUnrolled(const size_t func_idx, const PackedFunc& func, Tenso
  */
 template <typename TensorType>
 void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arg_count,
-                                   Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode<TensorType>*>& nodes);
 
@@ -165,6 +164,27 @@ void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const ObjectRef* args, int64_t num_args,
                     const std::vector<DBBatchedArgMode>& arg_modes, bool batched = false,
                     bool scattered_kernels = false);
+
+/*!
+ * \brief Print a DLTensor for debugging purposes
+ *
+ * \param tensor The DLTensor.
+ *
+ * \note The return value will be represent a debug string for the input tensor.
+ */
+inline std::string GetDLTensorInfo(const DLTensor* tensor) {
+  std::stringstream ss;
+  ss << "Tensor (" << tensor->dtype << ") [";
+  for (int i = 0; i < tensor->ndim; ++i) {
+    ss << tensor->shape[i] << " ";
+  }
+  ss << "] on device (" << tensor->device.device_type << ", " << tensor->device.device_id << ")";
+  if (tensor->data == nullptr) {
+    ss << " with null data";
+  }
+  return ss.str();
+}
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

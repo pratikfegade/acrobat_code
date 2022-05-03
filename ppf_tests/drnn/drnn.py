@@ -21,32 +21,37 @@ mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 
 main_func = mod["main"]
 
-batch_size=8
-hidden_size=64
+batch_size=4
+hidden_size=256
 target = "cuda"
 device = tvm.runtime.device(target)
 
 weights_list = []
 weights_dict = {
-    main_func.params[0].name_hint: get_random_tensor((256, 512)),
-    main_func.params[1].name_hint: get_random_tensor((1, 256)),
-    main_func.params[2].name_hint: get_random_tensor((256, 512)),
-    main_func.params[3].name_hint: get_random_tensor((1, 256)),
-    main_func.params[4].name_hint: get_random_tensor((256, 512)),
-    main_func.params[5].name_hint: get_random_tensor((256, 256)),
-    main_func.params[6].name_hint: get_random_tensor((1, 256)),
-    main_func.params[7].name_hint: get_random_tensor((1, 256)),
-    main_func.params[8].name_hint: get_random_tensor((2, 256)),
+    main_func.params[0].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[1].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[2].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[3].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[4].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[5].name_hint: get_random_tensor((hidden_size, hidden_size)),
+    main_func.params[6].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[7].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[8].name_hint: get_random_tensor((2, hidden_size)),
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
 
+inputs = []
+for i in range(batch_size):
+    inputs.append(get_random_tensor((1, hidden_size)))
+    inputs.append(get_random_tensor((1, hidden_size)))
+
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
-use_autoscheduler=False
+use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
@@ -85,18 +90,42 @@ def print_time(time):
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
     with pass_context:
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True)
+        def tune_fn(_tasks, _task_weights, _num_iterations):
+            if tune:
+                measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
+                tuner = auto_scheduler.TaskScheduler(_tasks, _task_weights, load_log_file=log_file)
+                tune_option = auto_scheduler.TuningOptions(
+                    num_measure_trials=_num_iterations,
+                    runner=measure_ctx.runner,
+                    measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+                )
+                tuner.tune(tune_option)
 
-        if tune:
-            measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-            tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
-            tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20000,
-                runner=measure_ctx.runner,
-                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-            )
-            tuner.tune(tune_option)
+        # Extract tasks
+        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
+                                                           include_simple_tasks=True,
+                                                           execution_options=None)
+
+        # Build and execute on the CPU for PGO stats
+        tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
+                                                                      include_simple_tasks=True,
+                                                                      execution_options=execution_options)
+
+        executor, fin_executor = executors
+        params_list = inputs
+        executor.vm.set_input("main", batch_size, *params_list)
+        fin_executor()
+        stats = executor.vm.get_pgo_stats()
+        for i in range(len(tasks)):
+            key = tasks[i].compute_dag.workload_key()
+            task_weights[i] = int(stats.get(key, 1))
+
+        print(task_weights)
+        exit()
+
+        # Finally tune ops with updated weights
+        os.remove(log_file)
+        tune_fn(tasks, task_weights, 20000)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
@@ -117,5 +146,5 @@ def execute():
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
-print("===============================================================================", flush=True)
-execute()
+# print("===============================================================================", flush=True)
+# execute()

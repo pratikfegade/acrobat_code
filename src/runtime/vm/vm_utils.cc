@@ -22,6 +22,8 @@
  * \brief The Relay virtual machine runtime.
  */
 
+#include "vm_utils.h"
+
 #include <dmlc/memory_io.h>
 #include <tvm/runtime/container/adt.h>
 #include <tvm/runtime/logging.h>
@@ -133,7 +135,7 @@ void TestNDArray(const NDArray& array) { TestNDArray(const_cast<DLTensor*>(array
 void TestPointerNDArray(const NDArray& ptr_array, int64_t total_nums, int64_t batch_size) {
   for (int i = 0; i < batch_size; ++i) {
     for (int j = 0; j < total_nums; ++j) {
-      static_cast<float**>(ptr_array->data)[i][j] = 1.0;
+      static_cast<int32_t**>(ptr_array->data)[i][j] = 999;
     }
   }
 }
@@ -178,25 +180,13 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg
   NDArray result = NDArray::Empty(ShapeTuple({static_cast<int64_t>(size)}),
                                   DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
                                   nodes[0]->args_[arg_num]->device);
+
   void** raw_data = static_cast<void**>(result->data);
-
-  // constexpr size_t unroll_factor = 16;
-  // size_t preloop_bound = size / unroll_factor;
-
-  // #pragma omp parallel for
-  //   for (size_t jo = 0; jo < preloop_bound; ++jo) {
-  // #pragma GCC unroll unroll_factor
-  //     for (size_t ji = 0; ji < unroll_factor; ++ji) {
-  //       size_t j = jo * unroll_factor + ji;
-  //       raw_data[j] = nodes[j]->args_[arg_num]->data;
-  //     }
-  //   }
-
   for (size_t j = 0; j < size; ++j) {
     raw_data[j] = nodes[j]->args_[arg_num]->data;
   }
 
-  TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
+  // TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
 
   return result;
 }
@@ -421,99 +411,101 @@ template void InvokePackedFnUnrolled<DLTensor*>(const size_t func_idx, const Pac
 
 template <typename TensorType>
 void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func, Index arity,
-                                   Index output_size,
                                    const std::vector<DBBatchedArgMode>& arg_modes,
                                    const std::vector<OpNode<TensorType>*>& nodes) {
-  // if (VMDBProfiler::DoProfile()) {
-  //   VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
-  // }
-  // // std::cout << "[UMA] Executing" << std::endl;
-  // bool print = false;
-  // ICHECK_EQ(arity, arg_modes.size());
-  // int32_t batch_size = nodes.size();
+#ifdef DB_PROFILING
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStartCall("arg_prep_batched");
+  }
+#endif
+  bool print = false;
+  ICHECK_EQ(arity, arg_modes.size());
+  int32_t batch_size = nodes.size();
 
-  // std::vector<TVMValue> values(arity + 1);
-  // std::vector<int> codes(arity + 1);
-  // std::vector<NDArray> arg_holder(arity);
-  // runtime::TVMArgsSetter setter(values.data(), codes.data());
-  // setter(0, batch_size);
-  // if (print) {
-  //   std::cout << "[VMU]    BatchSize 0 " << batch_size << std::endl;
-  // }
-  // int ctr = 1;
-  // for (Index i = 0; i < arity; ++i) {
-  //   switch (arg_modes[i]) {
-  //     case kIgnore: {
-  //       if (print) {
-  //         std::cout << "[VMU]    Ignoring " << i << std::endl;
-  //       }
-  //       break;
-  //     }
-  //     case kReuse: {
-  //       // arg_holder[i] = nodes[0]->args_[i];
-  //       setter(ctr, nodes[0]->args_[i]);
-  //       if (print) {
-  //         std::cout << "[VMU]    ArgReuse " << ctr << " "
-  //                   << ShapeToString(nodes[0]->args_[i].Shape()) << std::endl;
-  //       }
-  //       ctr += 1;
-  //       break;
-  //     }
-  //     case kScatter: {
-  //       arg_holder[i] = CreatePointerNDArray(nodes, i);
-  //       setter(ctr, arg_holder[i]);
-  //       if (print) {
-  //         std::cout << "[VMU]    ArgScatter " << ctr << " " <<
-  //         ShapeToString(arg_holder[i].Shape())
-  //                   << std::endl;
-  //       }
-  //       ctr += 1;
-  //       break;
-  //     }
-  //     case kConcat: {
-  //       std::vector<NDArray> to_concat(batch_size);
-  //       for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
-  //         to_concat[j] = nodes[j]->args_[i];
-  //       }
+  std::vector<TVMValue> values(arity + 1);
+  std::vector<int> codes(arity + 1);
+  static std::vector<NDArray> arg_holder;
+  runtime::TVMArgsSetter setter(values.data(), codes.data());
+  setter(0, batch_size);
+  if (print) {
+    std::cout << "[VMU]    BatchSize 0 " << batch_size << std::endl;
+  }
+  int ctr = 1;
+  for (Index i = 0; i < arity; ++i) {
+    switch (arg_modes[i]) {
+      case kIgnore: {
+        if (print) {
+          std::cout << "[VMU]    Ignoring " << i << std::endl;
+        }
+        break;
+      }
+      case kReuse: {
+        setter(ctr, nodes[0]->args_[i]);
+        if (print) {
+          std::cout << "[VMU]    ArgReuse " << ctr << std::endl;
+        }
+        ctr += 1;
+        break;
+      }
+      case kScatter: {
+        arg_holder.push_back(CreatePointerNDArray(nodes, i));
+        setter(ctr, arg_holder.back());
+        if (print) {
+          std::cout << "[VMU]    ArgScatter " << ctr << " "
+                    << GetDLTensorInfo(arg_holder.back().operator->()) << std::endl;
+        }
+        ctr += 1;
+        break;
+      }
+      case kConcat: {
+        std::vector<NDArray> to_concat(batch_size);
+        for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
+          to_concat[j] = nodes[j]->args_[i];
+        }
 
-  //       if (print) {
-  //         std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
-  //       }
-  //       NDArray concat_array = CreateConcatenatedNDArray(to_concat);
-  //       arg_holder[i] = concat_array;
-  //       setter(ctr, concat_array);
-  //       if (print) {
-  //         std::cout << "[VMU]    ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
-  //                   << std::endl;
-  //       }
-  //       ctr += 1;
+        if (print) {
+          std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
+        }
+        NDArray concat_array = CreateConcatenatedNDArray(to_concat);
+        arg_holder.push_back(concat_array);
+        setter(ctr, concat_array);
+        if (print) {
+          std::cout << "[VMU]    ArgConcat " << ctr << " " << ShapeToString(concat_array.Shape())
+                    << std::endl;
+        }
+        ctr += 1;
 
-  //       // ICHECK(false) << "Concat not implemented yet!";
-  //       // break;
-  //     }
-  //   }
-  // }
+        // ICHECK(false) << "Concat not implemented yet!";
+        // break;
+      }
+    }
+  }
 
-  // // std::cout << "[VMU]    Calling " << ctr << " " << arity << std::endl;
-  // if (VMDBProfiler::DoProfile()) {
-  //   VMDBProfiler::ProfileHostStopCall();
-  //   VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
-  // }
-  // TVMRetValue rv;
-  // func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
-  // if (VMDBProfiler::DoProfile()) {
-  //   VMDBProfiler::ProfileDeviceStopCall();
-  // }
+  // std::cout << "[VMU]    Calling " << ctr << " " << arity << std::endl;
+#ifdef DB_PROFILING
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileHostStopCall();
+    VMDBProfiler::ProfileDeviceStartCall("Kernel_" + std::to_string(func_idx));
+  }
+#endif
+  TVMRetValue rv;
+  func.CallPacked(TVMArgs(values.data(), codes.data(), ctr), &rv);
+#ifdef DB_PROFILING
+  if (VMDBProfiler::DoProfile()) {
+    VMDBProfiler::ProfileDeviceStopCall();
+  }
+#endif
 }
 
 template void InvokePackedFnBatchedUnrolled<NDArray>(const size_t func_idx, const PackedFunc& func,
-                                                     Index arity, Index output_size,
+                                                     Index arity,
                                                      const std::vector<DBBatchedArgMode>& arg_modes,
                                                      const std::vector<OpNode<NDArray>*>& nodes);
 
-template void InvokePackedFnBatchedUnrolled<DLTensor*>(
-    const size_t func_idx, const PackedFunc& func, Index arity, Index output_size,
-    const std::vector<DBBatchedArgMode>& arg_modes, const std::vector<OpNode<DLTensor*>*>& nodes);
+// template void InvokePackedFnBatchedUnrolled<DLTensor*>(
+//     const size_t func_idx, const PackedFunc& func, Index arity,
+//     const std::vector<DBBatchedArgMode>& arg_modes, const std::vector<OpNode<DLTensor*>*>&
+//     nodes);
 
 void InvokePackedFn(const PackedFunc& func, Index arg_count, Index output_size,
                     const ObjectRef* args, int64_t num_args,

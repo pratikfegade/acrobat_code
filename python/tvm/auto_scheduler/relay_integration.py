@@ -63,31 +63,29 @@ def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None, exe
                                                  config={"relay.backend.use_auto_scheduler": True,
                                                          "relay.db_autoscheduler_pass": True})
 
-    # with pass_context:
-    #     compiler = relay.vm.VMCompiler()
-    #     if params:
-    #         compiler.set_params(params)
-    #     mod = tvm.IRModule.from_expr(mod) if isinstance(mod, relay.Function) else mod
-    #     try:
-    #         compiler.lower(mod, target)
-    #     except TVMError:
-    #         logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
-    #     finally:
-    #         autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
-
-    fin_executor = None
-    executor = None
     with pass_context:
-        device = tvm.runtime.device("cuda", 0)
-        executor = relay.backend.vm.VMExecutor(mod, device, target)
-        try:
-            fin_executor = executor._make_executor(execution_options=execution_options, params=params)
-        except TVMError:
-            logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
-        finally:
-            autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
-
-    return (executor, fin_executor)
+        if execution_options:
+            fin_executor = None
+            executor = relay.backend.vm.VMExecutor(mod, tvm.runtime.device("cpu"), "llvm")
+            try:
+                fin_executor = executor._make_executor(execution_options=execution_options, params=params)
+            except TVMError:
+                logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
+            finally:
+                autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
+            return (executor, fin_executor)
+        else:
+            compiler = relay.vm.VMCompiler()
+            if params:
+                compiler.set_params(params)
+                mod = tvm.IRModule.from_expr(mod) if isinstance(mod, relay.Function) else mod
+            try:
+                compiler.lower(mod, target)
+            except TVMError:
+                logger.warning("Got exception in task extraction:\n %s", traceback.format_exc())
+            finally:
+                autotvm.GLOBAL_SCOPE.silent = old_autotvm_silent
+            return None
 
 class ThreadWithResult(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
@@ -155,15 +153,11 @@ def extract_tasks(
     with env:
         # Wrap build call in a new thread to avoid the conflict
         # between python's multiprocessing and tvm's thread pool
-        # build_thread = threading.Thread(
-            # target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context)
-        # )
         build_thread = ThreadWithResult(
             target=call_all_topi_funcs, args=(mod, params, target, opt_level, pass_context, execution_options)
         )
         build_thread.start()
         build_thread.join()
-
         fin_executor = build_thread.result
 
     dispatch_ctx.verbose = old_verbose
@@ -172,7 +166,7 @@ def extract_tasks(
     tasks = []
     weights = []
     for wkl_key, (weight, func_names) in env.wkl_key_to_weight.items():
-        print("EXTRACT TASKS:", wkl_key, type(wkl_key))
+        # print("EXTRACT TASKS:", wkl_key, type(wkl_key))
         task = SearchTask(
             workload_key=wkl_key,
             target=target,
@@ -197,7 +191,11 @@ def extract_tasks(
         with open(dump_workload_to_dag_log, "w") as f:
             json.dump({task.workload_key: str(task.compute_dag) for task in tasks}, f)
 
-    return tasks, weights, fin_executor
+    if execution_options:
+        return tasks, weights, fin_executor
+    else:
+        return tasks, weights
+
 
 
 class TracingMode:
@@ -422,7 +420,6 @@ def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
             if input_map:
                 env.add_workload_input_names(key, list(input_map.values()))
             wkl_key_ret = key
-            print("GRINDELWALD", key)
     elif env.tracing_mode == TracingMode.PREPARE_LAYOUT_REWRITE:
         pass
         #######################################################################

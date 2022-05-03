@@ -691,12 +691,8 @@ transform::Sequential MixedModulePassManager(IRModule mixed_mod, Target target, 
   Array<Pass> mixed_pass_list;
 
   mixed_pass_list.push_back(BindTarget(target));
+  mixed_pass_list.push_back(tir::transform::VerifyMemory());
 
-  bool extracting_tasks =
-      pass_ctx->GetConfig<Bool>("relay.backend.use_auto_scheduler", Bool(false)).value();
-  if (!extracting_tasks) {
-    mixed_pass_list.push_back(tir::transform::VerifyMemory());
-  }
   if (ShouldAnnotateEntryFunc(mixed_mod)) {
     mixed_pass_list.push_back(AnnotateEntryFunc(true));
   }

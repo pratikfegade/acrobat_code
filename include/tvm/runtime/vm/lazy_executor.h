@@ -143,7 +143,7 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
   /*! \brief Whether to execute or to gather PGO stats */
   bool pgo_{false};
   /*! \brief Execution counts for PackedFuncs, for when pgo is turned on */
-  Map<String, String> execution_counts_;
+  std::unordered_map<std::string, int> execution_counts_;
 };
 
 typedef LazyExecutor<NDArray> EagerAllocationLazyExecutor;

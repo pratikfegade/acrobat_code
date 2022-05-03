@@ -10,7 +10,7 @@ import numpy as np
 import tvm
 from tvm import relay
 from tvm import auto_scheduler
-from converter import initialize_tlstm, generate_random_trees
+from converter import initialize_tlstm, generate_random_trees_treelstm
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor
 
@@ -40,7 +40,7 @@ tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
 
-trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
+trees = generate_random_trees_treelstm(num_nodes, batch_size, (1, hidden_size), prelude)
 
 weights_list = []
 weights_dict = {}

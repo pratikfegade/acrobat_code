@@ -27,6 +27,7 @@
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
+#include <tvm/runtime/vm/db_execution_utils.h>
 #include <tvm/runtime/vm/vm.h>
 
 #include <algorithm>
@@ -109,7 +110,11 @@ PackedFunc VirtualMachine::GetFunction(const std::string& name,
   } else if (name == "get_pgo_stats") {
     return PackedFunc([sptr_to_self, this](TVMArgs args, TVMRetValue* rv) {
       ICHECK(shared_state_->lazy_executor_.pgo_);
-      *rv = shared_state_->lazy_executor_.execution_counts_;
+      Map<String, String> stats;
+      for (auto kv : shared_state_->lazy_executor_.execution_counts_) {
+        stats.Set(String(kv.first), String(std::to_string(kv.second)));
+      }
+      *rv = stats;
     });
   } else if (name == "invoke_stateful") {
     // TODO(tkonolige, jroesch, tqchen): invoke_stateful and get_output are
@@ -454,8 +459,6 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
     shared_state_->inouts_start[packed_index] = num_inputs + num_outputs;
     shared_state_->args_end[packed_index] = arg_access_modes.size();
 
-    std::cout << "[VM] Fun " << packed_index << " " << packed_name << std::endl;
-
     ICHECK(pf != nullptr) << packed_name;
     auto& registry = ::tvm::runtime::Registry::Register(packed_name);
     registry.set_body(pf);
@@ -468,6 +471,32 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
         }
         shared_state_->batched_funcs_[packed_index] = bit->second;
       }
+    }
+
+    bool print = true;
+    if (print) {
+      if (batched_execution_) {
+        std::cout << "[VM] Fun " << packed_index << " " << packed_name;
+        if (!IsBatchedName(packed_name)) {
+          std::cout << " " << shared_state_->batched_funcs_[packed_index];
+        }
+      } else {
+        std::cout << "[VM] Fun " << packed_index << " " << packed_name;
+      }
+
+      if (coarsened_execution_) {
+        std::cout << "  ScMode: [";
+        for (size_t i = 0; i < shared_state_->batched_func_arg_mode_[packed_index].size(); ++i) {
+          std::cout << shared_state_->batched_func_arg_mode_[packed_index][i] << " ";
+        }
+        std::cout << "]";
+      }
+      std::cout << "   AccMode: [";
+      for (size_t i = 0; i < shared_state_->prim_func_arg_access_mode_[packed_index].size(); ++i) {
+        std::cout << shared_state_->prim_func_arg_access_mode_[packed_index][i] << " ";
+      }
+      std::cout << "] " << shared_state_->outputs_start[packed_index] << " "
+                << shared_state_->inouts_start[packed_index] << std::endl;
     }
   }
 
@@ -514,7 +543,8 @@ ObjectRef VirtualMachine::ReadRegister(Index r) const { return frames_.back().re
 
 int64_t VirtualMachine::LoadScalarInt(Index r) const {
   int64_t result = 0;
-  const auto& obj = ReadRegister(r);
+  const auto& obj = Downcast<NDArray>(ReadRegister(r));
+
   NDArray array =
       Downcast<NDArray>(CopyTo(obj, GetDevice(shared_state_->exec_->host_device_index)));
 
@@ -560,6 +590,7 @@ void VirtualMachine::RunLoop() {
 bool VirtualMachine::RunOneIteration(int frame_start) {
   auto const& instr = code_[this->pc_];
   VLOG(2) << "Executing(" << pc_ << "): " << instr;
+  // std::cout << "Executing(" << pc_ << "): " << instr << std::endl;
 
   switch (instr.op) {
     case Opcode::Move: {
@@ -599,26 +630,46 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
       return false;
     }
     case Opcode::LoadConsti: {
+      // auto tensor =
+      // NDArray::Empty({1}, {kDLInt, 64, 1}, GetDevice(shared_state_->exec_->host_device_index));
+      // reinterpret_cast<int64_t*>(tensor->data)[0] = instr.load_consti.val;
+
       auto tensor =
-          NDArray::Empty({1}, {kDLInt, 64, 1}, GetDevice(shared_state_->exec_->host_device_index));
-      reinterpret_cast<int64_t*>(tensor->data)[0] = instr.load_consti.val;
+          NDArray::Empty({}, {kDLInt, 32, 1}, GetDevice(shared_state_->exec_->host_device_index));
+      reinterpret_cast<int32_t*>(tensor->data)[0] = instr.load_consti.val;
+
       WriteRegister(instr.dst, tensor);
       pc_++;
       return false;
     }
     case Opcode::Invoke: {
-      std::vector<ObjectRef> args;
-      for (Index i = 0; i < instr.num_args; ++i) {
-        args.push_back(ReadRegister(instr.invoke_args_registers[i]));
+      if (instr.func_index == DB_RANDOM_UNIFORM_INDEX) {
+        ICHECK_EQ(instr.num_args, 2);
+        auto lo = LoadScalarInt(instr.invoke_args_registers[0]);
+        auto hi = LoadScalarInt(instr.invoke_args_registers[1]);
+        auto output = GetRandom(lo, hi);
+
+        auto tensor =
+            NDArray::Empty({}, {kDLInt, 32, 1}, GetDevice(shared_state_->exec_->host_device_index));
+        reinterpret_cast<int32_t*>(tensor->data)[0] = output;
+        auto output_reg = instr.dst;
+        WriteRegister(output_reg, tensor);
+        pc_++;
+      } else {
+        std::vector<ObjectRef> args;
+        for (Index i = 0; i < instr.num_args; ++i) {
+          args.push_back(ReadRegister(instr.invoke_args_registers[i]));
+        }
+        InvokeGlobal(shared_state_->exec_->functions[instr.func_index], args, 0);
+        frames_.back().caller_return_register = instr.dst;
       }
-      InvokeGlobal(shared_state_->exec_->functions[instr.func_index], args, 0);
-      frames_.back().caller_return_register = instr.dst;
       return false;
     }
     case Opcode::InvokePacked: {
       VLOG(2) << "InvokedPacked " << instr.packed_index << " arity=" << instr.arity;
-      // std::cout << vm_id_ << " InvokedPacked " << instr.packed_index << " arity=" << instr.arity
-      // << std::endl;
+
+      // std::cout << vm_id_ << " InvokedPacked " << instr.packed_index << " arity=" <<
+      // instr.arity << std::endl;
       ICHECK_LE(instr.packed_index, shared_state_->packed_funcs_.size());
       const auto& arity = instr.arity;
       std::vector<ObjectRef> args;
@@ -679,6 +730,8 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
     case Opcode::If: {
       int32_t test_val = LoadScalarInt(instr.if_op.test);
       int32_t target_val = LoadScalarInt(instr.if_op.target);
+
+      // std::cout << "[VM] If " << test_val << " " << target_val << std::endl;
 
       if (test_val == target_val) {
         ICHECK_NE(instr.if_op.true_offset, 0);
@@ -941,13 +994,13 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
     // std::endl;
     if (vm->RunOneIteration(frame_start)) {
       return kExecutionEnd;
-    } else if (lazy_execution_) {
-      if (false /* Some condition that checks if the value of a tensor
-		  is to be read */) {
-        return kStageEnd;
-      } else {
-        continue;
-      }
+      // } else if (lazy_execution_) {
+      //   if (false /* Some condition that checks if the value of a tensor
+      // 		  is to be read */) {
+      //     return kStageEnd;
+      //   } else {
+      //     continue;
+      //   }
     } else if (vm->code_[vm->pc_ - 1].op == Opcode::InvokePacked) {
       return kStageEnd;
     }
