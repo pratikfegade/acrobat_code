@@ -444,7 +444,6 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
                            func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
   } else {
     auto batched_func_idx = vm_shared_state_->batched_funcs_[func_idx];
-    std::cout << "[VM] " << batched_func_idx << " " << num_nodes << std::endl;
     InvokePackedFnBatchedUnrolled(
         batched_func_idx, vm_shared_state_->packed_funcs_[batched_func_idx],
         func_nodes[0]->args_.size(), vm_shared_state_->batched_func_arg_mode_[batched_func_idx],

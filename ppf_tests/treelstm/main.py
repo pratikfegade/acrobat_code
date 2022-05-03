@@ -83,41 +83,6 @@ def auto_schedule(tune):
     pgo_and_auto_schedule(mod, weights_dict, trees, batch_size, log_file,
                           target, pass_context, execution_options)
 
-    # with pass_context:
-    #     tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-    #                                                                   include_simple_tasks=True,
-    #                                                                   execution_options=execution_options)
-
-    #     if executors:
-    #         print("Executing BRO")
-    #         executor, fin_executor = executors
-    #         params_list = []
-    #         for tree in trees: params_list += [tree]
-    #         executor.vm.set_input("main", batch_size, *params_list)
-    #         fin_executor()
-
-    #         stats = executor.vm.get_pgo_stats()
-    #         for i in range(len(tasks)):
-    #             key = tasks[i].compute_dag.workload_key()
-    #             task_weights[i] = int(stats.get(key, -1))
-
-    #     if tune:
-    #         measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-    #         tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
-    #         tune_option = auto_scheduler.TuningOptions(
-    #             num_measure_trials=25000,
-    #             runner=measure_ctx.runner,
-    #             measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-    #         )
-    #         # tuner.tune(tune_option)
-
-    #     print(task_weights)
-    #     # for task in tasks:
-    #         # try:
-    #             # print("YOLO", task.print_best(log_file))
-    #         # except Exception:
-    #             # pass
-
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
         with pass_context:

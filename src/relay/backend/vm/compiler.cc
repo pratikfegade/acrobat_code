@@ -747,9 +747,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
       std::vector<Index> argument_registers;
 
-      std::cout << "[COMP] Visiting " << call_node->args[0] << "  " << call_node->args[1]
-                << std::endl;
-
       VisitExpr(call_node->args[0]);
       argument_registers.push_back(last_register_);
       VisitExpr(call_node->args[1]);

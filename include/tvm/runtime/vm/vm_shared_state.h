@@ -55,21 +55,25 @@ class VMExecutionOptionsNode : public Object {
   /*! \brief whether to launch multiple concurrent VMs, each
    * corresponding to one batch element instance */
   bool concurrent_execution;
+  /*! \brief is this a pgo run */
+  bool pgo;
   /*! \brief the batch size to be used for execution */
   size_t batch_size;
 
   VMExecutionOptionsNode() {}
   VMExecutionOptionsNode(bool coarsened_execution_, bool lazy_execution_, bool batched_execution_,
-                         bool scattered_kernels_, bool concurrent_execution_, size_t batch_size_)
+                         bool scattered_kernels_, bool concurrent_execution_, bool pgo_,
+                         size_t batch_size_)
       : coarsened_execution(coarsened_execution_),
         lazy_execution(lazy_execution_),
         batched_execution(batched_execution_),
         scattered_kernels(scattered_kernels_),
         concurrent_execution(concurrent_execution_),
+        pgo(pgo_),
         batch_size(batch_size_) {}
 
   static constexpr const uint32_t _type_index = TypeIndex::kDynamic;
-  static constexpr const char* _type_key = "VMExecutionOptions";
+  static constexpr const char* _type_key = "vm.VMExecutionOptions";
   TVM_DECLARE_FINAL_OBJECT_INFO(VMExecutionOptionsNode, Object);
 };
 
@@ -81,7 +85,8 @@ class VMExecutionOptions : public ObjectRef {
    * \param lazy_execution whether to execute tensor operations lazily.
    */
   TVM_DLL VMExecutionOptions(bool coarsened_execution, bool lazy_execution, bool batched_execution,
-                             bool scattered_kernels, bool concurrent_execution, size_t batch_size);
+                             bool scattered_kernels, bool concurrent_execution, bool pgo,
+                             size_t batch_size);
   // declare VMExecutionOptions.
   TVM_DEFINE_OBJECT_REF_METHODS(VMExecutionOptions, ObjectRef, VMExecutionOptionsNode);
 };

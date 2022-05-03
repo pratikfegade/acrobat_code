@@ -47,6 +47,8 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
                                                            execution_options=None)
 
         # Build and execute on the CPU for PGO stats
+        pass_context, execution_options = relay.backend.vm.create_pgo_workflow_configs(pass_context,
+                                                                                       execution_options)
         tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                                       include_simple_tasks=True,
                                                                       execution_options=execution_options)
@@ -65,6 +67,7 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
 
         print(task_weights)
         print(dynamic_batch_sizes)
+        exit()
 
         # Finally tune ops with updated weights
         tune_fn(tasks, task_weights, 20000)

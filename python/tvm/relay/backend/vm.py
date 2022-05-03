@@ -71,6 +71,23 @@ def create_workflow_configs(lazy_execution=False,
     pass_context = tvm.transform.PassContext(opt_level=opt_level, config=config)
     return pass_context, execution_options
 
+def create_pgo_workflow_configs(pass_context, execution_options):
+    config = {
+        "relay.db_coarsen_granularity": False,
+        "relay.db_batched_execution": True,
+        "relay.db_lazy_execution": True,
+        "relay.db_scattered_kernels": pass_context.config["relay.db_scattered_kernels"],
+        "relay.db_concurrent_execution": pass_context.config["relay.db_concurrent_execution"],
+        "relay.db_dynamic_batch_size_estimate": pass_context.config["relay.db_dynamic_batch_size_estimate"],
+        "relay.backend.use_auto_scheduler": pass_context.config["relay.backend.use_auto_scheduler"],
+        "relay.db_aot_output_directory": pass_context.config["relay.db_aot_output_directory"],
+        "relay.db_use_depth_tracking": False,
+        "relay.db_perform_static_scheduling": False,
+        "relay.db_generate_aot_code": False,
+        "relay.db_model_name": pass_context.config["relay.db_model_name"],
+    }
+    pass_context = tvm.transform.PassContext(opt_level=pass_context.opt_level, config=config)
+    return pass_context, execution_options.create_pgo_execution_options()
 
 def compile(mod, target=None, target_host=None, params=None):
     """Compile the module to VM executable. A helper function for VMCompiler.

@@ -87,13 +87,12 @@ PackedFunc Executable::GetFunction(const std::string& name, const ObjectPtr<Obje
       VMExecutionOptions options = args[0];
       ObjectPtr<VirtualMachine> vm;
       if (options->concurrent_execution) {
-        // std::cout << "[EXE] Making concurrent VM" << std::endl;
         vm = make_object<ConcurrentVirtualMachine>();
       } else {
         vm = make_object<VirtualMachine>();
       }
       vm->SetExecutionOptions(options);
-      vm->InitSharedState();
+      vm->InitSharedState(options->pgo);
       vm->LoadExecutable(this);
       *rv = Module(vm);
     });

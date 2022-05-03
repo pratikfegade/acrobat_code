@@ -200,7 +200,7 @@ class VirtualMachine : public runtime::ModuleNode {
   /*!
    * \brief Initialize the shared state if needed.
    */
-  virtual void InitSharedState();
+  virtual void InitSharedState(bool pgo);
 
  protected:
   /*! \brief Push a call frame on to the call stack. */
@@ -400,7 +400,7 @@ class ConcurrentVirtualMachine : public VirtualMachine {
   /*!
    * \brief Initialize the shared state if needed.
    */
-  void InitSharedState() override;
+  void InitSharedState(bool pgo) override;
 
  protected:
   /*!

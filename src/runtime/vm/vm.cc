@@ -51,16 +51,23 @@ TVM_REGISTER_OBJECT_TYPE(VMExecutionOptionsNode);
 
 VMExecutionOptions::VMExecutionOptions(bool coarsened_execution, bool lazy_execution,
                                        bool batched_execution, bool scattered_kernels,
-                                       bool concurrent_execution, size_t batch_size)
-    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(coarsened_execution, lazy_execution,
-                                                             batched_execution, scattered_kernels,
-                                                             concurrent_execution, batch_size)) {}
+                                       bool concurrent_execution, bool pgo, size_t batch_size)
+    : VMExecutionOptions(make_object<VMExecutionOptionsNode>(
+          coarsened_execution, lazy_execution, batched_execution, scattered_kernels,
+          concurrent_execution, pgo, batch_size)) {}
 
 TVM_REGISTER_GLOBAL("runtime.CreateVMExecutionOptions")
     .set_body_typed([](bool coarsened_execution, bool lazy_execution, bool batched_execution,
-                       bool scattered_kernels, bool concurrent_execution, size_t batch_size) {
+                       bool scattered_kernels, bool concurrent_execution, bool pgo,
+                       size_t batch_size) {
       return VMExecutionOptions(coarsened_execution, lazy_execution, batched_execution,
-                                scattered_kernels, concurrent_execution, batch_size);
+                                scattered_kernels, concurrent_execution, pgo, batch_size);
+    });
+
+TVM_REGISTER_GLOBAL("runtime.CreatePGOVMExecutionOptions")
+    .set_body_typed([](VMExecutionOptions options) {
+      return VMExecutionOptions(false, true, true, true, options->concurrent_execution, true,
+                                options->batch_size);
     });
 
 VMClosure::VMClosure(size_t func_index, std::vector<ObjectRef> free_vars) {
@@ -265,10 +272,10 @@ void VirtualMachine::SetInput(std::string func_name, TVMArgs args, int offset, i
   inputs_.emplace(func_name, batch_func_args);
 }
 
-void VirtualMachine::InitSharedState() {
+void VirtualMachine::InitSharedState(bool pgo) {
   if (!shared_state_) {
     shared_state_ = new VMSharedState<EagerAllocationLazyExecutor>();
-    shared_state_->lazy_executor_.SetPGO(true);
+    this->shared_state_->lazy_executor_.SetPGO(pgo);
   }
   this->shared_state_->lazy_executor_.vm_shared_state_ = this->shared_state_;
 }
@@ -983,9 +990,9 @@ void ConcurrentVirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   }
 }
 
-void ConcurrentVirtualMachine::InitSharedState() {
+void ConcurrentVirtualMachine::InitSharedState(bool pgo) {
   this->concurrent_vm_ = true;
-  VirtualMachine::InitSharedState();
+  VirtualMachine::InitSharedState(pgo);
   for (auto& vm : vms_) {
     VirtualMachine* vm_ptr = GetVMFromModule(vm);
     vm_ptr->shared_state_ = this->shared_state_;
