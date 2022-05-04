@@ -20,30 +20,44 @@ mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 
 main_func = mod["main"]
 
+num_heads=8
+head_size=64
+model_size=head_size*num_heads
+ff_size=2048
+seq_len=128
 batch_size=4
-hidden_size=256
 target = "cuda"
 device = tvm.runtime.device(target)
 
 weights_list = []
 weights_dict = {
-    main_func.params[0].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
-    main_func.params[1].name_hint: get_random_tensor((1, hidden_size)),
-    main_func.params[2].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
-    main_func.params[3].name_hint: get_random_tensor((1, hidden_size)),
-    main_func.params[4].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
-    main_func.params[5].name_hint: get_random_tensor((hidden_size, hidden_size)),
-    main_func.params[6].name_hint: get_random_tensor((1, hidden_size)),
-    main_func.params[7].name_hint: get_random_tensor((1, hidden_size)),
-    main_func.params[8].name_hint: get_random_tensor((2, hidden_size)),
+    main_func.params[0].name_hint: get_random_tensor((model_size, model_size)),
+    main_func.params[1].name_hint: get_random_tensor((model_size, model_size)),
+    main_func.params[2].name_hint: get_random_tensor((model_size, model_size)),
+    main_func.params[3].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[4].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[5].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[6].name_hint: get_random_tensor((model_size,)),
+    main_func.params[7].name_hint: get_random_tensor((model_size,)),
+    main_func.params[8].name_hint: get_random_tensor((model_size, model_size)),
+    main_func.params[9].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[10].name_hint: get_random_tensor((ff_size, model_size)),
+    main_func.params[11].name_hint: get_random_tensor((1, ff_size)),
+    main_func.params[12].name_hint: get_random_tensor((model_size, ff_size)),
+    main_func.params[13].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[14].name_hint: get_random_tensor((model_size,)),
+    main_func.params[15].name_hint: get_random_tensor((model_size,)),
+    main_func.params[16].name_hint: get_random_tensor((1, 512)),
+    main_func.params[17].name_hint: get_random_tensor((1, 1)),
+    main_func.params[18].name_hint: get_random_tensor((16, 512)),
+    main_func.params[19].name_hint: get_random_tensor((1, 16))
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
 
 inputs = []
 for i in range(batch_size):
-    inputs.append(get_random_tensor((1, hidden_size)))
-    inputs.append(get_random_tensor((1, hidden_size)))
+    inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
 coarsened_execution=False
@@ -86,7 +100,7 @@ def print_time(time):
         time
     )
 
-log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
+log_file = get_ansor_log_file(model_name, [ff_size, num_heads, head_size, model_size], pass_context, target)
 def auto_schedule(tune):
     pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
                           target, pass_context, execution_options)

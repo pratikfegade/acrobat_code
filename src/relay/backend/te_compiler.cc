@@ -297,9 +297,14 @@ class TECompilerImpl : public TECompilerNode {
     CCacheValue value;
     auto it = cache_.find(key);
 
+    // std::cout << "Lowering " << key->source_func << std::endl;
+
+    // auto iiit = task_weights_.find(key->source_func);
+    // ICHECK(iiit != task_weights_.end());
+    // auto func_task_weight = (*iiit).second->value;
+
     auto iiit = task_weights_.find(key->source_func);
-    ICHECK(iiit != task_weights_.end());
-    auto func_task_weight = (*iiit).second->value;
+    auto func_task_weight = (iiit != task_weights_.end()) ? (*iiit).second->value : 1;
 
     if (it != cache_.end()) {
       VLOG(1) << "already lowered to name:" << std::endl

@@ -89,6 +89,7 @@ def call_all_topi_funcs(mod, params, target, opt_level=3, pass_context=None, exe
 
 class ThreadWithResult(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs={}, *, daemon=None):
+        self.result = None
         def function():
             self.result = target(*args, **kwargs)
         super().__init__(group=group, target=function, name=name, daemon=daemon)

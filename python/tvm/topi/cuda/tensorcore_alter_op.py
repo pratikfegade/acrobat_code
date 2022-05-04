@@ -136,6 +136,7 @@ def _dense_legalize(attrs, inputs, arg_types):
     # Collect the input exprs.
     x, y = inputs
 
+    print(x_tensor, y_tensor, flush=True)
     M, K = x_tensor.shape
     N, K = y_tensor.shape
     try:

@@ -374,7 +374,7 @@ class TypeInferencer : private ExprFunctor<Type(const Expr&)>,
       Type vtype = this->GetType(op->value);
       let_type = this->Unify(let_type, vtype, op->span);
 
-      ICHECK(is_functional_literal || !this->type_map_.count(op->var));
+      ICHECK(is_functional_literal || !this->type_map_.count(op->var)) << op->var;
       // NOTE: no scoping is necessary because var are unique in program
       this->type_map_[op->var].checked_type = let_type;
     };

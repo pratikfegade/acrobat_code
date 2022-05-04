@@ -41,10 +41,10 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
             )
             tuner.tune(tune_option)
 
-        # Extract tasks
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True,
-                                                           execution_options=None)
+        # # Extract tasks
+        # tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
+        #                                                    include_simple_tasks=True,
+        #                                                    execution_options=None)
 
         # Build and execute on the CPU for PGO stats
         pass_context, execution_options = relay.backend.vm.create_pgo_workflow_configs(pass_context,
