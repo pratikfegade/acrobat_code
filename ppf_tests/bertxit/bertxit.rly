@@ -1,0 +1,80 @@
+#[version = "0.0.5"]
+
+def @transformer_encoder(
+  %input: Tensor[(128, 256), float32],
+
+  %prelinear_wq: Tensor[(256, 256), float32],
+  %prelinear_wk: Tensor[(256, 256), float32],
+  %prelinear_wv: Tensor[(256, 256), float32],
+
+  %prelinear_bq: Tensor[(1, 256), float32],
+  %prelinear_bk: Tensor[(1, 256), float32],
+  %prelinear_bv: Tensor[(1, 256), float32],
+
+  %postlinear_w: Tensor[(256, 256), float32],
+  %postlinear_b: Tensor[(1, 256), float32],
+
+  %ff1_w: Tensor[(2048, 256), float32],
+  %ff1_b: Tensor[(1, 2048), float32],
+
+  %ff2_w: Tensor[(256, 2048), float32],
+  %ff2_b: Tensor[(1, 256), float32],
+) {
+  let %qs = nn.dense(%input, %prelinear_wq, units = 256) + %prelinear_bq;
+  let %ks = nn.dense(%input, %prelinear_wk, units = 256) + %prelinear_bk;
+  let %vs = nn.dense(%input, %prelinear_wv, units = 256) + %prelinear_bv;
+
+  let %q = transpose(reshape(%q, newshape=[128, 8, 64]), axes=[1, 0, 2]);
+  let %k = transpose(reshape(%k, newshape=[128, 8, 64]), axes=[1, 0, 2]);
+  let %v = transpose(reshape(%v, newshape=[128, 8, 64]), axes=[1, 0, 2]);
+
+  let %qkt = nn.softmax(nn.batch_matmul(%q, %k));
+
+  let %attn_v = reshape(
+    transpose(
+      nn.batch_matmul(%qkt, %v, transpose_a=0, transpose_b=0),
+      axes=[1, 0, 2]
+    ),
+    newshape=[128, 256]
+  );
+
+  let %post_linear = nn.layer_norm(nn.dense(%attn_v, %postlinear_w, units=256) + %postlinear_b + %input, 0.5, 0.4);
+  let %layer_normed = nn.layer_norm(%post_linear, 0.5, 0.4);
+
+  let %ff1 = nn.relu(nn.dense(%layer_normed, %ff1_w, units=2048) + %ff1_b);
+
+  let %ff2 = nn.dense(%ff1, %ff2_w, units=2048) + %ff2_b + %post_linear;
+
+  let %out = nn.layer_norm(%ff2, 0.6, 0.3);
+
+  %out
+}
+
+def @main(
+  %input: Tensor[(128, 256), float32],
+
+  %prelinear_wq: Tensor[(256, 256), float32],
+  %prelinear_wk: Tensor[(256, 256), float32],
+  %prelinear_wv: Tensor[(256, 256), float32],
+
+  %prelinear_bq: Tensor[(1, 256), float32],
+  %prelinear_bk: Tensor[(1, 256), float32],
+  %prelinear_bv: Tensor[(1, 256), float32],
+
+  %postlinear_w: Tensor[(256, 256), float32],
+  %postlinear_b: Tensor[(1, 256), float32],
+
+  %ff1_w: Tensor[(2048, 256), float32],
+  %ff1_b: Tensor[(1, 2048), float32],
+
+  %ff2_w: Tensor[(256, 2048), float32],
+  %ff2_b: Tensor[(1, 256), float32],
+) {
+  @transformer_encoder(
+    %input,
+    %prelinear_wq, %prelinear_wk, %prelinear_wv,
+    %prelinear_bq, %prelinear_bk, %prelinear_bv,
+    %postlinear_w, %postlinear_b,
+    %ff1_w, %ff1_b, %ff2_w, %ff2_b
+  )
+}
