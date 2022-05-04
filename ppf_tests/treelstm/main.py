@@ -10,9 +10,21 @@ import numpy as np
 import tvm
 from tvm import relay
 from tvm import auto_scheduler
-from converter import initialize_tlstm, generate_random_trees
+from treelstm import TreeLSTM
+from network import copy_var
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
+from tree_utils import generate_complete_treelstm_trees
+
+def initialize_tlstm(input_size, memory_size):
+    tlstm = TreeLSTM(input_size=input_size, memory_size=memory_size, name="treelstm")
+    mod = tlstm.mod
+    tlstm_func = mod[tlstm.f]
+    tlstm_gv = tlstm.f
+    gv = relay.GlobalVar("main")
+    main_params = [copy_var(v) for v in tlstm_func.params]
+    mod[gv] = relay.Function(main_params, tlstm_gv(*main_params), tlstm_func.ret_type)
+    return tlstm, mod, tlstm.p
 
 # target = "llvm -mcpu=core-avx2"
 target = "cuda"
@@ -21,7 +33,7 @@ else: device = tvm.runtime.device("cpu")
 
 hidden_size = 256
 batch_size = 8
-num_nodes = 6
+tree_height = 6
 
 lazy_execution=True
 coarsened_execution=False
@@ -40,7 +52,7 @@ tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 weight_vars = tlstm.all_weights()
 
-trees = generate_random_trees(num_nodes, batch_size, (1, hidden_size), prelude)
+trees = generate_complete_treelstm_trees(tree_height, batch_size, (1, hidden_size), prelude)
 
 weights_list = []
 weights_dict = {}

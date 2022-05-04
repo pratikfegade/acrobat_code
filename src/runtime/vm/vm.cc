@@ -371,7 +371,7 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
-  std::cout << "HELLO" << std::endl;
+  std::cout << "HELLO " << batch_size_ << std::endl;
   for (int i = 0; i < batch_size_; ++i) {
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();

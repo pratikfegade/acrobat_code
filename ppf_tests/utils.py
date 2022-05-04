@@ -65,8 +65,8 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
             task_weights[i] = int(this_stats.get("exe_count", 1))
             dynamic_batch_sizes[i] = float(this_stats.get("batch_size", 1.0))
 
-        print(task_weights)
-        print(dynamic_batch_sizes)
+        print(task_weights, len(tasks))
+        print(dynamic_batch_sizes, len(tasks))
         exit()
 
         # Finally tune ops with updated weights

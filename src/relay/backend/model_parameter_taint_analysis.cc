@@ -310,7 +310,7 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint Add(const Var& var, ContextT current_context, const FullTaint& to_add,
                 const std::string& reason) {
     ICHECK_EQ(to_add->taint.size(), GetTypeSize(var->checked_type()))
-        << var << " " << to_add->taint;
+        << var << " " << to_add->taint << " " << reason;
 
     // bool print = var->checked_type().as<TypeCallNode>() && current_context;
 
@@ -578,7 +578,7 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint VisitExpr_(const TupleGetItemNode* op, ContextT current_context) {
     auto tuple_taint = this->VisitExpr(op->tuple, current_context);
     ICHECK_GT(tuple_taint->taint.size(), op->index);
-    auto taint = Array<Bool>({tuple_taint->taint[op->index]});
+    auto taint = CreateStateForType(op->checked_type(), tuple_taint->taint[op->index]);
     auto function_points_to = tuple_taint->function_points_to;
     return FullTaint(taint, function_points_to);
   }

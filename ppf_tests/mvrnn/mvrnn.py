@@ -3,7 +3,6 @@ os.environ["DIETCODE_CODEGEN_OPT"] = "1"
 os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
 os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
 TVM_HOME = os.environ["TVM_HOME"]
-print("TVM_HOME", TVM_HOME)
 
 import timeit
 import numpy as np
@@ -13,17 +12,21 @@ from tvm import relay
 from tvm import auto_scheduler
 import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
+from tree_utils import generate_complete_mvrnn_trees
 
 mod = tvm.IRModule()
 mod._import(TVM_HOME + "/ppf_tests/mvrnn/mvrnn.rly")
 
 mvrnn_func = mod["mvrnn"]
 
-batch_size=8
+batch_size=1
 hidden_size=64
+tree_height=3
 target = "cuda"
 device = tvm.runtime.device(target)
+
+trees = generate_complete_mvrnn_trees(tree_height, batch_size, hidden_size, mod)
 
 vweight = get_random_tensor((64, 128))
 vbias = get_random_tensor((1, 64))
@@ -81,26 +84,8 @@ def print_time(time):
 
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
 def auto_schedule(tune):
-    with pass_context:
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True)
-
-        if tune:
-            measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-            tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
-            tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20000,
-                runner=measure_ctx.runner,
-                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-            )
-            tuner.tune(tune_option)
-
-        # for task in tasks:
-        #     try:
-        #         print("BOLO", task.print_best(log_file))
-        #     except Exception:
-        #         print("BOLO Exception")
-        #         pass
+    pgo_and_auto_schedule(mod, weights_dict, trees, batch_size, log_file,
+                          target, pass_context, execution_options)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):

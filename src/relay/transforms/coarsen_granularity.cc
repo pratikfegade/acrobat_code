@@ -204,7 +204,7 @@ void FlattenVar(const relay::Var& var, Map<relay::Var, Array<Expr>>* p_tuple_var
   std::vector<relay::Var>& flattened_free_vars = *p_flattened_free_vars;
   std::vector<Expr>& flattened_call_args = *p_flattened_call_args;
 
-  if (auto ttn = var->checked_type().as<TupleTypeNode>()) {
+  if (auto ttn = GetVarType(var).as<TupleTypeNode>()) {
     Array<Expr> tir_tuple_vars;
     int idx = 0;
     for (auto field_type : ttn->fields) {

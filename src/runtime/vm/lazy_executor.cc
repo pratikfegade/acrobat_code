@@ -439,6 +439,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   }
 #endif
   auto num_nodes = func_nodes.size();
+  std::cout << "[LZ]   Executing " << func_idx << " " << num_nodes << std::endl;
   if (num_nodes == 1) {
     InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
                            func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
@@ -546,13 +547,13 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       graph_depth = std::max(graph_depth, node_depth);
     }
 
-    // std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
+    std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
     int nodes_executed = 0;
     std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
     for (int j = 0; j <= graph_depth; ++j) {
       auto& depth_nodes = depth_to_node[j];
       std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-      // std::cout << "[LZ] Depth " << j << " " << depth_nodes.size() << std::endl;
+      std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
       nodes_executed += depth_nodes.size();
       for (auto& node : depth_nodes) {
         func_to_node[node->func_idx_].push_back(node);

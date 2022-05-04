@@ -12,81 +12,12 @@ def @tuple_map_mvrnn(
   %mbias: Tensor[(1, 64), float32],
   %left: MVTree,
   %right: MVTree
-) -> ((Tensor[(64, 64), float32], Tensor[(1, 64), float32]),
-      (Tensor[(64, 64), float32], Tensor[(1, 64), float32])) {
-  (@mvrnn(%vweight, %vbias, %mweight, %mbias, %left),
-   @mvrnn(%vweight, %vbias, %mweight, %mbias, %right))
+) -> (Tensor[(64, 64), float32], Tensor[(1, 64), float32],
+      Tensor[(64, 64), float32], Tensor[(1, 64), float32]) {
+  let %ll = @mvrnn(%vweight, %vbias, %mweight, %mbias, %left);
+  let %rr = @mvrnn(%vweight, %vbias, %mweight, %mbias, %right);
+  (%ll.0, %ll.1, %rr.0, %rr.1)
 }
-
-def @dense(%v: Tensor[(1, 64), float32], %m: Tensor[(64, 64), float32]) -> Tensor[(1, 64), float32] {
-  nn.dense(%v, %m, units=64)
-}
-
-def @tuple_map_dense(
-  %vl: Tensor[(1, 64), float32],
-  %ml: Tensor[(64, 64), float32],
-  %vr: Tensor[(1, 64), float32],
-  %mr: Tensor[(64, 64), float32]
-) -> (Tensor[(1, 64), float32], Tensor[(1, 64), float32]) {
-  (@dense(%vl, %mr), @dense(%vr, %ml))
-}
-
-
-// def @mvrnn(
-//   %vweight: Tensor[(64, 128), float32],
-//   %vbias: Tensor[(1, 64), float32],
-//   %mweight: Tensor[(64, 128), float32],
-//   %mbias: Tensor[(1, 64), float32],
-//   %tree: MVTree
-// ) -> (Tensor[(64, 64), float32], Tensor[(1, 64), float32]) {
-
-//   match? (%tree) {
-//     InnerNode(%left, %right) => {
-//       let %rec_res = @tuple_map_mvrnn(%vweight, %vbias, %mweight, %mbias, %left, %right);
-//       let %lres = %rec_res.0;
-//       let %rres = %rec_res.1;
-//       let %ml = %lres.0;
-//       let %mr = %rres.0;
-//       let %vl = %lres.1;
-//       let %vr = %rres.1;
-
-//       let %d_res = @tuple_map_dense(%vl, %ml, %vr, %mr);
-
-//       // let %v_comp = concatenate((%d_res.0, %d_res.1), axis=1);
-//       // let %v = tanh(%vbias + nn.dense(%v_comp, %vweight, units=64));
-
-//       // let %m_comp = concatenate((%ml, %mr), axis=1);
-//       // let %m = %mbias + nn.dense(%m_comp, %mweight, units=64);
-
-//       let %v_func = fn(
-//         %v1: Tensor[(1, 64), float32],
-//         %v2: Tensor[(1, 64), float32],
-//         %vweight: Tensor[(64, 128), float32],
-//         %vbias: Tensor[(1, 64), float32],
-//         Primitive=1
-//       ) -> Tensor[(1, 64), float32] {
-//         tanh(%vbias + nn.dense(concatenate((%v1, %v2), axis=1), %vweight, units=64))
-//       };
-//       let %v = %v_func(%d_res.0, %d_res.1, %vweight, %vbias);
-
-//       let %m_func = fn(
-//         %ml: Tensor[(64, 64), float32],
-//         %mr: Tensor[(64, 64), float32],
-//         %mweight: Tensor[(64, 128), float32],
-//         %mbias: Tensor[(1, 64), float32],
-//         Primitive=1
-//       ) -> Tensor[(64, 64), float32] {
-//         %mbias + nn.dense(concatenate((%ml, %mr), axis=1), %mweight, units=64)
-//       };
-//       let %m = %m_func(%ml, %mr, %mweight, %mbias);
-
-//       (%m, %v)
-//     },
-//     LeafNode(%m, %v) => {
-//       (%m, %v)
-//     }
-//   }
-// }
 
 def @mvrnn(
   %vweight: Tensor[(64, 128), float32],
@@ -99,18 +30,10 @@ def @mvrnn(
   match? (%tree) {
     InnerNode(%left, %right) => {
       let %rec_res = @tuple_map_mvrnn(%vweight, %vbias, %mweight, %mbias, %left, %right);
-      let %lres = %rec_res.0;
-      let %rres = %rec_res.1;
-      let %ml = %lres.0;
-      let %mr = %rres.0;
-      let %vl = %lres.1;
-      let %vr = %rres.1;
-
-      // let %v_comp = concatenate((%d_res.0, %d_res.1), axis=1);
-      // let %v = tanh(%vbias + nn.dense(%v_comp, %vweight, units=64));
-
-      // let %m_comp = concatenate((%ml, %mr), axis=1);
-      // let %m = %mbias + nn.dense(%m_comp, %mweight, units=64);
+      let %ml = %rec_res.0;
+      let %vl = %rec_res.1;
+      let %mr = %rec_res.2;
+      let %vr = %rec_res.3;
 
       let %v_func = fn(
         %v1: Tensor[(1, 64), float32],
@@ -132,11 +55,18 @@ def @mvrnn(
         %mbias + nn.dense(concatenate((%ml, %mr), axis=1), %mweight, units=64)
       };
 
+      let %dense_func = fn(
+        %v: Tensor[(1, 64), float32],
+        %m: Tensor[(64, 64), float32]
+      ) {
+        nn.dense(%v, %m, units=64)
+      };
+
       (
         %m_func(%ml, %mr, %mweight, %mbias),
         %v_func(
-          nn.dense(%vl, %mr, units=64),
-          nn.dense(%vr, %ml, units=64),
+          %dense_func(%vl, %mr),
+          %dense_func(%vr, %ml),
           %vweight,
           %vbias
         )
