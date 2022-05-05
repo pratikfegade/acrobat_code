@@ -17,6 +17,8 @@
  * under the License.
  */
 
+#include <tvm/driver/driver_api.h>
+
 #include "../../support/utils.h"
 #include "batch_te_graph.h"
 
@@ -24,6 +26,7 @@ namespace tvm {
 namespace relay {
 namespace tec {
 
+namespace {
 class BatchifyRewriter : public te::ExprMutator {
  public:
   BatchifyRewriter(const Map<te::Operation, te::Operation>& rmap, const te::IterVar& batch_iv)
@@ -70,6 +73,7 @@ class BatchifyRewriter : public te::ExprMutator {
       tensor_cache_;
   const te::IterVar& batch_iv_;
 };
+}  // namespace
 
 std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
@@ -167,6 +171,131 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     ret.Set(op, batchified_op);
   }
   return std::make_pair(ret, batch_size);
+}
+
+std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
+    const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
+    const Array<Bool>& static_reuse_flags, const int static_batch_size) {
+  Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
+
+  ICHECK_EQ(static_reuse_flags.size(), inputs.size());
+  ICHECK_GT(static_reuse_flags.size(), 0);
+
+  Map<te::Operation, te::Operation> rewritten;
+  Map<te::Operation, te::Operation> ret;
+
+  Array<te::Tensor> new_inputs;
+  std::unordered_set<const Object*> input_ops;
+  // For each input that is not reused, we need to create a compute op
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    auto input = inputs[i];
+    auto input_op = input->op.as<te::PlaceholderOpNode>();
+    input_ops.insert(input_op);
+    if (static_reuse_flags[i]) {
+      new_inputs.push_back(inputs[i]);
+      continue;
+    }
+
+    Array<te::Tensor> this_new_inputs;
+    for (size_t j = 0; j < static_batch_size; ++j) {
+      this_new_inputs.push_back(te::placeholder(input_op->shape, input_op->dtype,
+                                                input_op->name + "_sb" + std::to_string(j)));
+    }
+
+    new_inputs.push_back_all(this_new_inputs);
+
+    Array<PrimExpr> cumm_shape;
+    cumm_shape.push_back(static_batch_size);
+    cumm_shape.push_back_all(input_op->shape);
+
+    auto cumm_op_body = [&](const Array<tir::Var>& vars) {
+      ICHECK_EQ(vars.size(), cumm_shape.size());
+      Array<tir::Var> orig_vars;
+      for (size_t k = 1; k < vars.size(); ++k) {
+        orig_vars.push_back(vars[k]);
+      }
+      PrimExpr body = this_new_inputs[0](orig_vars);
+      for (int k = 1; k < static_batch_size; ++k) {
+        body = tvm::if_then_else(vars[0] == k, this_new_inputs[k](orig_vars), body);
+      }
+      return body;
+    };
+    auto cumm_op = te::compute(cumm_shape, cumm_op_body, input_op->name + "_cumm");
+    std::cout << "CUMM OP " << cumm_op->op << std::endl;
+    rewritten.Set(input->op, cumm_op->op);
+  }
+
+  Array<te::Operation> graph_ops_wo_inputs;
+  for (auto op : graph_ops) {
+    if (input_ops.count(op.get())) {
+      continue;
+    }
+    auto batchified_op = op;
+    if (auto pop = op.as<te::PlaceholderOpNode>()) {
+      Array<PrimExpr> new_shape;
+      new_shape.push_back(static_batch_size);
+      new_shape.push_back_all(pop->shape);
+      batchified_op = te::PlaceholderOp(pop->name, new_shape, pop->dtype);
+    } else if (auto cop = op.as<te::ComputeOpNode>()) {
+      te::IterVar batch_iv = te::IterVar(Range(0, static_batch_size),
+                                         tir::Var("sb_iv", DataType::Int(32)), tir::kDataPar);
+      Array<te::IterVar> new_axis;
+      new_axis.push_back(batch_iv);
+      new_axis.push_back_all(cop->axis);
+
+      BatchifyRewriter rewriter(rewritten, batch_iv);
+      Array<PrimExpr> new_body;
+      for (auto e : cop->body) {
+        new_body.push_back(rewriter(e));
+      }
+      batchified_op = te::ComputeOp(cop->name, cop->tag, cop->attrs, new_axis, new_body);
+    } else {
+      ICHECK(false) << "Op " << op << " not supported for batchifying";
+    }
+    if (!op.same_as(batchified_op)) {
+      rewritten.Set(op, batchified_op);
+    }
+    std::cout << "CUMM OP " << batchified_op << std::endl;
+    ret.Set(op, batchified_op);
+  }
+
+  Array<te::Tensor> new_outputs;
+  Array<te::Operation> new_output_ops;
+  for (auto tensor : outputs) {
+    auto old_op = tensor->op;
+    ICHECK_EQ(old_op->num_outputs(), 1);
+    auto output_op = tensor->op;
+    auto it = rewritten.find(output_op);
+    if (it != rewritten.end()) {
+      output_op = (*it).second;
+    }
+    auto output_tensor = output_op.output(tensor->value_index);
+
+    Array<te::Tensor> this_new_outputs;
+    for (int i = 0; i < static_batch_size; ++i) {
+      auto output_body = [&](const Array<tir::Var>& vars) {
+        Array<PrimExpr> args;
+        args.push_back(i);
+        for (size_t k = 0; k < vars.size(); ++k) {
+          args.push_back(vars[k]);
+        }
+        return output_tensor(args);
+      };
+      auto cumm_op = te::compute(old_op->output_shape(tensor->value_index), output_body,
+                                 output_op->name + "_sb" + std::to_string(i));
+      new_output_ops.push_back(cumm_op->op);
+      std::cout << "CUMM OP " << cumm_op->op << std::endl;
+    }
+    new_outputs.push_back_all(this_new_outputs);
+  }
+
+  auto schedule = te::create_schedule(new_output_ops);
+  Array<te::Tensor> sch_args;
+  sch_args.push_back_all(new_inputs);
+  sch_args.push_back_all(new_outputs);
+  auto mod = LowerSchedule(schedule, sch_args, "cumm_test", {});
+  std::cout << "[CUMM] " << mod << std::endl;
+  return std::make_pair(new_inputs, new_outputs);
 }
 
 }  // namespace tec

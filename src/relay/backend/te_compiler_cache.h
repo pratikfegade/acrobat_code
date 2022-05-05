@@ -81,10 +81,16 @@ class CCacheKeyNode : public Object {
   Function source_func;
   /*! \brief The hardware target.*/
   Target target;
+  /*! \brief static reuse flags.*/
+  Array<Bool> static_reuse_flags;
+  /*! \brief static batch size.*/
+  Integer static_batch_size;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("source_func", &source_func);
     v->Visit("target", &target);
+    v->Visit("static_reuse_flags", &static_reuse_flags);
+    v->Visit("static_batch_size", &static_batch_size);
   }
   /*! \return The hash value of CCacheKey. */
   inline size_t Hash() const;
@@ -116,7 +122,8 @@ class CCacheKey : public ObjectRef {
    * \param source_func The source function.
    * \param target The target device.
    */
-  TVM_DLL CCacheKey(Function source_func, Target target);
+  TVM_DLL CCacheKey(Function source_func, Target target, Array<Bool> static_reuse_flags = {},
+                    int static_batch_size = 1);
 
   const CCacheKeyNode* operator->() const { return static_cast<const CCacheKeyNode*>(get()); }
   // comparator
@@ -233,7 +240,9 @@ Array<IndexExpr> GetShape(const Array<IndexExpr>& shape);
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
                                               Array<Bool> model_parameter_taints = {},
-                                              int task_weight = 1, bool create_batched = false,
+                                              Array<Bool> static_reuse_flags = {},
+                                              int static_batch_size = 1, int task_weight = 1,
+                                              bool create_batched = false,
                                               bool scattered_kernels = false);
 
 CachedFunc ShapeFuncFor(const Function& prim_func, const Target& target,
@@ -248,6 +257,8 @@ inline size_t CCacheKeyNode::Hash() const {
   // do structral hash, avoid 0.
   hash_ = tvm::StructuralHash()(this->source_func);
   hash_ = dmlc::HashCombine(hash_, std::hash<std::string>()(target->str()));
+  hash_ = dmlc::HashCombine(hash_, tvm::StructuralHash()(static_reuse_flags));
+  hash_ = dmlc::HashCombine(hash_, tvm::StructuralHash()(static_batch_size->value));
   if (hash_ == 0) hash_ = 1;
   return hash_;
 }
@@ -255,7 +266,9 @@ inline size_t CCacheKeyNode::Hash() const {
 inline bool CCacheKeyNode::Equal(const CCacheKeyNode* other) const {
   if (Hash() != other->Hash()) return false;
   return this->target->str() == other->target->str() &&
-         tvm::StructuralEqual()(this->source_func, other->source_func);
+         tvm::StructuralEqual()(this->source_func, other->source_func) &&
+         tvm::StructuralEqual()(this->static_reuse_flags, other->static_reuse_flags) &&
+         this->static_batch_size->value == other->static_batch_size->value;
 }
 
 }  // namespace tec

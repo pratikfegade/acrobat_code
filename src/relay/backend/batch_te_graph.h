@@ -38,6 +38,10 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
     const std::vector<bool>& reuse_taints, const std::string& unbatched_name);
 
+std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
+    const Array<te::Tensor>& inputs, const Array<te::Tensor>& tensor_outs,
+    const Array<Bool>& static_reuse_flags, const int static_batch_size);
+
 }  // namespace tec
 }  // namespace relay
 }  // namespace tvm

@@ -45,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../support/utils.h"
 #include "../op/annotation/annotation.h"
 #include "../op/call/call.h"
 #include "../op/memory/device_copy.h"
@@ -373,7 +374,8 @@ class TECompilerImpl : public TECompilerNode {
           auto mangled = mangle_fn(name);
           return GetUniqueName(mangled, &name_map_);
         },
-        func_model_parameter_taints, func_task_weight, batched_execution, scattered_kernels);
+        func_model_parameter_taints, key->static_reuse_flags, key->static_batch_size,
+        func_task_weight, batched_execution, scattered_kernels);
     value->cached_func = lowered_cached_funcs.first;
     value->batched_cached_func = lowered_cached_funcs.second;
 
@@ -398,14 +400,9 @@ class TECompilerImpl : public TECompilerNode {
         if (batched && scattered_kernels) {
           size_t flattened_size = func_model_parameter_taints.size();
           size_t unflattened_size = key->source_func->params.size();
-          size_t flattened_useful_size = key->source_func->params.size();
-          // std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
-          // << cached_func->inputs.size() << " " << cached_func->outputs.size() << " "
-          // << flattened_size << std::endl;
-          ICHECK_GE(flattened_size, flattened_useful_size)
-              << cached_func->prim_fn_var->name_hint
-              << " Maybe the function has a parameter that contains nested tuples? The model "
-                 "parameter taint analysis currently does not support those!";
+          std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
+                    << cached_func->inputs << " " << cached_func->outputs << " " << flattened_size
+                    << std::endl;
           ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
           int ctr = 0;
           for (size_t i = 0; i < flattened_size; ++i) {
@@ -865,6 +862,112 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
                        std::move(span));
   }
 
+  BaseFunc GetCalleeIfPresent(const Expr& e) {
+    auto on_device_props = GetOnDeviceProps(e);
+    if (on_device_props.body.defined()) {
+      return GetCalleeIfPresent(on_device_props.body);
+    }
+    if (auto cn = e.as<CallNode>()) {
+      return ResolveToPrimitive(cn->op);
+    }
+    return NullValue<BaseFunc>();
+  }
+
+  void MakeCombinedLoweredCall(
+      const BaseFunc& base_func,
+      std::vector<std::tuple<Var, Expr, Span, const LetNode*>> hfuse_group_bindings) {
+    std::cout << "[TCE] Lowering group " << std::endl;
+    ICHECK(base_func.as<FunctionNode>());
+    auto func = Downcast<Function>(base_func);
+
+    ICHECK(!func->GetAttr<String>(attr::kCompiler).defined());
+    ICHECK(func->HasNonzeroAttr(attr::kPrimitive));
+
+    // The target corresponding to the call_node expression's annotation.
+    SEScope se_scope = GetSEScope(Downcast<Call>(std::get<1>(hfuse_group_bindings[0])));
+    ICHECK(!se_scope->IsFullyUnconstrained());
+    auto target = se_scope->target;
+    ICHECK(target.defined());
+
+    std::cout << "[TCE] Lowered function" << std::endl;
+
+    std::vector<const CallNode*> calls;
+    for (auto tup : hfuse_group_bindings) {
+      auto expr = std::get<1>(tup);
+      auto on_device_props = GetOnDeviceProps(expr);
+      if (on_device_props.body.defined()) {
+        expr = on_device_props.body;
+      }
+      calls.push_back(expr.as<CallNode>());
+    }
+
+    auto num_args = func->params.size();
+    std::vector<bool> static_reuse_flags_vec(num_args, true);
+    for (auto call : calls) {
+      ICHECK_EQ(call->args.size(), num_args);
+      for (size_t i = 0; i < num_args; ++i) {
+        if (call->args[i] != calls[0]->args[i]) {
+          static_reuse_flags_vec[i] = false;
+        }
+      }
+    }
+    Array<Bool> static_reuse_flags;
+    for (auto val : static_reuse_flags_vec) {
+      static_reuse_flags.push_back(Bool(val));
+    }
+    std::cout << "[TCE]    " << static_reuse_flags << std::endl;
+
+    CCacheKey key = CCacheKey(func, target, static_reuse_flags);
+    CachedFunc cfunc = compiler_->Lower(key, module_name_);
+  }
+
+  Expr VisitExpr_(const LetNode* let_node) override {
+    PreVisitLetBlock_(let_node);
+    std::vector<std::tuple<Var, Expr, Span, const LetNode*>> bindings;
+    Expr expr = GetRef<Expr>(let_node);
+
+    while (const auto* inner_let_node = expr.as<LetNode>()) {
+      // Let-bound var (in pre visited version) goes into scope.
+      // (We'll just assume this is a letrec.)
+
+      auto this_rhs_callee = GetCalleeIfPresent(inner_let_node->value);
+      if (this_rhs_callee.defined() &&
+          ((last_rhs_callee_ == this_rhs_callee) || !last_rhs_callee_.defined())) {
+        hfuse_group_bindings_.push_back(std::make_tuple(inner_let_node->var, inner_let_node->value,
+                                                        inner_let_node->span, inner_let_node));
+        last_rhs_callee_ = this_rhs_callee;
+      } else {
+        if (hfuse_group_bindings_.size() > 1) {
+          std::cout << "[TCE] Found group" << std::endl;
+          for (auto tup : hfuse_group_bindings_) {
+            std::cout << "[TCE]    " << std::get<0>(tup) << std::endl;
+          }
+          MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
+        }
+
+        last_rhs_callee_ = NullValue<BaseFunc>();
+        hfuse_group_bindings_.clear();
+      }
+
+      PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
+      std::pair<Var, Expr> pair = PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
+      bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
+      expr = inner_let_node->body;
+    }
+
+    expr = VisitExpr(expr);
+
+    for (auto itr = bindings.rbegin(); itr != bindings.rend(); ++itr) {
+      // Let-bound var goes out of scope.
+      const LetNode* pre_let_node = std::get<3>(*itr);
+      PopBoundVar(pre_let_node->var);
+      Let post_let = Let(/*var=*/std::get<0>(*itr), /*value=*/std::get<1>(*itr),
+                         /*body=*/expr, /*span=*/std::get<2>(*itr));
+      expr = PostVisitLet_(pre_let_node, post_let.get());
+    }
+    return PostVisitLetBlock_(let_node, expr.as<LetNode>());
+  }
+
   std::pair<Var, Expr> PreVisitLetBinding_(const Var& var, const Expr& value) final {
     Var new_var = Downcast<Var>(Mutate(var));
     Expr new_value = Mutate(value);
@@ -989,7 +1092,6 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     // Lower the primitive function for that target.
     Function function = Downcast<Function>(primitive_func);
     ICHECK(call_node->type_args.empty()) << "lowered functions cannot be polymorphic";
-    // std::cout << "[TC] Lowering " << function << std::endl;
     return MakeLoweredCall(function, std::move(new_args), call_node->span, target);
   }
 
@@ -1011,6 +1113,9 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
   // Cache ops that need to be frequently used later to reduce lookup
   // overhead.
   const Op& debug_op_;
+
+  BaseFunc last_rhs_callee_ = NullValue<BaseFunc>();
+  std::vector<std::tuple<Var, Expr, Span, const LetNode*>> hfuse_group_bindings_;
 };
 
 Target GetTargetFromInteger(DLDeviceType dev_type, tec::TargetMap targets) {
@@ -1049,7 +1154,8 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
       [=](Function func, IRModule module, PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
         auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
-        // std::cout << "[Lowering] Func  " << func->params << std::endl;
+        func = Downcast<Function>(LiftLetsOutOfValues(func));
+        std::cout << "[Lowering] Func  " << func << std::endl;
         return Downcast<Function>(lower_te.Mutate(func));
       };
   return CreateFunctionPass(pass_func, 0, "LowerTensorExpr", {});

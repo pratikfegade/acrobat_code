@@ -153,7 +153,7 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
         auto func_model_parameter_taints = (*iit).second;
         tec::PrimFuncFor(
             GetRef<Function>(func), Target::Current(), [](std::string name) { return name; },
-            func_model_parameter_taints, batched_execution_, scattered_execution_);
+            func_model_parameter_taints, {}, batched_execution_, scattered_execution_);
         // std::cout << "[ASLR] Exiting scope\n" << std::endl;
 
         f = runtime::Registry::Get("auto_scheduler.exit_layout_rewrite");

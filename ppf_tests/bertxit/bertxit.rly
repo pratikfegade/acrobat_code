@@ -1,8 +1,6 @@
 #[version = "0.0.5"]
 
 def @transformer_encoder(
-  %input: Tensor[(128, 512), float32],
-
   %prelinear_wq: Tensor[(512, 512), float32],
   %prelinear_wk: Tensor[(512, 512), float32],
   %prelinear_wv: Tensor[(512, 512), float32],
@@ -25,6 +23,8 @@ def @transformer_encoder(
 
   %ln2_g: Tensor[(512), float32],
   %ln2_b: Tensor[(512), float32],
+
+  %input: Tensor[(128, 512), float32],
 ) -> Tensor[(128, 512), float32] {
 
   let %qkv_prelinear_func = fn(
@@ -32,7 +32,7 @@ def @transformer_encoder(
     %_weight: Tensor[(512, 512), float32],
     %_bias: Tensor[(1, 512), float32],
     Primitive=1
-  ) {
+  ) -> Tensor[(8, 128, 64), float32] {
     transpose(
       reshape(
         nn.dense(%_input, %_weight, units = 512) + %_bias,
@@ -41,6 +41,59 @@ def @transformer_encoder(
       axes=[1, 0, 2]
     )
   };
+
+  // let %qkv_hfused_function = fn(
+  //   %_fn: fn(
+  //     Tensor[(128, 512), float32],
+  //     Tensor[(512, 512), float32],
+  //     Tensor[(1, 512), float32]
+  //   ) ->
+  //     Tensor[(8, 128, 64), float32],
+
+  //   %_inpq: Tensor[(128, 512), float32],
+  //   %_wq: Tensor[(512, 512), float32],
+  //   %_bq: Tensor[(1, 512), float32],
+
+  //   %_inpk: Tensor[(128, 512), float32],
+  //   %_wk: Tensor[(512, 512), float32],
+  //   %_bk: Tensor[(1, 512), float32],
+
+  //   %_inpv: Tensor[(128, 512), float32],
+  //   %_wv: Tensor[(512, 512), float32],
+  //   %_bv: Tensor[(1, 512), float32],
+
+  //   HFusedPrimitive=1
+  // ) {
+  //   (
+  //     %_fn(%_inpq, %_wq, %_bq),
+  //     %_fn(%_inpk, %_wk, %_bk),
+  //     %_fn(%_inpv, %_wv, %_bv)
+  //   )
+  // };
+
+  // let %qkv_res = %qkv_hfused_function(
+  //   fn(
+  //     %_input: Tensor[(128, 512), float32],
+  //     %_weight: Tensor[(512, 512), float32],
+  //     %_bias: Tensor[(1, 512), float32],
+  //     Primitive=1
+  //   ) -> Tensor[(8, 128, 64), float32] {
+  //     transpose(
+  //       reshape(
+  //         nn.dense(%_input, %_weight, units = 512) + %_bias,
+  //         newshape=[128, 8, 64]
+  //       ),
+  //       axes=[1, 0, 2]
+  //     )
+  //   },
+  //   %input, %prelinear_wq, %prelinear_bq,
+  //   %input, %prelinear_wk, %prelinear_bk,
+  //   %input, %prelinear_wv, %prelinear_bv,
+  // );
+
+  // let %q = %qkv_res.0;
+  // let %k = %qkv_res.1;
+  // let %v = %qkv_res.2;
 
   let %q = %qkv_prelinear_func(%input, %prelinear_wq, %prelinear_bq);
   let %k = %qkv_prelinear_func(%input, %prelinear_wk, %prelinear_bk);
@@ -63,100 +116,12 @@ def @transformer_encoder(
   };
 
   let %attn_v = %attn_v_func(%qkt, %v);
-
   let %post_linear = nn.dense(%attn_v, %postlinear_w, units=512) + %postlinear_b + %input;
-
   let %layer_normed = nn.layer_norm(%post_linear, %ln1_g, %ln1_b);
-
   let %ff1 = nn.relu(nn.dense(%layer_normed, %ff1_w, units=2048) + %ff1_b);
-
   let %ff2 = nn.dense(%ff1, %ff2_w, units=512) + %ff2_b + %post_linear;
-
   let %out = nn.layer_norm(%ff2, %ln2_g, %ln2_b);
-
   %out
-}
-
-def @bertxit(
-  %input: Tensor[(128, 512), float32],
-
-  %execution_ctr: Tensor[(), int32],
-  %num_layers: Tensor[(), int32],
-
-  %prelinear_wq: Tensor[(512, 512), float32],
-  %prelinear_wk: Tensor[(512, 512), float32],
-  %prelinear_wv: Tensor[(512, 512), float32],
-  %prelinear_bq: Tensor[(1, 512), float32],
-  %prelinear_bk: Tensor[(1, 512), float32],
-  %prelinear_bv: Tensor[(1, 512), float32],
-  %ln1_g: Tensor[(512), float32],
-  %ln1_b: Tensor[(512), float32],
-  %postlinear_w: Tensor[(512, 512), float32],
-  %postlinear_b: Tensor[(1, 512), float32],
-  %ff1_w: Tensor[(2048, 512), float32],
-  %ff1_b: Tensor[(1, 2048), float32],
-  %ff2_w: Tensor[(512, 2048), float32],
-  %ff2_b: Tensor[(1, 512), float32],
-  %ln2_g: Tensor[(512), float32],
-  %ln2_b: Tensor[(512), float32],
-  %certainty_w: Tensor[(1, 512), float32],
-  %certainty_b: Tensor[(1, 1), float32],
-  %classification_w: Tensor[(16, 512), float32],
-  %classification_b: Tensor[(1, 16), float32]
-) -> Tensor[(), int32] {
-
-  let %certainty_fn = fn (
-    %_input: Tensor[(128, 512), float32],
-    %_weight: Tensor[(1, 512), float32],
-    %_bias: Tensor[(1, 1), float32],
-    Primitive=1
-  ) -> Tensor[(1, 1), float32] {
-    nn.dense(reshape(take(%_input, 0, axis=0, mode="fast"), newshape=[1, 512]), %_weight, units=1) + %_bias
-  };
-
-  let %classification_fn = fn (
-    %_input: Tensor[(128, 512), float32],
-    %_weight: Tensor[(16, 512), float32],
-    %_bias: Tensor[(1, 16), float32],
-    Primitive=1
-  ) -> Tensor[(1, 16), float32] {
-    nn.softmax(nn.dense(reshape(take(%_input, 0, axis=0, mode="fast"), newshape=[1, 512]), %_weight, units=16) + %_bias)
-  };
-
-  let %layer_out = @transformer_encoder(
-    %input,
-    %prelinear_wq, %prelinear_wk, %prelinear_wv,
-    %prelinear_bq, %prelinear_bk, %prelinear_bv,
-    %ln1_g, %ln1_b,
-    %postlinear_w, %postlinear_b,
-    %ff1_w, %ff1_b,
-    %ff2_w, %ff2_b,
-    %ln2_g, %ln2_b
-  );
-
-  let %confidence = %certainty_fn(%layer_out, %certainty_w, %certainty_b);
-  let %to_exit = random.db_uniform(0, %num_layers - %execution_ctr, out_shape=[], out_dtype="int32");
-  if (%to_exit > 0) {
-    if (%execution_ctr <= %num_layers) {
-      @bertxit(
-        %layer_out,
-        %execution_ctr + 1, %num_layers,
-        %prelinear_wq, %prelinear_wk, %prelinear_wv,
-        %prelinear_bq, %prelinear_bk, %prelinear_bv,
-        %ln1_g, %ln1_b,
-        %postlinear_w, %postlinear_b,
-        %ff1_w, %ff1_b,
-        %ff2_w, %ff2_b,
-        %ln2_g, %ln2_b,
-        %certainty_w, %certainty_b,
-        %classification_w, %classification_b,
-      )
-    } else {
-      argmax(%classification_fn(%layer_out, %classification_w, %classification_b))
-    }
-  } else {
-    argmax(%classification_fn(%layer_out, %classification_w, %classification_b))
-  }
 }
 
 def @main(
@@ -176,16 +141,10 @@ def @main(
   %ff2_b: Tensor[(1, 512), float32],
   %ln2_g: Tensor[(512), float32],
   %ln2_b: Tensor[(512), float32],
-  %certainty_w: Tensor[(1, 512), float32],
-  %certainty_b: Tensor[(1, 1), float32],
-  %classification_w: Tensor[(16, 512), float32],
-  %classification_b: Tensor[(1, 16), float32]
 
   %input: Tensor[(128, 512), float32]
-) -> Tensor[(), int32] {
-  @bertxit(
-    %input,
-    0, 6,
+) -> Tensor[(128, 512), float32] {
+  @transformer_encoder(
     %prelinear_wq, %prelinear_wk, %prelinear_wv,
     %prelinear_bq, %prelinear_bk, %prelinear_bv,
     %ln1_g, %ln1_b,
@@ -193,7 +152,127 @@ def @main(
     %ff1_w, %ff1_b,
     %ff2_w, %ff2_b,
     %ln2_g, %ln2_b,
-    %certainty_w, %certainty_b,
-    %classification_w, %classification_b,
+    %input,
   )
 }
+
+// def @bertxit(
+//   %input: Tensor[(128, 512), float32],
+
+//   %execution_ctr: Tensor[(), int32],
+//   %num_layers: Tensor[(), int32],
+
+//   %prelinear_wq: Tensor[(512, 512), float32],
+//   %prelinear_wk: Tensor[(512, 512), float32],
+//   %prelinear_wv: Tensor[(512, 512), float32],
+//   %prelinear_bq: Tensor[(1, 512), float32],
+//   %prelinear_bk: Tensor[(1, 512), float32],
+//   %prelinear_bv: Tensor[(1, 512), float32],
+//   %ln1_g: Tensor[(512), float32],
+//   %ln1_b: Tensor[(512), float32],
+//   %postlinear_w: Tensor[(512, 512), float32],
+//   %postlinear_b: Tensor[(1, 512), float32],
+//   %ff1_w: Tensor[(2048, 512), float32],
+//   %ff1_b: Tensor[(1, 2048), float32],
+//   %ff2_w: Tensor[(512, 2048), float32],
+//   %ff2_b: Tensor[(1, 512), float32],
+//   %ln2_g: Tensor[(512), float32],
+//   %ln2_b: Tensor[(512), float32],
+//   %certainty_w: Tensor[(1, 512), float32],
+//   %certainty_b: Tensor[(1, 1), float32],
+//   %classification_w: Tensor[(16, 512), float32],
+//   %classification_b: Tensor[(1, 16), float32]
+// ) -> Tensor[(), int32] {
+
+//   let %certainty_fn = fn (
+//     %_input: Tensor[(128, 512), float32],
+//     %_weight: Tensor[(1, 512), float32],
+//     %_bias: Tensor[(1, 1), float32],
+//     Primitive=1
+//   ) -> Tensor[(1, 1), float32] {
+//     nn.dense(reshape(take(%_input, 0, axis=0, mode="fast"), newshape=[1, 512]), %_weight, units=1) + %_bias
+//   };
+
+//   let %classification_fn = fn (
+//     %_input: Tensor[(128, 512), float32],
+//     %_weight: Tensor[(16, 512), float32],
+//     %_bias: Tensor[(1, 16), float32],
+//     Primitive=1
+//   ) -> Tensor[(1, 16), float32] {
+//     nn.softmax(nn.dense(reshape(take(%_input, 0, axis=0, mode="fast"), newshape=[1, 512]), %_weight, units=16) + %_bias)
+//   };
+
+//   let %layer_out = @transformer_encoder(
+//     %input,
+//     %prelinear_wq, %prelinear_wk, %prelinear_wv,
+//     %prelinear_bq, %prelinear_bk, %prelinear_bv,
+//     %ln1_g, %ln1_b,
+//     %postlinear_w, %postlinear_b,
+//     %ff1_w, %ff1_b,
+//     %ff2_w, %ff2_b,
+//     %ln2_g, %ln2_b
+//   );
+
+//   let %confidence = %certainty_fn(%layer_out, %certainty_w, %certainty_b);
+//   let %to_exit = random.db_uniform(0, %num_layers - %execution_ctr, out_shape=[], out_dtype="int32");
+//   if (%to_exit > 0) {
+//     if (%execution_ctr <= %num_layers) {
+//       @bertxit(
+//         %layer_out,
+//         %execution_ctr + 1, %num_layers,
+//         %prelinear_wq, %prelinear_wk, %prelinear_wv,
+//         %prelinear_bq, %prelinear_bk, %prelinear_bv,
+//         %ln1_g, %ln1_b,
+//         %postlinear_w, %postlinear_b,
+//         %ff1_w, %ff1_b,
+//         %ff2_w, %ff2_b,
+//         %ln2_g, %ln2_b,
+//         %certainty_w, %certainty_b,
+//         %classification_w, %classification_b,
+//       )
+//     } else {
+//       argmax(%classification_fn(%layer_out, %classification_w, %classification_b))
+//     }
+//   } else {
+//     argmax(%classification_fn(%layer_out, %classification_w, %classification_b))
+//   }
+// }
+
+// def @main(
+//   %prelinear_wq: Tensor[(512, 512), float32],
+//   %prelinear_wk: Tensor[(512, 512), float32],
+//   %prelinear_wv: Tensor[(512, 512), float32],
+//   %prelinear_bq: Tensor[(1, 512), float32],
+//   %prelinear_bk: Tensor[(1, 512), float32],
+//   %prelinear_bv: Tensor[(1, 512), float32],
+//   %ln1_g: Tensor[(512), float32],
+//   %ln1_b: Tensor[(512), float32],
+//   %postlinear_w: Tensor[(512, 512), float32],
+//   %postlinear_b: Tensor[(1, 512), float32],
+//   %ff1_w: Tensor[(2048, 512), float32],
+//   %ff1_b: Tensor[(1, 2048), float32],
+//   %ff2_w: Tensor[(512, 2048), float32],
+//   %ff2_b: Tensor[(1, 512), float32],
+//   %ln2_g: Tensor[(512), float32],
+//   %ln2_b: Tensor[(512), float32],
+//   %certainty_w: Tensor[(1, 512), float32],
+//   %certainty_b: Tensor[(1, 1), float32],
+//   %classification_w: Tensor[(16, 512), float32],
+//   %classification_b: Tensor[(1, 16), float32]
+
+//   %input: Tensor[(128, 512), float32]
+// ) -> Tensor[(), int32] {
+//   @bertxit(
+//     %input,
+//     0, 6,
+//     %prelinear_wq, %prelinear_wk, %prelinear_wv,
+//     %prelinear_bq, %prelinear_bk, %prelinear_bv,
+//     %ln1_g, %ln1_b,
+//     %postlinear_w, %postlinear_b,
+//     %ff1_w, %ff1_b,
+//     %ff2_w, %ff2_b,
+//     %ln2_g, %ln2_b,
+//     %certainty_w, %certainty_b,
+//     %classification_w, %classification_b,
+//   )
+// }

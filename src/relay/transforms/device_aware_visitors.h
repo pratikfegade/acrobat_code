@@ -307,7 +307,7 @@ class DeviceAwareExprMutator : public ExprMutator, public LexicalOnDeviceMixin {
       : LexicalOnDeviceMixin(maybe_mod) {}
 
   Expr VisitExpr_(const FunctionNode* function_node) final;
-  Expr VisitExpr_(const LetNode* let_node) final;
+  virtual Expr VisitExpr_(const LetNode* let_node);
   Expr VisitExpr_(const CallNode* call_node) final;
 
   /*!

@@ -1,112 +1,58 @@
 import os
-# os.environ["DIETCODE_CODEGEN_OPT"] = "1"
-# os.environ["DIETCODE_DO_LOCAL_PADDING"] = "1"
-# os.environ["DIETCODE_DO_LOOP_PARTITIONING"] = "1"
+os.environ["AUTOSCHEDULER_STAND_ALONE"] = "1"
 
-from tvm import te
-import argparse
 import numpy as np
 import tvm
+from tvm import te, auto_scheduler
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--target', nargs='?', default='llvm')
-parser.add_argument('--dtype', dest='dtype', nargs='?', default='float32')
-parser.add_argument('--batch-size', dest='batch_size', default=1, type=int)
-parser.add_argument('--peel-loops', dest='peel_loops', default=False, action='store_true')
-parser.add_argument('--debug', dest='debug', default=False, action='store_true')
-parser.add_argument('--const-bs', dest='const_bs', default=False, action='store_true')
-parser.add_argument('--debug-code', dest='debug_code', nargs='?', default='none')
-parser.add_argument('--manual-code', dest='manual_code', default=False, action='store_true')
-parser.add_argument('--hidden-size', dest='hidden_size', default=256, type=int)
-args = parser.parse_args()
+@auto_scheduler.register_workload  # Note the auto_scheduler decorator
+def matmul_add(X, N, L, M, dtype):
+    A = te.placeholder((N, L), name="A", dtype=dtype)
+    B0 = te.placeholder((X, L, M), name="B0", dtype=dtype)
+    B1 = te.placeholder((X, L, M), name="B1", dtype=dtype)
+    B2 = te.placeholder((X, L, M), name="B2", dtype=dtype)
 
-peel_loops = args.peel_loops
-float_dtype = args.dtype
-num_gates = 4
-hidden_size = args.hidden_size
+    B = te.compute((X, 3, L, M), lambda b, n, i, j:
+                   te.if_then_else(n == 0, B0[b, i, j], te.if_then_else(n == 1, B1[b, i, j], B2[b, i, j])),
+                   name="B")
 
-##################### Model placeholders #####################
-batch_size = 128 if args.const_bs else te.var("BS")
+    k = te.reduce_axis((0, L), name="k")
+    matmul = te.compute(
+        (X, 3, N, M),
+        lambda b, n, i, j: te.sum(A[i, k] * B[b, n, k, j], axis=k),
+        name="matmul",
+        attrs={"layout_free_placeholders": [B]},  # enable automatic layout transform for tensor B
+    )
 
-W = te.placeholder((hidden_size, hidden_size), name = 'W', dtype = float_dtype)
-I = te.placeholder((batch_size, hidden_size), name = 'I', dtype = float_dtype)
+    C0 = te.compute((X, N, M), lambda b, i, j: matmul[b, 0, i, j], name="C0")
+    C1 = te.compute((X, N, M), lambda b, i, j: te.tanh(matmul[b, 1, i, j]), name="C1")
+    C2 = te.compute((X, N, M), lambda b, i, j: te.sigmoid(matmul[b, 2, i, j]), name="C2")
 
-##################### Computation #####################
-k = te.reduce_axis((0, hidden_size), name = 'i_kh2h')
-Ol = te.compute((batch_size, hidden_size),
-                lambda n, i: te.sum(W[i, k] * I[n, k], axis = k),
-                name = 'Ol')
+    return [A, B0, B1, B2, C0, C1, C2]
 
-O = te.compute((batch_size, hidden_size), lambda n, i: 2*Ol[n, k], name = 'O')
+target = tvm.target.Target("cuda")
+N = L = M = 512
+X = 8
+task = tvm.auto_scheduler.SearchTask(func=matmul_add, args=(X, N, L, M, "float32"), target=target)
 
-##################### Scheduling #####################
-s = te.create_schedule([O.op])
+# Inspect the computational graph
+print("Computational DAG:")
+print(task.compute_dag)
 
-if args.target == "cuda":
-    thread_x = lambda: te.thread_axis("threadIdx.x")
-    thread_y = lambda: te.thread_axis("threadIdx.y")
-    block_x = lambda: te.thread_axis("blockIdx.x")
-    block_y = lambda: te.thread_axis("blockIdx.y")
 
-    ############# Scheduling for internal nodes #############
-    hS = s.cache_read(I, 'shared', [Ol])
-    wS = s.cache_read(W, 'shared', [Ol])
+log_file = "matmul.json"
+tune_option = auto_scheduler.TuningOptions(
+    num_measure_trials=10,
+    measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+    verbose=2,
+)
 
-    s[Ol].set_scope('local')
+# Run auto-tuning (search)
+task.tune(tune_option)
 
-    x, y = s[O].leaf_iter_vars[0:2]
-    xo, xi = s[O].split(x, nparts = 4)
-    yo, yi = s[O].split(y, nparts = 4)
+# Apply the best schedule
+sch, args = task.apply_best(log_file)
 
-    s[O].reorder(xo, yo, xi, yi)
-
-    s[O].bind(xo, block_y())
-    s[O].bind(yo, block_x())
-    yio, yii = s[O].split(yi, factor = 16)
-    s[O].reorder(yio, xi, yii)
-    s[O].bind(xi, thread_y())
-    s[O].bind(yio, te.thread_axis("vthread"))
-    s[O].bind(yii, thread_x())
-
-    s[Ol].compute_at(s[O], yii)
-    x, y, k = s[Ol].leaf_iter_vars
-    k = s[Ol].op.reduce_axis[0]
-    ko, ki = s[Ol].split(k, nparts = 16)
-    s[Ol].reorder(ko, x, y, ki)
-    s[hS].compute_at(s[Ol], ko)
-    s[wS].compute_at(s[Ol], ko)
-
-    s[hS].bind(s[hS].leaf_iter_vars[0], thread_y())
-    s[hS].bind(s[hS].leaf_iter_vars[1], thread_x())
-
-    xo, xi = s[wS].split(s[wS].leaf_iter_vars[0], factor = 4)
-    s[wS].bind(xi, thread_y())
-    s[wS].bind(s[wS].leaf_iter_vars[2], thread_x())
-
-print_after_passes = [
-    # "tir.NarrowDataType",
-    # "tir.InjectPrefetch",
-    # "tir.LowerThreadAllreduce",
-    # "tir.LowerThreadAllreduce",
-    # "tir.SplitHostDevice"
-    # "tir.CombineContextCall",
-    # "tir.LowerScatterLoadsAndStores"
-]
-
-with tvm.transform.PassContext(config={ "tir.detect_global_barrier": False }):
-    inputs = [W, I, O] if args.const_bs else [batch_size, W, I, O]
-
-    if args.debug_code == "ir":
-        lowered = tvm.lower(s, inputs, simple_mode=False,
-                            print_after_passes=print_after_passes)
-        print(lowered)
-    elif args.debug_code == "code":
-        fadd = tvm.build(s, inputs, args.target,
-                         print_after_passes=print_after_passes)
-        if args.target == 'cuda':
-            print('-----GPU code-----\n' + fadd.imported_modules[0].get_source())
-        else:
-            print('-----CPU code-----\n' + fadd.get_source())
-    else:
-        fadd = tvm.build(s, inputs, args.target)
-        fadd.export_library('lstm.so')
+print("Lowered TIR:")
+print(tvm.lower(sch, args, simple_mode=True))
+print(task.print_best(log_file))

@@ -47,10 +47,10 @@ weights_dict = {
     main_func.params[13].name_hint: get_random_tensor((1, model_size)),
     main_func.params[14].name_hint: get_random_tensor((model_size,)),
     main_func.params[15].name_hint: get_random_tensor((model_size,)),
-    main_func.params[16].name_hint: get_random_tensor((1, 512)),
-    main_func.params[17].name_hint: get_random_tensor((1, 1)),
-    main_func.params[18].name_hint: get_random_tensor((16, 512)),
-    main_func.params[19].name_hint: get_random_tensor((1, 16))
+    # main_func.params[16].name_hint: get_random_tensor((1, 512)),
+    # main_func.params[17].name_hint: get_random_tensor((1, 1)),
+    # main_func.params[18].name_hint: get_random_tensor((16, 512)),
+    # main_func.params[19].name_hint: get_random_tensor((1, 16))
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])

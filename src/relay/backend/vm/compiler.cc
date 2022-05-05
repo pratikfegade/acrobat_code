@@ -1481,7 +1481,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::NameAllFunctions());
 
   // lower all functions annotated as "primitive" by FuseOps.
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", false, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1489,7 +1489,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, true));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1527,7 +1527,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

@@ -65,10 +65,13 @@ LoweredOutput::LoweredOutput(tvm::Array<te::Tensor> outputs, OpImplementation im
   data_ = std::move(n);
 }
 
-CCacheKey::CCacheKey(Function source_func, Target target) {
+CCacheKey::CCacheKey(Function source_func, Target target, Array<Bool> static_reuse_flags,
+                     int static_batch_size) {
   auto n = make_object<CCacheKeyNode>();
   n->source_func = std::move(source_func);
   n->target = std::move(target);
+  n->static_reuse_flags = std::move(static_reuse_flags);
+  n->static_batch_size = Integer(std::move(static_batch_size));
   data_ = std::move(n);
 }
 
@@ -132,8 +135,10 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
   std::pair<CachedFunc, CachedFunc> Create(const Function& relay_func,
                                            std::function<std::string(std::string)> renamer,
-                                           Array<Bool> model_parameter_taints, int task_weight,
-                                           bool create_batched, bool scattered_kernels) {
+                                           Array<Bool> model_parameter_taints,
+                                           Array<Bool> static_reuse_flags, int static_batch_size,
+                                           int task_weight, bool create_batched,
+                                           bool scattered_kernels) {
     // std::cout << "Lowering " << task_weight << "\n" << relay_func << "\n\n" << std::endl;
     Array<tvm::te::Tensor> fn_inputs;
     int ctr = 0;
@@ -185,6 +190,14 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
+    bool static_batched = (fn_inputs.size() > 0) && (static_reuse_flags.size() > 0);
+    if (static_batched) {
+      auto res =
+          StaticBatchifyTEGraph(fn_inputs, tensor_outs, static_reuse_flags, static_batch_size);
+      fn_inputs = res.first;
+      tensor_outs = res.second;
+    }
+
     int batched_task_weight = task_weight;
     int unbatched_task_weight = 1;
     if (!create_batched) {
@@ -209,9 +222,6 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
         ObjectRef obj =
             (*fauto_schedule)(prim_fn_var->name_hint, tensor_outs, unbatched_task_weight);
-        // if (obj.defined()) {
-        // schedule = Downcast<te::Schedule>(obj);
-        // }
         if (obj.defined()) {
           auto arr = Downcast<Array<ObjectRef>>(obj);
           schedule = Downcast<te::Schedule>(arr[0]);
@@ -278,13 +288,15 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
       auto construct_reuse_taints = [&](const Array<te::Tensor>& tensors,
                                         std::vector<bool>* p_reuse_taints, size_t offset) {
-        ICHECK_LE(offset + tensors.size(), model_parameter_taints.size());
         for (size_t i = 0; i < tensors.size(); ++i) {
+          int repeat_count = 1;
+          if (static_batched && offset == 0 && !(static_reuse_flags[i].operator bool())) {
+            repeat_count = static_batch_size;
+          }
           auto tensor = tensors[i];
-          if (model_parameter_taints[i + offset].operator bool()) {
-            p_reuse_taints->push_back(true);
-          } else {
-            p_reuse_taints->push_back(false);
+          auto val = model_parameter_taints[i + offset].operator bool();
+          for (size_t i = 0; i < repeat_count; ++i) {
+            p_reuse_taints->push_back(val);
           }
         }
       };
@@ -314,7 +326,13 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
             }
           }
           // std::cout << "[TECC]  Arg Mode " << tensor->op->name << " " << arg_mode << std::endl;
-          p_arg_modes->push_back(tvm::Integer(static_cast<int>(arg_mode)));
+          int repeat_count = 1;
+          if (static_batched && offset == 0 && !(static_reuse_flags[i].operator bool())) {
+            repeat_count = static_batch_size;
+          }
+          for (size_t i = 0; i < repeat_count; ++i) {
+            p_arg_modes->push_back(tvm::Integer(static_cast<int>(arg_mode)));
+          }
         }
         return output;
       };
@@ -562,9 +580,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
  */
 std::pair<CachedFunc, CachedFunc> PrimFuncFor(const Function& source_func, const Target& target,
                                               std::function<std::string(std::string)> renamer,
-                                              Array<Bool> model_parameter_taints, int task_weight,
-                                              bool create_batched, bool scattered_kernels) {
-  return ScheduleBuilder(target).Create(source_func, renamer, model_parameter_taints, task_weight,
+                                              Array<Bool> model_parameter_taints,
+                                              Array<Bool> static_reuse_flags, int static_batch_size,
+                                              int task_weight, bool create_batched,
+                                              bool scattered_kernels) {
+  return ScheduleBuilder(target).Create(source_func, renamer, model_parameter_taints,
+                                        static_reuse_flags, static_batch_size, task_weight,
                                         create_batched, scattered_kernels);
 }
 
@@ -942,7 +963,7 @@ std::string GetUniqueName(std::string name, std::unordered_map<std::string, int>
 TVM_REGISTER_GLOBAL("relay.backend.LowerToTE").set_body_typed([](Function prim_func) {
   return ScheduleBuilder(tvm::Target("ext_dev"), false)
       .Create(
-          prim_func, [&](std::string name) { return name; }, {}, 1, false, false)
+          prim_func, [&](std::string name) { return name; }, {}, {}, 1, 1, false, false)
       .first;
 });
 
