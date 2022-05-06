@@ -111,7 +111,7 @@ void LexicalOnDeviceMixin::PushBoundVar(Var var, const SEScope& se_scope) {
   if (se_scope->IsFullyUnconstrained()) {
     return;
   }
-  ICHECK(var_se_scopes_.find(var) == var_se_scopes_.end());
+  ICHECK(var_se_scopes_.find(var) == var_se_scopes_.end()) << var;
   var_se_scopes_.emplace(std::move(var), se_scope);
 }
 

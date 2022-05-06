@@ -943,6 +943,40 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     std::vector<std::tuple<Var, Expr, Span, const LetNode*>> bindings;
     Expr expr = GetRef<Expr>(let_node);
 
+    auto handle_group = [&]() {
+      if (hfuse_group_bindings_.size() > 1) {
+        auto combined_call = MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
+
+        Array<Type> combined_type_fields;
+        for (auto tup : hfuse_group_bindings_) {
+          combined_type_fields.push_back(GetVarType(std::get<0>(tup)));
+        }
+        Var combined_res("combined", TupleType(combined_type_fields));
+        Expr body = std::get<3>(hfuse_group_bindings_.back())->body;
+        for (int i = static_cast<int>(hfuse_group_bindings_.size()) - 1; i >= 0; --i) {
+          auto tup = hfuse_group_bindings_[i];
+          auto var = std::get<0>(tup);
+          auto var_value = TupleGetItem(combined_res, i);
+          auto let = Let(var, var_value, body);
+          bindings.emplace_back(var, var_value, std::get<2>(tup), let.get());
+          PushBoundVar(var, GetSEScope(var_value));
+          body = let;
+        }
+        auto combined_let = Let(combined_res, combined_call, body);
+        bindings.emplace_back(combined_res, combined_call, Span(), combined_let.get());
+        PushBoundVar(combined_res, GetSEScope(combined_call));
+      } else if (hfuse_group_bindings_.size() == 1) {
+        auto tup = hfuse_group_bindings_[0];
+        auto var = std::get<0>(tup);
+        auto val = std::get<1>(tup);
+        auto spn = std::get<2>(tup);
+        auto let = std::get<3>(tup);
+        PushBoundVar(var, GetSEScope(val));
+        std::pair<Var, Expr> pair = PreVisitLetBinding_(var, val);
+        bindings.emplace_back(pair.first, pair.second, spn, let);
+      }
+    };
+
     while (const auto* inner_let_node = expr.as<LetNode>()) {
       // Let-bound var (in pre visited version) goes into scope.
       // (We'll just assume this is a letrec.)
@@ -954,26 +988,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
                                                         inner_let_node->span, inner_let_node));
         last_rhs_callee_ = this_rhs_callee;
       } else {
-        if (hfuse_group_bindings_.size() > 1) {
-          auto combined_call = MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
-
-          // CREATE TUPLE GETS AND SO ON
-          PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
-          std::pair<Var, Expr> pair =
-              PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
-          bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
-
-        } else if (hfuse_group_bindings_.size() == 1) {
-          auto tup = hfuse_group_bindings_[0];
-          auto var = std::get<0>(tup);
-          auto val = std::get<1>(tup);
-          auto spn = std::get<2>(tup);
-          auto let = std::get<3>(tup);
-          PushBoundVar(var, GetSEScope(val));
-          std::pair<Var, Expr> pair = PreVisitLetBinding_(var, val);
-          bindings.emplace_back(pair.first, pair.second, spn, let);
-        }
-
+        handle_group();
         last_rhs_callee_ = NullValue<BaseFunc>();
         hfuse_group_bindings_.clear();
 
@@ -983,6 +998,9 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       }
       expr = inner_let_node->body;
     }
+    handle_group();
+
+    ICHECK_EQ(hfuse_group_bindings_.size(), 0);
 
     expr = VisitExpr(expr);
 
@@ -994,6 +1012,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
                          /*body=*/expr, /*span=*/std::get<2>(*itr));
       expr = PostVisitLet_(pre_let_node, post_let.get());
     }
+    std::cout << "[PVL] Expr " << expr << std::endl;
     return PostVisitLetBlock_(let_node, expr.as<LetNode>());
   }
 
