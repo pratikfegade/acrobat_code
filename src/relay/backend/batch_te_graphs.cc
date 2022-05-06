@@ -221,7 +221,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
       return body;
     };
     auto cumm_op = te::compute(cumm_shape, cumm_op_body, input_op->name + "_cumm");
-    std::cout << "CUMM OP " << cumm_op->op << std::endl;
+    // std::cout << "CUMM OP " << cumm_op->op << std::endl;
     rewritten.Set(input->op, cumm_op->op);
   }
 
@@ -255,7 +255,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     if (!op.same_as(batchified_op)) {
       rewritten.Set(op, batchified_op);
     }
-    std::cout << "CUMM OP " << batchified_op << std::endl;
+    // std::cout << "CUMM OP " << batchified_op << std::endl;
     ret.Set(op, batchified_op);
   }
 
@@ -271,7 +271,6 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     }
     auto output_tensor = output_op.output(tensor->value_index);
 
-    Array<te::Tensor> this_new_outputs;
     for (int i = 0; i < static_batch_size; ++i) {
       auto output_body = [&](const Array<tir::Var>& vars) {
         Array<PrimExpr> args;
@@ -281,20 +280,20 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
         }
         return output_tensor(args);
       };
-      auto cumm_op = te::compute(old_op->output_shape(tensor->value_index), output_body,
-                                 output_op->name + "_sb" + std::to_string(i));
-      new_output_ops.push_back(cumm_op->op);
-      std::cout << "CUMM OP " << cumm_op->op << std::endl;
+      auto cumm_tensor = te::compute(old_op->output_shape(tensor->value_index), output_body,
+                                     output_op->name + "_sb" + std::to_string(i));
+      new_output_ops.push_back(cumm_tensor->op);
+      // std::cout << "CUMM OP " << cumm_op->op << std::endl;
+      new_outputs.push_back(cumm_tensor);
     }
-    new_outputs.push_back_all(this_new_outputs);
   }
 
-  auto schedule = te::create_schedule(new_output_ops);
-  Array<te::Tensor> sch_args;
-  sch_args.push_back_all(new_inputs);
-  sch_args.push_back_all(new_outputs);
-  auto mod = LowerSchedule(schedule, sch_args, "cumm_test", {});
-  std::cout << "[CUMM] " << mod << std::endl;
+  // auto schedule = te::create_schedule(new_output_ops);
+  // Array<te::Tensor> sch_args;
+  // sch_args.push_back_all(new_inputs);
+  // sch_args.push_back_all(new_outputs);
+  // auto mod = LowerSchedule(schedule, sch_args, "cumm_test", {});
+  // std::cout << "[CUMM] " << mod << std::endl;
   return std::make_pair(new_inputs, new_outputs);
 }
 

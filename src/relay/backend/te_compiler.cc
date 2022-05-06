@@ -298,7 +298,7 @@ class TECompilerImpl : public TECompilerNode {
     CCacheValue value;
     auto it = cache_.find(key);
 
-    // std::cout << "Lowering " << key->source_func << std::endl;
+    std::cout << "Lowering " << key->source_func << " " << key->static_batch_size << std::endl;
 
     // auto iiit = task_weights_.find(key->source_func);
     // ICHECK(iiit != task_weights_.end());
@@ -746,17 +746,8 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     }
   }
 
-  /*!
-   * \brief Lowers the primitive function \p func to TIR for ultimate execution
-   * on a device with configuration \p target. Returns the global var bound
-   * to the TIR implementation, and attributes to attach to the call to identify it as
-   * a TIR call.
-   */
-  Expr MakeLoweredCall(Function func, Array<Expr> visited_args, Span span, Target target) {
-    CCacheKey key = CCacheKey(func, target);
-    CachedFunc cfunc = compiler_->Lower(key, module_name_);
-    ICHECK(cfunc.defined());
-
+  Expr MakeLoweredCallEpilogue(CachedFunc cfunc, Function func, Array<Expr> visited_args, Span span,
+                               Target target) {
     auto opt_compiler = func->GetAttr<String>(attr::kCompiler);
     // Add some metadata on top of the *original function* and invoke the callback so it can
     // be captured.
@@ -862,6 +853,19 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
                        std::move(span));
   }
 
+  /*!
+   * \brief Lowers the primitive function \p func to TIR for ultimate execution
+   * on a device with configuration \p target. Returns the global var bound
+   * to the TIR implementation, and attributes to attach to the call to identify it as
+   * a TIR call.
+   */
+  Expr MakeLoweredCall(Function func, Array<Expr> visited_args, Span span, Target target) {
+    CCacheKey key = CCacheKey(func, target);
+    CachedFunc cfunc = compiler_->Lower(key, module_name_);
+    ICHECK(cfunc.defined());
+    return MakeLoweredCallEpilogue(cfunc, func, visited_args, span, target);
+  }
+
   BaseFunc GetCalleeIfPresent(const Expr& e) {
     auto on_device_props = GetOnDeviceProps(e);
     if (on_device_props.body.defined()) {
@@ -873,7 +877,7 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     return NullValue<BaseFunc>();
   }
 
-  void MakeCombinedLoweredCall(
+  Expr MakeCombinedLoweredCall(
       const BaseFunc& base_func,
       std::vector<std::tuple<Var, Expr, Span, const LetNode*>> hfuse_group_bindings) {
     std::cout << "[TCE] Lowering group " << std::endl;
@@ -917,8 +921,21 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     }
     std::cout << "[TCE]    " << static_reuse_flags << std::endl;
 
-    CCacheKey key = CCacheKey(func, target, static_reuse_flags);
+    CCacheKey key = CCacheKey(func, target, static_reuse_flags, hfuse_group_bindings.size());
     CachedFunc cfunc = compiler_->Lower(key, module_name_);
+
+    Array<Expr> args;
+    for (size_t i = 0; i < static_reuse_flags_vec.size(); ++i) {
+      size_t end_call = 1;
+      if (!static_reuse_flags_vec[i]) {
+        end_call = hfuse_group_bindings.size();
+      }
+      for (size_t j = 0; j < end_call; ++j) {
+        args.push_back(calls[j]->args[i]);
+      }
+    }
+
+    return MakeLoweredCallEpilogue(cfunc, func, args, std::get<2>(hfuse_group_bindings[0]), target);
   }
 
   Expr VisitExpr_(const LetNode* let_node) override {
@@ -938,20 +955,32 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
         last_rhs_callee_ = this_rhs_callee;
       } else {
         if (hfuse_group_bindings_.size() > 1) {
-          std::cout << "[TCE] Found group" << std::endl;
-          for (auto tup : hfuse_group_bindings_) {
-            std::cout << "[TCE]    " << std::get<0>(tup) << std::endl;
-          }
-          MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
+          auto combined_call = MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
+
+          // CREATE TUPLE GETS AND SO ON
+          PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
+          std::pair<Var, Expr> pair =
+              PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
+          bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
+
+        } else if (hfuse_group_bindings_.size() == 1) {
+          auto tup = hfuse_group_bindings_[0];
+          auto var = std::get<0>(tup);
+          auto val = std::get<1>(tup);
+          auto spn = std::get<2>(tup);
+          auto let = std::get<3>(tup);
+          PushBoundVar(var, GetSEScope(val));
+          std::pair<Var, Expr> pair = PreVisitLetBinding_(var, val);
+          bindings.emplace_back(pair.first, pair.second, spn, let);
         }
 
         last_rhs_callee_ = NullValue<BaseFunc>();
         hfuse_group_bindings_.clear();
-      }
 
-      PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
-      std::pair<Var, Expr> pair = PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
-      bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
+        PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
+        std::pair<Var, Expr> pair = PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
+        bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
+      }
       expr = inner_let_node->body;
     }
 

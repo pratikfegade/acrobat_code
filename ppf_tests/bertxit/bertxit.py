@@ -60,7 +60,7 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
