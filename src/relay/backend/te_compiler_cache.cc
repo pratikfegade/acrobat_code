@@ -156,6 +156,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     readable_name_stream_ << "fused";
     auto outputs = this->VisitExpr(relay_func->body);
 
+    bool static_batched =
+        (fn_inputs.size() > 0) && (static_reuse_flags.size() > 0) && (static_batch_size > 0);
+    if (static_batched) {
+      readable_name_stream_ << "_sb";
+    }
+
     auto candidate_name = readable_name_stream_.str();
     constexpr static size_t kMaxFuncNameLength = 80;
     // WARNING: Please make sure to also update TVM_CRT_MAX_STRLEN_FUNCTION_NAME
@@ -174,6 +180,34 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     auto prim_fn_var = GlobalVar(unique_name);
     prim_fn_var->checked_type_ = relay_func->checked_type();
 
+    if (static_batched) {
+      auto type = relay_func->checked_type().as<FuncTypeNode>();
+      Array<Type> inputs;
+      for (size_t i = 0; i < type->arg_types.size(); ++i) {
+        size_t to_repeat = 1;
+        if (!static_reuse_flags[i].operator bool()) {
+          to_repeat = static_batch_size;
+        }
+        for (int j = 0; j < to_repeat; ++j) {
+          inputs.push_back(type->arg_types[i]);
+        }
+      }
+
+      Array<Type> outputs;
+      if (auto rn = type->ret_type.as<TupleTypeNode>()) {
+        for (auto field_type : rn->fields) {
+          for (size_t i = 0; i < static_batch_size; ++i) {
+            outputs.push_back(field_type);
+          }
+        }
+      } else {
+        for (size_t i = 0; i < static_batch_size; ++i) {
+          outputs.push_back(type->ret_type);
+        }
+      }
+      prim_fn_var->checked_type_ = FuncType(inputs, TupleType(outputs), {}, {});
+    }
+
     // std::cout << "------------------------------------------------------ " << std::endl;
     // std::cout << unique_name << std::endl;
     // std::cout << relay_func << std::endl;
@@ -190,8 +224,6 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       }
     }
 
-    bool static_batched =
-        (fn_inputs.size() > 0) && (static_reuse_flags.size() > 0) && (static_batch_size > 0);
     if (static_batched) {
       auto res =
           StaticBatchifyTEGraph(fn_inputs, tensor_outs, static_reuse_flags, static_batch_size);
@@ -245,6 +277,7 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         if (obj.defined()) {
           auto arr = Downcast<Array<ObjectRef>>(obj);
           schedule = Downcast<te::Schedule>(arr[0]);
+
           if (arr[1].defined()) {
             workload_key = Downcast<String>(arr[1]);
           }
@@ -292,8 +325,8 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     }
 
     CachedFunc generated_prim_func =
-        CachedFunc(target_, prim_fn_var, Array<tir::Var>(), fn_inputs, outputs, Array<Integer>(),
-                   schedule, prim_func, {}, {}, workload_key);
+        CachedFunc(target_, prim_fn_var, Array<tir::Var>(), fn_inputs, tensor_outs,
+                   Array<Integer>(), schedule, prim_func, {}, {}, workload_key);
     CachedFunc generated_batched_func;
 
     // std::cout << "[TCC] Create batched functions? " << create_batched << std::endl;
@@ -308,9 +341,6 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
 
       auto construct_reuse_taints = [&](int num_tensors, std::vector<bool>* p_reuse_taints,
                                         size_t offset) {
-        std::cout << "[CRT] " << num_tensors << " " << static_reuse_flags << " " << offset
-                  << std::endl;
-
         for (size_t i = 0; i < num_tensors; ++i) {
           auto val = model_parameter_taints[i + offset].operator bool();
           p_reuse_taints->push_back(val);

@@ -57,33 +57,28 @@ class LetLifter : public ExprMutator {
 
       Expr ret = NullValue<Expr>();
       if (StructuralEqual()(outer_var, outer_body)) {
-        ret = Let(inner_var, inner_value, inner_body);
-        if (on_device_props.body.defined()) {
-          ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
-                    WrapOnDevice(on_device_props, inner_body));
-        } else {
-          ret = Let(inner_var, inner_value, inner_body);
-        }
-        // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
-        // std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
+        ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
+                  WrapOnDevice(on_device_props, inner_body));
+        std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
+        std::cout << "[LL]   Returning1\n " << DebugPrint(ret) << "\n\n" << std::endl;
       } else {
-        if (on_device_props.body.defined()) {
-          ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
-                    Let(outer_var, WrapOnDevice(on_device_props, inner_body), outer_body));
-        } else {
-          ret = Let(inner_var, inner_value, Let(outer_var, inner_body, outer_body));
-        }
-        // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
-        // std::cout << "[LL]   Returning\n " << DebugPrint(ret) << "\n\n" << std::endl;
+        ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
+                  Let(outer_var, WrapOnDevice(on_device_props, inner_body), outer_body));
+        std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
+        std::cout << "[LL]   Returning2\n " << DebugPrint(ret) << "\n\n" << std::endl;
       }
       return ret;
     } else {
-      return Let(outer_var, outer_value, outer_body);
+      return Let(outer_var, WrapOnDevice(on_device_props, outer_value), outer_body);
     }
   }
 
   Expr WrapOnDevice(const OnDeviceProps& props, const Expr& e) {
-    return OnDevice(e, props.se_scope, props.constrain_result, props.constrain_body);
+    if (props.body.defined()) {
+      return OnDevice(e, props.se_scope, props.constrain_result, props.constrain_body);
+    } else {
+      return e;
+    }
   }
 };
 

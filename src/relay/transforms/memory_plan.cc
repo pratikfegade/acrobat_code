@@ -202,6 +202,7 @@ class MemoryPlanner : public ExprMutator {
 
       const CallNode* rhs_call_op = rhs.as<CallNode>();
       if (rhs_call_op && rhs_call_op->op == Op::Get("memory.alloc_storage")) {
+        ICHECK(on_device_props.se_scope->target.defined()) << lhs;
         auto binding =
             process_alloc_storage(&dynamic_regions, lhs, rhs_call_op, on_device_props.se_scope);
         lhs = binding.first;

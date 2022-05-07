@@ -48,18 +48,29 @@ model_name="treelstm"
 generate_aot_code=True
 dynamic_batch_size_estimate=256
 
-tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
-mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
-weight_vars = tlstm.all_weights()
+mod = tvm.IRModule()
+mod.import_from_std("prelude.rly")
+mod._import(TVM_HOME + "/ppf_tests/treelstm/treelstm.rly")
 
-trees = generate_complete_treelstm_trees(tree_height, batch_size, (1, hidden_size), prelude)
+mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
+main_func = mod["main"]
+print(mod)
 
 weights_list = []
-weights_dict = {}
-for weight in weight_vars:
-    tensor = get_random_tensor(tuple([int(i) for i in weight.type_annotation.shape]))
-    weights_list.append(tensor)
-    weights_dict[weight.name_hint] = tensor
+weights_dict = {
+    main_func.params[0].name_hint: get_random_tensor((hidden_size, hidden_size)),
+    main_func.params[1].name_hint: get_random_tensor((hidden_size, hidden_size)),
+    main_func.params[2].name_hint: get_random_tensor((3*hidden_size, hidden_size)),
+    main_func.params[3].name_hint: get_random_tensor((1, 3*hidden_size)),
+    main_func.params[4].name_hint: get_random_tensor((1, 3*hidden_size)),
+    main_func.params[5].name_hint: get_random_tensor((3*hidden_size, hidden_size)),
+    main_func.params[6].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[7].name_hint: get_random_tensor((1, hidden_size)),
+}
+for i in range(len(weights_dict)):
+    weights_list.append(weights_dict[main_func.params[i].name_hint])
+
+trees = generate_complete_treelstm_trees(tree_height, batch_size, (1, hidden_size), mod)
 
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,

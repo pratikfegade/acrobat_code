@@ -60,7 +60,7 @@ const PointerTypeNode* PointerInBuffer(const tir::Buffer& buffer) {
 std::pair<tir::Var, tir::Buffer> FindPointerParam(const tir::PrimFunc& prim_func,
                                                   size_t* current_primfunc_param_index) {
   while (true) {
-    ICHECK_LT(*current_primfunc_param_index, prim_func->params.size());
+    ICHECK_LT(*current_primfunc_param_index, prim_func->params.size()) << prim_func;
     const tir::Var& param = prim_func->params[*current_primfunc_param_index];
     auto itr = prim_func->buffer_map.find(param);
     if (itr == prim_func->buffer_map.end()) {

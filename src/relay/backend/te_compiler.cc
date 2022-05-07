@@ -298,8 +298,6 @@ class TECompilerImpl : public TECompilerNode {
     CCacheValue value;
     auto it = cache_.find(key);
 
-    std::cout << "Lowering " << key->source_func << " " << key->static_batch_size << std::endl;
-
     // auto iiit = task_weights_.find(key->source_func);
     // ICHECK(iiit != task_weights_.end());
     // auto func_task_weight = (*iiit).second->value;
@@ -400,9 +398,6 @@ class TECompilerImpl : public TECompilerNode {
         if (batched && scattered_kernels) {
           size_t flattened_size = func_model_parameter_taints.size();
           size_t unflattened_size = key->source_func->params.size();
-          std::cout << "[TEC]  Arg modes " << cached_func->batched_arg_mode << " "
-                    << cached_func->inputs << " " << cached_func->outputs << " " << flattened_size
-                    << std::endl;
           ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
           int ctr = 0;
           for (size_t i = 0; i < flattened_size; ++i) {
@@ -476,6 +471,10 @@ class TECompilerImpl : public TECompilerNode {
         VLOG(1) << "scheduling";
         IRModule scheduled_module =
             tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds, scatter_buffers);
+
+        if (!batched) {
+          std::cout << "[HTFL8] " << scheduled_module << std::endl;
+        }
 
         ICHECK_EQ(scheduled_module->functions.size(), 1);
 
@@ -692,59 +691,16 @@ using AnalysisRemapping = std::unordered_map<Expr, Expr, ObjectHash, ObjectEqual
  * ... %p(...) ...
  * \endcode
  */
-class LowerTensorExprMutator : public DeviceAwareExprMutator {
+
+class AbstractLowerTensorExprMutator {
  public:
-  LowerTensorExprMutator(const IRModule& module, ProcessFn process_fn, String module_name,
-                         TECompiler compiler, SEScope host_se_scope)
-      : DeviceAwareExprMutator(module),
-        module_(module),
+  AbstractLowerTensorExprMutator(const IRModule& module, ProcessFn process_fn, String module_name,
+                                 TECompiler compiler, SEScope host_se_scope)
+      : module_(module),
         process_fn_(std::move(process_fn)),
         module_name_(std::move(module_name)),
         compiler_(std::move(compiler)),
-        host_se_scope_(std::move(host_se_scope)),
-        debug_op_(Op::Get("debug")) {}
-
-  /*!
-   *  \brief Returns the primitive function associated with \p expr, or nullptr if none.
-   */
-  BaseFunc ResolveToPrimitive(const Expr& expr) {
-    // NOTE: We can't assume expr->checked_type_ is defined, so can't early exit for first-order
-    // expressions.
-    if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
-      if (!module_->ContainGlobalVar(global_var_node->name_hint)) {
-        // TODO(mbs): extern function cleanup
-        // Assume the function is extern and thus no longer in the IRModule.
-        return {};
-      } else {
-        BaseFunc base_func = module_->Lookup(GetRef<GlobalVar>(global_var_node));
-        return ResolveToPrimitive(base_func);
-      }
-    } else if (const auto* prim_func_node = expr.as<tir::PrimFuncNode>()) {
-      return GetRef<tir::PrimFunc>(prim_func_node);
-    } else if (const auto* var_node = expr.as<VarNode>()) {
-      auto itr = primitive_functions_.find(var_node);
-      if (itr == primitive_functions_.end()) {
-        // Not bound to a primitive function.
-        return {};
-      } else {
-        return itr->second;
-      }
-    } else if (const auto* function_node = expr.as<FunctionNode>()) {
-      if (!function_node->HasNonzeroAttr(attr::kPrimitive)) {
-        // Not marked as primitive by FuseOps.
-        return {};
-      }
-      if (const auto* call_node = function_node->body.as<CallNode>()) {
-        if (call_node->op == debug_op_) {
-          // Debug 'primitives' are not lowered.
-          return {};
-        }
-      }
-      return GetRef<Function>(function_node);
-    } else {
-      return {};
-    }
-  }
+        host_se_scope_(std::move(host_se_scope)) {}
 
   Expr MakeLoweredCallEpilogue(CachedFunc cfunc, Function func, Array<Expr> visited_args, Span span,
                                Target target) {
@@ -866,21 +822,8 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     return MakeLoweredCallEpilogue(cfunc, func, visited_args, span, target);
   }
 
-  BaseFunc GetCalleeIfPresent(const Expr& e) {
-    auto on_device_props = GetOnDeviceProps(e);
-    if (on_device_props.body.defined()) {
-      return GetCalleeIfPresent(on_device_props.body);
-    }
-    if (auto cn = e.as<CallNode>()) {
-      return ResolveToPrimitive(cn->op);
-    }
-    return NullValue<BaseFunc>();
-  }
-
-  Expr MakeCombinedLoweredCall(
-      const BaseFunc& base_func,
-      std::vector<std::tuple<Var, Expr, Span, const LetNode*>> hfuse_group_bindings) {
-    std::cout << "[TCE] Lowering group " << std::endl;
+  Expr MakeCombinedLoweredCall(const BaseFunc& base_func,
+                               std::vector<const LetNode*> hfuse_group_bindings, SEScope se_scope) {
     ICHECK(base_func.as<FunctionNode>());
     auto func = Downcast<Function>(base_func);
 
@@ -888,27 +831,25 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     ICHECK(func->HasNonzeroAttr(attr::kPrimitive));
 
     // The target corresponding to the call_node expression's annotation.
-    SEScope se_scope = GetSEScope(Downcast<Call>(std::get<1>(hfuse_group_bindings[0])));
+    // = GetSEScope(Downcast<Call>(hfuse_group_bindings[0]->value));
     ICHECK(!se_scope->IsFullyUnconstrained());
     auto target = se_scope->target;
     ICHECK(target.defined());
 
-    std::cout << "[TCE] Lowered function" << std::endl;
-
     std::vector<const CallNode*> calls;
-    for (auto tup : hfuse_group_bindings) {
-      auto expr = std::get<1>(tup);
+    for (auto let : hfuse_group_bindings) {
+      auto expr = let->value;
       auto on_device_props = GetOnDeviceProps(expr);
       if (on_device_props.body.defined()) {
         expr = on_device_props.body;
       }
-      calls.push_back(expr.as<CallNode>());
+      calls.push_back(RemoveOnDeviceCalls(expr).as<CallNode>());
     }
 
     auto num_args = func->params.size();
     std::vector<bool> static_reuse_flags_vec(num_args, true);
     for (auto call : calls) {
-      ICHECK_EQ(call->args.size(), num_args);
+      ICHECK_EQ(call->args.size(), num_args) << GetRef<Expr>(call);
       for (size_t i = 0; i < num_args; ++i) {
         if (call->args[i] != calls[0]->args[i]) {
           static_reuse_flags_vec[i] = false;
@@ -919,7 +860,6 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     for (auto val : static_reuse_flags_vec) {
       static_reuse_flags.push_back(Bool(val));
     }
-    std::cout << "[TCE]    " << static_reuse_flags << std::endl;
 
     CCacheKey key = CCacheKey(func, target, static_reuse_flags, hfuse_group_bindings.size());
     CachedFunc cfunc = compiler_->Lower(key, module_name_);
@@ -935,85 +875,69 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
       }
     }
 
-    return MakeLoweredCallEpilogue(cfunc, func, args, std::get<2>(hfuse_group_bindings[0]), target);
+    return MakeLoweredCallEpilogue(cfunc, func, args, hfuse_group_bindings[0]->span, target);
   }
 
-  Expr VisitExpr_(const LetNode* let_node) override {
-    PreVisitLetBlock_(let_node);
-    std::vector<std::tuple<Var, Expr, Span, const LetNode*>> bindings;
-    Expr expr = GetRef<Expr>(let_node);
+  IRModule module_;
+  ProcessFn process_fn_;
+  String module_name_;
+  TECompiler compiler_;
+  /*!
+   * \brief The \p SEScope for the host, which is where all shape-related data and computation
+   * must live.
+   */
+  SEScope host_se_scope_;
+};
 
-    auto handle_group = [&]() {
-      if (hfuse_group_bindings_.size() > 1) {
-        auto combined_call = MakeCombinedLoweredCall(last_rhs_callee_, hfuse_group_bindings_);
+class LowerTensorExprMutator : public DeviceAwareExprMutator,
+                               public AbstractLowerTensorExprMutator {
+ public:
+  LowerTensorExprMutator(const IRModule& module, ProcessFn process_fn, String module_name,
+                         TECompiler compiler, SEScope host_se_scope)
+      : DeviceAwareExprMutator(module),
+        AbstractLowerTensorExprMutator(module, process_fn, module_name, compiler, host_se_scope),
+        debug_op_(Op::Get("debug")) {}
 
-        Array<Type> combined_type_fields;
-        for (auto tup : hfuse_group_bindings_) {
-          combined_type_fields.push_back(GetVarType(std::get<0>(tup)));
-        }
-        Var combined_res("combined", TupleType(combined_type_fields));
-        Expr body = std::get<3>(hfuse_group_bindings_.back())->body;
-        for (int i = static_cast<int>(hfuse_group_bindings_.size()) - 1; i >= 0; --i) {
-          auto tup = hfuse_group_bindings_[i];
-          auto var = std::get<0>(tup);
-          auto var_value = TupleGetItem(combined_res, i);
-          auto let = Let(var, var_value, body);
-          bindings.emplace_back(var, var_value, std::get<2>(tup), let.get());
-          PushBoundVar(var, GetSEScope(var_value));
-          body = let;
-        }
-        auto combined_let = Let(combined_res, combined_call, body);
-        bindings.emplace_back(combined_res, combined_call, Span(), combined_let.get());
-        PushBoundVar(combined_res, GetSEScope(combined_call));
-      } else if (hfuse_group_bindings_.size() == 1) {
-        auto tup = hfuse_group_bindings_[0];
-        auto var = std::get<0>(tup);
-        auto val = std::get<1>(tup);
-        auto spn = std::get<2>(tup);
-        auto let = std::get<3>(tup);
-        PushBoundVar(var, GetSEScope(val));
-        std::pair<Var, Expr> pair = PreVisitLetBinding_(var, val);
-        bindings.emplace_back(pair.first, pair.second, spn, let);
-      }
-    };
-
-    while (const auto* inner_let_node = expr.as<LetNode>()) {
-      // Let-bound var (in pre visited version) goes into scope.
-      // (We'll just assume this is a letrec.)
-
-      auto this_rhs_callee = GetCalleeIfPresent(inner_let_node->value);
-      if (this_rhs_callee.defined() &&
-          ((last_rhs_callee_ == this_rhs_callee) || !last_rhs_callee_.defined())) {
-        hfuse_group_bindings_.push_back(std::make_tuple(inner_let_node->var, inner_let_node->value,
-                                                        inner_let_node->span, inner_let_node));
-        last_rhs_callee_ = this_rhs_callee;
+  /*!
+   *  \brief Returns the primitive function associated with \p expr, or nullptr if none.
+   */
+  BaseFunc ResolveToPrimitive(const Expr& expr) {
+    // NOTE: We can't assume expr->checked_type_ is defined, so can't early exit for first-order
+    // expressions.
+    if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
+      if (!module_->ContainGlobalVar(global_var_node->name_hint)) {
+        // TODO(mbs): extern function cleanup
+        // Assume the function is extern and thus no longer in the IRModule.
+        return {};
       } else {
-        handle_group();
-        last_rhs_callee_ = NullValue<BaseFunc>();
-        hfuse_group_bindings_.clear();
-
-        PushBoundVar(inner_let_node->var, GetSEScope(inner_let_node->value));
-        std::pair<Var, Expr> pair = PreVisitLetBinding_(inner_let_node->var, inner_let_node->value);
-        bindings.emplace_back(pair.first, pair.second, inner_let_node->span, inner_let_node);
+        BaseFunc base_func = module_->Lookup(GetRef<GlobalVar>(global_var_node));
+        return ResolveToPrimitive(base_func);
       }
-      expr = inner_let_node->body;
+    } else if (const auto* prim_func_node = expr.as<tir::PrimFuncNode>()) {
+      return GetRef<tir::PrimFunc>(prim_func_node);
+    } else if (const auto* var_node = expr.as<VarNode>()) {
+      auto itr = primitive_functions_.find(var_node);
+      if (itr == primitive_functions_.end()) {
+        // Not bound to a primitive function.
+        return {};
+      } else {
+        return itr->second;
+      }
+    } else if (const auto* function_node = expr.as<FunctionNode>()) {
+      if (!function_node->HasNonzeroAttr(attr::kPrimitive)) {
+        // Not marked as primitive by FuseOps.
+        return {};
+      }
+      if (const auto* call_node = function_node->body.as<CallNode>()) {
+        if (call_node->op == debug_op_) {
+          // Debug 'primitives' are not lowered.
+          return {};
+        }
+      }
+      return GetRef<Function>(function_node);
+    } else {
+      return {};
     }
-    handle_group();
-
-    ICHECK_EQ(hfuse_group_bindings_.size(), 0);
-
-    expr = VisitExpr(expr);
-
-    for (auto itr = bindings.rbegin(); itr != bindings.rend(); ++itr) {
-      // Let-bound var goes out of scope.
-      const LetNode* pre_let_node = std::get<3>(*itr);
-      PopBoundVar(pre_let_node->var);
-      Let post_let = Let(/*var=*/std::get<0>(*itr), /*value=*/std::get<1>(*itr),
-                         /*body=*/expr, /*span=*/std::get<2>(*itr));
-      expr = PostVisitLet_(pre_let_node, post_let.get());
-    }
-    std::cout << "[PVL] Expr " << expr << std::endl;
-    return PostVisitLetBlock_(let_node, expr.as<LetNode>());
   }
 
   std::pair<Var, Expr> PreVisitLetBinding_(const Var& var, const Expr& value) final {
@@ -1143,28 +1067,204 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator {
     return MakeLoweredCall(function, std::move(new_args), call_node->span, target);
   }
 
-  IRModule module_;
-  ProcessFn process_fn_;
   // Map from in-scope let-bound variables to Functions known to be primitive, or PrimFuncs which
   // have already been lowered. We'll rewrite these to the fresh global vars bound to the lowered
   // primitive function as we go. Those vars will be bound in the target device-type specific
   // module we'll ultimately emit for each required device-type. Note that a primitive may be
   // lowered for multiple device types, each which will be assigned a fresh var.
   std::unordered_map<const VarNode*, BaseFunc> primitive_functions_;
-  String module_name_;
-  TECompiler compiler_;
-  /*!
-   * \brief The \p SEScope for the host, which is where all shape-related data and computation
-   * must live.
-   */
-  SEScope host_se_scope_;
   // Cache ops that need to be frequently used later to reduce lookup
   // overhead.
   const Op& debug_op_;
-
-  BaseFunc last_rhs_callee_ = NullValue<BaseFunc>();
-  std::vector<std::tuple<Var, Expr, Span, const LetNode*>> hfuse_group_bindings_;
 };
+
+Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, String module_name,
+                               TECompiler compiler, SEScope host_se_scope, Function func) {
+  struct Group {
+    std::vector<Var> vars;
+    BaseFunc func;
+  };
+
+  class Phase1 : public ExprVisitor {
+   public:
+    Phase1(const IRModule& module) : module_(module), debug_op_(Op::Get("debug")) {}
+
+   private:
+    BaseFunc ResolveToPrimitive(const Expr& expr) {
+      // NOTE: We can't assume expr->checked_type_ is defined, so can't early exit for first-order
+      // expressions.
+      if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
+        if (!module_->ContainGlobalVar(global_var_node->name_hint)) {
+          // TODO(mbs): extern function cleanup
+          // Assume the function is extern and thus no longer in the IRModule.
+          return {};
+        } else {
+          BaseFunc base_func = module_->Lookup(GetRef<GlobalVar>(global_var_node));
+          return ResolveToPrimitive(base_func);
+        }
+      } else if (const auto* prim_func_node = expr.as<tir::PrimFuncNode>()) {
+        return GetRef<tir::PrimFunc>(prim_func_node);
+      } else if (const auto* var_node = expr.as<VarNode>()) {
+        auto itr = primitive_functions_.find(var_node);
+        if (itr == primitive_functions_.end()) {
+          // Not bound to a primitive function.
+          return {};
+        } else {
+          return itr->second;
+        }
+      } else if (const auto* function_node = expr.as<FunctionNode>()) {
+        if (!function_node->HasNonzeroAttr(attr::kPrimitive)) {
+          // Not marked as primitive by FuseOps.
+          return {};
+        }
+        if (const auto* call_node = function_node->body.as<CallNode>()) {
+          if (call_node->op == debug_op_) {
+            // Debug 'primitives' are not lowered.
+            return {};
+          }
+        }
+        return GetRef<Function>(function_node);
+      } else {
+        return {};
+      }
+    }
+
+    BaseFunc GetCalleeIfPresent(const Expr& e) {
+      if (auto cn = e.as<CallNode>()) {
+        return ResolveToPrimitive(cn->op);
+      }
+      return NullValue<BaseFunc>();
+    }
+
+    void PrimFuncBinding(const LetNode* op) {
+      BaseFunc prim_func = ResolveToPrimitive(op->value);
+      if (prim_func.defined()) {
+        primitive_functions_.emplace(op->var.get(), prim_func);
+      }
+    }
+
+    void VisitExpr_(const LetNode* op) final {
+      Expr current = GetRef<Expr>(op);
+
+      BaseFunc last_rhs_callee_ = NullValue<BaseFunc>();
+      std::vector<Var> current_hfuse_group_;
+      while (current.as<LetNode>()) {
+        auto let = current.as<LetNode>();
+        PrimFuncBinding(let);
+        auto this_rhs_callee = GetCalleeIfPresent(let->value);
+        if (this_rhs_callee.defined() &&
+            ((last_rhs_callee_ == this_rhs_callee) || !last_rhs_callee_.defined())) {
+          current_hfuse_group_.push_back(let->var);
+          last_rhs_callee_ = this_rhs_callee;
+        } else {
+          if (current_hfuse_group_.size() > 1) {
+            hfuse_groups_.push_back({current_hfuse_group_, last_rhs_callee_});
+          }
+          last_rhs_callee_ = NullValue<BaseFunc>();
+          current_hfuse_group_.clear();
+        }
+        ExprVisitor::VisitExpr(let->value);
+        current = let->body;
+      }
+
+      ExprVisitor::VisitExpr(current);
+    }
+
+    IRModule module_;
+    std::unordered_map<const VarNode*, BaseFunc> primitive_functions_;
+    const Op& debug_op_;
+
+   public:
+    std::vector<Group> hfuse_groups_;
+  };
+
+  class Phase2 : public ExprMutator, public AbstractLowerTensorExprMutator {
+   public:
+    Phase2(const IRModule& module, ProcessFn process_fn, String module_name, TECompiler compiler,
+           SEScope host_se_scope, const std::vector<Group>& groups)
+        : AbstractLowerTensorExprMutator(module, process_fn, module_name, compiler, host_se_scope),
+          groups_(groups) {
+      for (auto group : groups_) {
+        var2group_map_[group.vars[0].get()] = group;
+      }
+    }
+
+   private:
+    Expr VisitExpr_(const LetNode* op) {
+      auto it = var2group_map_.find(op->var.get());
+      if (it != var2group_map_.end()) {
+        auto group_vars = it->second.vars;
+        auto group_func = it->second.func;
+        std::vector<const LetNode*> group_lets(group_vars.size());
+
+        auto current = GetRef<Expr>(op);
+        SEScope value_se_scope = SEScope::FullyUnconstrained();
+        for (size_t i = 0; i < group_vars.size(); ++i) {
+          auto let = current.as<LetNode>();
+          ICHECK(let) << group_vars[i];
+          ICHECK_EQ(let->var.get(), group_vars[i].get());
+          group_lets[i] = let;
+
+          auto let_value = ExprMutator::VisitExpr(let->value);
+          auto od_props_val = GetOnDeviceProps(let_value);
+          if (od_props_val.body.defined()) {
+            let_value = od_props_val.body;
+          }
+
+          auto let_body = let->body;
+          auto od_props_body = GetOnDeviceProps(let_body);
+          if (od_props_body.body.defined()) {
+            let_body = od_props_body.body;
+          }
+
+          current = let_body;
+          auto opt_se_scope = SEScope::Join(value_se_scope, od_props_val.se_scope);
+          if (opt_se_scope) {
+            value_se_scope = opt_se_scope.value();
+          } else {
+            return ExprMutator::VisitExpr_(op);
+          }
+          value_se_scope = od_props_val.se_scope;
+        }
+
+        auto inner_body = ExprMutator::VisitExpr(group_lets.back()->body);
+
+        auto combined_call = MakeCombinedLoweredCall(group_func, group_lets, value_se_scope);
+        std::cout << "[TPGN] Combined call " << combined_call << std::endl;
+
+        Array<Type> combined_type_fields;
+        for (auto var : group_vars) {
+          combined_type_fields.push_back(GetVarType(var));
+        }
+        Var combined_res("combined", TupleType(combined_type_fields));
+        Expr body = inner_body;
+        for (int i = static_cast<int>(group_lets.size()) - 1; i >= 0; --i) {
+          body = Let(group_lets[i]->var, TupleGetItem(combined_res, i), body);
+        }
+        return Let(combined_res, combined_call, body);
+      }
+
+      return ExprMutator::VisitExpr_(op);
+    }
+
+    const std::vector<Group>& groups_;
+    std::unordered_map<const Object*, Group> var2group_map_;
+  };
+
+  Phase1 phase1(module);
+  phase1(RemoveOnDeviceCalls(func));
+  std::cout << "[TPGN] Found Groups" << std::endl;
+  for (auto group : phase1.hfuse_groups_) {
+    std::cout << "[TPGN]  New Group" << std::endl;
+    for (auto var : group.vars) {
+      std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+    }
+  }
+
+  Phase2 phase2(module, process_fn, module_name, compiler, host_se_scope, phase1.hfuse_groups_);
+  func = Downcast<Function>(phase2(func));
+  return func;
+}
 
 Target GetTargetFromInteger(DLDeviceType dev_type, tec::TargetMap targets) {
   if (targets.size() == 1) {
@@ -1201,10 +1301,22 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function func, IRModule module, PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
-        auto global_symbol = func->GetAttr<String>(tvm::attr::kGlobalSymbol);
+        auto func_name = func->GetAttr<String>(tvm::tir::attr::kDBFunctionName);
+        bool print = (func_name == "mvrnn");
+        // if (print) {
+        //   std::cout << "[TEC] PreLowering\n" << PrettyPrint(func) << std::endl;
+        // }
         func = Downcast<Function>(LiftLetsOutOfValues(func));
-        std::cout << "[Lowering] Func  " << func << std::endl;
-        return Downcast<Function>(lower_te.Mutate(func));
+        if (print) {
+          std::cout << "[TEC] Lowering\n" << PrettyPrint(func) << std::endl;
+        }
+        func =
+            PerformStaticBatching(module, process_fn, module_name, compiler, host_se_scope, func);
+        func = Downcast<Function>(lower_te.Mutate(func));
+        if (print) {
+          std::cout << "[TEC] Lowered\n" << PrettyPrint(func) << std::endl;
+        }
+        return func;
       };
   return CreateFunctionPass(pass_func, 0, "LowerTensorExpr", {});
 }

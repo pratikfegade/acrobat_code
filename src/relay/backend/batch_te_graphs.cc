@@ -221,7 +221,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
       return body;
     };
     auto cumm_op = te::compute(cumm_shape, cumm_op_body, input_op->name + "_cumm");
-    // std::cout << "CUMM OP " << cumm_op->op << std::endl;
+    std::cout << "[PULP] Input cumm op " << cumm_op->op << std::endl;
     rewritten.Set(input->op, cumm_op->op);
   }
 
@@ -255,7 +255,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     if (!op.same_as(batchified_op)) {
       rewritten.Set(op, batchified_op);
     }
-    // std::cout << "CUMM OP " << batchified_op << std::endl;
+    std::cout << "[PULP] Body cumm op " << batchified_op << std::endl;
     ret.Set(op, batchified_op);
   }
 
@@ -283,7 +283,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
       auto cumm_tensor = te::compute(old_op->output_shape(tensor->value_index), output_body,
                                      output_op->name + "_sb" + std::to_string(i));
       new_output_ops.push_back(cumm_tensor->op);
-      // std::cout << "CUMM OP " << cumm_op->op << std::endl;
+      std::cout << "[PULP] Output cumm op " << cumm_tensor->op << std::endl;
       new_outputs.push_back(cumm_tensor);
     }
   }

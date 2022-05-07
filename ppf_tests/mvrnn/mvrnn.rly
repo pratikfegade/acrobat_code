@@ -57,20 +57,28 @@ def @mvrnn(
 
       let %dense_func = fn(
         %v: Tensor[(1, 64), float32],
-        %m: Tensor[(64, 64), float32]
+        %m: Tensor[(64, 64), float32],
+        Primitive=1
       ) {
         nn.dense(%v, %m, units=64)
       };
 
+      let %mvlr = %dense_func(%vl, %mr);
+      let %mvrl = %dense_func(%vr, %ml);
       (
         %m_func(%ml, %mr, %mweight, %mbias),
-        %v_func(
-          %dense_func(%vl, %mr),
-          %dense_func(%vr, %ml),
-          %vweight,
-          %vbias
-        )
+        %v_func(%mvlr, %mvrl, %vweight, %vbias)
       )
+
+      // (
+      //   %m_func(%ml, %mr, %mweight, %mbias),
+      //   %v_func(
+      //     %dense_func(%vl, %mr),
+      //     %dense_func(%vr, %ml),
+      //     %vweight,
+      //     %vbias
+      //   )
+      // )
     },
     LeafNode(%m, %v) => {
       (%m, %v)
