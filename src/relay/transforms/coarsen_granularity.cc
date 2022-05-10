@@ -469,7 +469,7 @@ class GroupStaticScheduler : public AbstractTIRLowerer {
     };
     push_args(call->args[1]);
     push_args(call->args[2]);
-    return Call(callee_gv, args);
+    return Call(callee_gv, args, call->attrs, call->type_args, call->span);
   }
 };
 
@@ -1030,6 +1030,21 @@ class Coarsener : public ExprMutator {
           auto it = group_static_depths.find(i);
           if (it != group_static_depths.end()) {
             attrs_map.Set(tir::attr::kDBGraphDepth, Integer(it->second));
+          }
+          bool has_static_output = false;
+          std::cout << "[TENET] Group " << std::endl;
+          for (auto e : group) {
+            std::cout << "[TENET]  Call " << e << std::endl;
+            auto cn = e.as<CallNode>();
+            has_static_output =
+                has_static_output || Downcast<DictAttrs>(cn->attrs)
+                                         .GetAttr(tir::attr::kDBScalarOutputOp, Bool(false))
+                                         .value()
+                                         ->value;
+            std::cout << "[TENET]    " << has_static_output << std::endl;
+          }
+          if (has_static_output) {
+            attrs_map.Set(tir::attr::kDBScalarOutputOp, Bool(true));
           }
           auto call =
               InvokeTVMOp(prim_func_var, input_args_tuple, output_args_tuple, DictAttrs(attrs_map));

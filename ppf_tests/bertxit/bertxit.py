@@ -61,11 +61,11 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
-use_autoscheduler=False
+use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
@@ -103,8 +103,9 @@ def print_time(time):
 
 log_file = get_ansor_log_file(model_name, [ff_size, num_heads, head_size, model_size], pass_context, target)
 def auto_schedule(tune):
-    pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
-                          target, pass_context, execution_options)
+    if (tune):
+        pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
+                              target, pass_context, execution_options, fin_iterations=100)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):

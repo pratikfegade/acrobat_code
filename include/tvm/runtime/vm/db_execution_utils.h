@@ -26,6 +26,7 @@
 #define TVM_RUNTIME_VM_DB_EXECUTION_UTILS_H_
 
 #include <stddef.h>
+#include <tvm/runtime/c_runtime_api.h>
 #include <tvm/runtime/ndarray.h>
 
 #include <iostream>
@@ -55,7 +56,9 @@ inline int64_t NDToInt64(const NDArray& nd) {
 
 template <typename T>
 inline T Scalarize(DLTensor* tensor) {
-  return reinterpret_cast<T*>(tensor->data)[0];
+  T res;
+  TVMArrayCopyToBytes(tensor, &res, sizeof(T));
+  return res;
 }
 
 inline int32_t GetRandom(int32_t lo, int32_t hi) {

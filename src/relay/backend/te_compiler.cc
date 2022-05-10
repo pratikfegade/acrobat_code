@@ -396,11 +396,16 @@ class TECompilerImpl : public TECompilerNode {
         // Create scatter_buffer_map when applicable
         Map<te::Tensor, tir::Buffer> scatter_buffers;
         if (batched && scattered_kernels) {
+          bool print = (key->static_batch_size->value > 1);
+          if (print) {
+            std::cout << "[KB] Lowering " << cached_func->batched_arg_mode << std::endl;
+          }
           size_t flattened_size = func_model_parameter_taints.size();
           size_t unflattened_size = key->source_func->params.size();
           ICHECK_GE(flattened_size, unflattened_size) << cached_func->prim_fn_var->name_hint;
           int ctr = 0;
-          for (size_t i = 0; i < flattened_size; ++i) {
+          // for (size_t i = 0; i < flattened_size; ++i) {
+          for (size_t i = 0; i < cached_func->batched_arg_mode.size(); ++i) {
             auto arg_mode = cached_func->batched_arg_mode[i]->value;
             if (cached_func->batched_arg_mode[i]->value ==
                 static_cast<int>(tvm::runtime::vm::kIgnore)) {
@@ -411,7 +416,9 @@ class TECompilerImpl : public TECompilerNode {
               te::Tensor arg = (ctr < cached_func->inputs.size())
                                    ? cached_func->inputs[ctr]
                                    : cached_func->outputs[ctr - cached_func->inputs.size()];
-              // std::cout << "[TEC]   Scatter buffer for " << arg->op->name << std::endl;
+              if (print) {
+                std::cout << "[KB]   Scatter buffer for " << arg->op->name << std::endl;
+              }
               auto scatter_buffer = create_pointer_buffer(arg);
               scatter_buffers.Set(arg, scatter_buffer);
             }

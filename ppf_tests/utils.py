@@ -29,7 +29,7 @@ def get_random_tensor(shape):
 
 
 def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
-                          target, pass_context, execution_options):
+                          target, pass_context, execution_options, fin_iterations=20000):
     with pass_context:
         def tune_fn(_tasks, _task_weights, _num_iterations):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
@@ -41,17 +41,13 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
             )
             tuner.tune(tune_option)
 
-        # # Extract tasks
-        # tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-        #                                                    include_simple_tasks=True,
-        #                                                    execution_options=None)
-
         # Build and execute on the CPU for PGO stats
         pass_context, execution_options = relay.backend.vm.create_pgo_workflow_configs(pass_context,
                                                                                        execution_options)
         tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                                       include_simple_tasks=True,
                                                                       execution_options=execution_options)
+        # exit()
 
         dynamic_batch_sizes = [0] * len(tasks)
         executor, fin_executor = executors
@@ -69,4 +65,4 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
         print(dynamic_batch_sizes, len(tasks))
 
         # Finally tune ops with updated weights
-        tune_fn(tasks, task_weights, 20000)
+        tune_fn(tasks, task_weights, fin_iterations)
