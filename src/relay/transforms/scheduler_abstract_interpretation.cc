@@ -41,6 +41,7 @@
 #include "../analysis/call_graph.h"
 #include "../op/annotation/annotation.h"
 #include "../op/memory/memory.h"
+#include "../op/random/db_random.h"
 #include "../op/vm/vm.h"
 #include "./function_pointer_analysis.h"
 #include "./pass_utils.h"
@@ -441,6 +442,7 @@ class TaintAnalysis : public BaseExprFunctor {
       auto callee_prim_func = mod_->Lookup(Downcast<GlobalVar>(op->args[0]));
 
       auto inputs_full_taint = this->VisitExpr(op->args[1], current_context);
+
       auto max_inputs_depth = inputs_full_taint->taint;
       auto output_depth = CappedIncr(max_inputs_depth);
       auto outputs_tuple = op->args[2].as<TupleNode>();
@@ -459,6 +461,13 @@ class TaintAnalysis : public BaseExprFunctor {
         prim_func_call_depths_[op_key] = MergeTaints(it->second, max_inputs_depth);
       }
       return output_full_taint;
+    } else if (op->op == GetDBRandomUniformOp()) {
+      for (auto arg : op->args) {
+        this->VisitExpr(arg, current_context);
+      }
+      auto taint = TaintT(MAX_DEPTH_VALUE);
+      auto function_points_to = FunctionSet();
+      return FullTaint(taint, function_points_to);
     } else if (op->op.as<OpNode>()) {
       auto taint = TaintT(0);
       auto function_points_to = FunctionSet();

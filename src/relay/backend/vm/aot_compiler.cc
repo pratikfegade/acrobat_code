@@ -308,6 +308,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
     inbuilt_ops_.insert({"equal", "=="});
     inbuilt_ops_.insert({"not_equal", "!="});
     inbuilt_ops_.insert({"greater_equal", ">="});
+    inbuilt_ops_.insert({"less_equal", "<="});
+    inbuilt_ops_.insert({"greater", ">"});
   }
 
   int GenerateCPPForFunction(bool definition) {
@@ -450,8 +452,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
         ICHECK(reg_type.as<TensorTypeNode>());
         auto tensor_type = RelayTypeToCppStrString(reg_type, false, "", false);
         auto scalar_type = RelayTypeToCppStrString(reg_type, false, "", true);
-        auto tensor_var = GetVarForReg(i);
-        auto scalar_var = GetVarForReg(i, true);
+        auto tensor_var = GetVarForReg(i, true);
+        auto scalar_var = GetVarForReg(i);
         type2vars[tensor_type].push_back(tensor_var);
         type2vars[scalar_type].push_back(scalar_var);
       } else {
@@ -489,6 +491,17 @@ class VMAOTFunctionCompiler : SourcePrinter {
       stream_ << ";\n";
     }
     stream_ << "\n";
+  }
+
+  void EmitTriggerEvaluation() {
+    if (lazy_execution()) {
+      this->PrintIndent(stream_);
+      if (concurrent_execution()) {
+        stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id);\n";
+      } else {
+        stream_ << GetExecutorType() << "::Current()->LazyExecute();\n";
+      }
+    }
   }
 
   int VisitBytecode() {
@@ -625,6 +638,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           case Opcode::Invoke: {
             if (instr.packed_index == DB_RANDOM_UNIFORM_INDEX) {
+              EmitTriggerEvaluation();
               this->PrintIndent(stream_);
               auto dst_var = GetVarForReg(instr.dst);
               auto lo_var = GetVarForReg(instr.invoke_args_registers[0]);
@@ -700,30 +714,29 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::InvokePacked: {
-            auto get_scalar_var_for_reg = [&](Index reg) {
-              if (scalar_outs_of_tensor_ops.count(reg)) {
-                return GetVarForReg(reg, true);
-              } else {
-                return GetVarForReg(reg);
-              }
-            };
+            auto get_scalar_var_for_reg = [&](Index reg) {};
+
+            auto scalar_op_call = GetScalarOp(i);
+            auto scalar_op = scalar_op_call ? scalar_op_call->op.as<OpNode>() : nullptr;
+            bool generate_inbuilt_scalar_op = scalar_op_call && inbuilt_ops_.count(scalar_op->name);
 
             std::vector<std::string> flattened_args;
             for (int j = 0; j < instr.arity; ++j) {
-              if (auto tt = register_types_.at(instr.packed_args[j]).as<TupleTypeNode>()) {
-                auto tuple_var = GetVarForReg(instr.packed_args[j]);
+              auto arg_reg = instr.packed_args[j];
+              if (auto tt = register_types_.at(arg_reg).as<TupleTypeNode>()) {
+                auto tuple_var = GetVarForReg(arg_reg);
                 for (size_t k = 0; k < tt->fields.size(); ++k) {
                   flattened_args.push_back("std::get<" + std::to_string(k) + ">(*" + tuple_var +
                                            ")");
                 }
+              } else if (scalar_outs_of_tensor_ops.count(arg_reg)) {
+                flattened_args.push_back(GetVarForReg(arg_reg, !generate_inbuilt_scalar_op));
               } else {
-                flattened_args.push_back(get_scalar_var_for_reg(instr.packed_args[j]));
+                flattened_args.push_back(GetVarForReg(arg_reg));
               }
             }
 
-            auto scalar_op_call = GetScalarOp(i);
-            auto scalar_op = scalar_op_call ? scalar_op_call->op.as<OpNode>() : nullptr;
-            if (scalar_op_call && inbuilt_ops_.count(scalar_op->name)) {
+            if (generate_inbuilt_scalar_op) {
               ICHECK(scalar_op);
               auto op_str = inbuilt_ops_.at(scalar_op->name);
               auto dst_var = flattened_args.back();
@@ -786,9 +799,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
               if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
                 for (int j = 0; j < instr.arity; ++j) {
                   if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+                    auto dtype =
+                        register_types_.at(instr.packed_args[j]).as<TensorTypeNode>()->dtype;
+                    EmitTriggerEvaluation();
                     this->PrintIndent(stream_);
-                    stream_ << GetVarForReg(instr.packed_args[j], true) << " = Scalarize("
-                            << GetVarForReg(instr.packed_args[j]) << ");\n";
+                    stream_ << GetVarForReg(instr.packed_args[j]) << " = Scalarize<"
+                            << DTypeToTypeStr(dtype) << ">("
+                            << GetVarForReg(instr.packed_args[j], true) << ");\n";
                   }
                 }
               }
@@ -913,6 +930,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
               break;
             }
             auto dst_var = GetVarForReg(instr.dst);
+            if (scalar_outs_of_tensor_ops.count(instr.dst)) {
+              dst_var = GetVarForReg(instr.dst, true);
+            }
             auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
             auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
             std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
@@ -1586,7 +1606,8 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  size_t batch_size = " << batch_size << ";\n";
 
   os << "  VMExecutionOptions options(coarsened_execution, lazy_execution, batched_execution,\n";
-  os << "                             scattered_kernels, concurrent_execution, batch_size);\n";
+  os << "                             scattered_kernels, concurrent_execution, false, "
+        "batch_size);\n";
   os << "  runtime->SetExecutionOptions(options);\n";
   os << "  runtime->InitSharedState();\n";
   os << "  runtime->LoadExecutable(exec_ptr);\n";
@@ -1745,6 +1766,12 @@ void VMAOTCompiler::Codegen() {
 
   hpp_file_stream.close();
   cpp_file_stream.close();
+
+  std::string err;
+  support::Execute("clang-format -i " + output_directory_ + "/" + header_file_name, &err);
+  ICHECK_EQ(err.size(), 0) << err;
+  support::Execute("clang-format -i " + output_directory_ + "/" + cpp_file_name, &err);
+  ICHECK_EQ(err.size(), 0) << err;
 
   std::cout << "[AOT] Created files" << std::endl;
   std::cout << "[AOT]  " << output_directory_ + "/" + header_file_name << std::endl;

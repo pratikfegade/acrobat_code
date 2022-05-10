@@ -70,7 +70,7 @@ class SourcePrinter {
 
   inline std::string GetVarForReg(RegName reg, bool scalarize = false) {
     if (scalarize) {
-      return "scalar_local_" + std::to_string(reg);
+      return "tensor_local_" + std::to_string(reg);
     } else {
       return "local_" + std::to_string(reg);
     }

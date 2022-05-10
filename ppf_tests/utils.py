@@ -52,7 +52,6 @@ def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
         tasks, task_weights, executors = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
                                                                       include_simple_tasks=True,
                                                                       execution_options=execution_options)
-        exit()
 
         dynamic_batch_sizes = [0] * len(tasks)
         executor, fin_executor = executors

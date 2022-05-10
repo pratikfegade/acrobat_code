@@ -7,4 +7,5 @@ aot_test/drnn
 aot_test/treelstm
 aot_test/lstm_cell
 aot_test/graph_gen
+aot_test/bertxit
 aot_test/dump*

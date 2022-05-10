@@ -25,7 +25,8 @@ head_size=64
 model_size=head_size*num_heads
 ff_size=2048
 seq_len=128
-batch_size=4
+num_classes=16
+batch_size=8
 target = "cuda"
 device = tvm.runtime.device(target)
 
@@ -47,10 +48,10 @@ weights_dict = {
     main_func.params[13].name_hint: get_random_tensor((1, model_size)),
     main_func.params[14].name_hint: get_random_tensor((model_size,)),
     main_func.params[15].name_hint: get_random_tensor((model_size,)),
-    # main_func.params[16].name_hint: get_random_tensor((1, 512)),
-    # main_func.params[17].name_hint: get_random_tensor((1, 1)),
-    # main_func.params[18].name_hint: get_random_tensor((16, 512)),
-    # main_func.params[19].name_hint: get_random_tensor((1, 16))
+    main_func.params[16].name_hint: get_random_tensor((1, model_size)),
+    main_func.params[17].name_hint: get_random_tensor((1, 1)),
+    main_func.params[18].name_hint: get_random_tensor((num_classes, model_size)),
+    main_func.params[19].name_hint: get_random_tensor((1, num_classes))
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
@@ -60,11 +61,11 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
-use_autoscheduler=True
+use_autoscheduler=False
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
@@ -124,5 +125,5 @@ def execute():
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
 if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
-# print("===============================================================================", flush=True)
-# execute()
+print("===============================================================================", flush=True)
+execute()

@@ -79,7 +79,7 @@ std::pair<Map<te::Operation, te::Operation>, tir::Var> BatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
     const std::vector<bool>& reuse_taints, const std::string& unbatched_name) {
   bool print = false;
-  // bool print = (unbatched_name == "vm_mod_fused_ones");
+  // bool print = (unbatched_name == "vm_mod_fused_nn_dense_add_reshape_transpose_sb");
   if (print) {
     std::cout << "[BR] Batchifying " << unbatched_name << std::endl;
   }
@@ -177,6 +177,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     const Array<te::Tensor>& inputs, const Array<te::Tensor>& outputs,
     const Array<Bool>& static_reuse_flags, const int static_batch_size) {
   Array<te::Operation> graph_ops = GetSubGraph(outputs, inputs, true);
+  bool print = false;
 
   ICHECK_EQ(static_reuse_flags.size(), inputs.size());
   ICHECK_GT(static_reuse_flags.size(), 0);
@@ -221,7 +222,9 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
       return body;
     };
     auto cumm_op = te::compute(cumm_shape, cumm_op_body, input_op->name + "_cumm");
-    std::cout << "[PULP] Input cumm op " << cumm_op->op << std::endl;
+    if (print) {
+      std::cout << "[PULP] Input cumm op " << cumm_op->op << std::endl;
+    }
     rewritten.Set(input->op, cumm_op->op);
   }
 
@@ -255,7 +258,9 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     if (!op.same_as(batchified_op)) {
       rewritten.Set(op, batchified_op);
     }
-    std::cout << "[PULP] Body cumm op " << batchified_op << std::endl;
+    if (print) {
+      std::cout << "[PULP] Body cumm op " << batchified_op << std::endl;
+    }
     ret.Set(op, batchified_op);
   }
 
@@ -283,17 +288,21 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
       auto cumm_tensor = te::compute(old_op->output_shape(tensor->value_index), output_body,
                                      output_op->name + "_sb" + std::to_string(i));
       new_output_ops.push_back(cumm_tensor->op);
-      std::cout << "[PULP] Output cumm op " << cumm_tensor->op << std::endl;
+      if (print) {
+        std::cout << "[PULP] Output cumm op " << cumm_tensor->op << std::endl;
+      }
       new_outputs.push_back(cumm_tensor);
     }
   }
 
-  // auto schedule = te::create_schedule(new_output_ops);
-  // Array<te::Tensor> sch_args;
-  // sch_args.push_back_all(new_inputs);
-  // sch_args.push_back_all(new_outputs);
-  // auto mod = LowerSchedule(schedule, sch_args, "cumm_test", {});
-  // std::cout << "[CUMM] " << mod << std::endl;
+  if (print) {
+    auto schedule = te::create_schedule(new_output_ops);
+    Array<te::Tensor> sch_args;
+    sch_args.push_back_all(new_inputs);
+    sch_args.push_back_all(new_outputs);
+    auto mod = LowerSchedule(schedule, sch_args, "cumm_test", {});
+    std::cout << "[CUMM] " << mod << std::endl;
+  }
   return std::make_pair(new_inputs, new_outputs);
 }
 

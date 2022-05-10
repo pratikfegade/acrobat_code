@@ -1353,7 +1353,7 @@ transform::Sequential VMCompiler::MemoryOpt(const SEScope& host_se_scope) {
   // Manifest the allocations.
   // pass_seqs.push_back(transform::PrintCurrentIR("RemoveUnusedFunctions", false, true));
   pass_seqs.push_back(transform::ManifestAlloc(host_se_scope));
-  pass_seqs.push_back(transform::PrintCurrentIR("ManifestAlloc", false, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("ManifestAlloc", false, true));
 
   // Compute away possibly introduced constant computation.
   pass_seqs.push_back(transform::FoldConstant());
@@ -1511,13 +1511,17 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
+    pass_seqs.push_back(transform::PrintCurrentIR("Before hoisting", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
+    pass_seqs.push_back(transform::PrintCurrentIR("Hoisting", true, true));
   }
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, true));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
+    // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
     pass_seqs.push_back(transform::InferType());
   } else {
     // Compute prim func access modes for all prim funcs

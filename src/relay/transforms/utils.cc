@@ -59,13 +59,13 @@ class LetLifter : public ExprMutator {
       if (StructuralEqual()(outer_var, outer_body)) {
         ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
                   WrapOnDevice(on_device_props, inner_body));
-        std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
-        std::cout << "[LL]   Returning1\n " << DebugPrint(ret) << "\n\n" << std::endl;
+        // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
+        // std::cout << "[LL]   Returning1\n " << DebugPrint(ret) << "\n\n" << std::endl;
       } else {
         ret = Let(inner_var, WrapOnDevice(on_device_props, inner_value),
                   Let(outer_var, WrapOnDevice(on_device_props, inner_body), outer_body));
-        std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
-        std::cout << "[LL]   Returning2\n " << DebugPrint(ret) << "\n\n" << std::endl;
+        // std::cout << "[LL] Visiting\n " << DebugPrint(GetRef<Expr>(outer_let)) << std::endl;
+        // std::cout << "[LL]   Returning2\n " << DebugPrint(ret) << "\n\n" << std::endl;
       }
       return ret;
     } else {

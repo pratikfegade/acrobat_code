@@ -53,6 +53,11 @@ inline int64_t NDToInt64(const NDArray& nd) {
   return reinterpret_cast<int64_t*>(cpu_array->data)[0];
 }
 
+template <typename T>
+inline T Scalarize(DLTensor* tensor) {
+  return reinterpret_cast<T*>(tensor->data)[0];
+}
+
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
   static std::random_device rd;
   /* static std::mt19937 gen(rd()); */

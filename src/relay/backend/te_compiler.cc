@@ -472,9 +472,9 @@ class TECompilerImpl : public TECompilerNode {
         IRModule scheduled_module =
             tvm::LowerSchedule(cached_func->schedule, all_args, func_name, binds, scatter_buffers);
 
-        if (!batched) {
-          std::cout << "[HTFL8] " << scheduled_module << std::endl;
-        }
+        // if (!batched) {
+        // std::cout << "[HTFL8] " << scheduled_module << std::endl;
+        // }
 
         ICHECK_EQ(scheduled_module->functions.size(), 1);
 
@@ -1230,7 +1230,7 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
         auto inner_body = ExprMutator::VisitExpr(group_lets.back()->body);
 
         auto combined_call = MakeCombinedLoweredCall(group_func, group_lets, value_se_scope);
-        std::cout << "[TPGN] Combined call " << combined_call << std::endl;
+        // std::cout << "[TPGN] Combined call " << combined_call << std::endl;
 
         Array<Type> combined_type_fields;
         for (auto var : group_vars) {
@@ -1253,11 +1253,11 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
 
   Phase1 phase1(module);
   phase1(RemoveOnDeviceCalls(func));
-  std::cout << "[TPGN] Found Groups" << std::endl;
+  // std::cout << "[TPGN] Found Groups" << std::endl;
   for (auto group : phase1.hfuse_groups_) {
-    std::cout << "[TPGN]  New Group" << std::endl;
+    // std::cout << "[TPGN]  New Group" << std::endl;
     for (auto var : group.vars) {
-      std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+      // std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
     }
   }
 
