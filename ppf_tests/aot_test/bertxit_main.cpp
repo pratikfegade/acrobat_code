@@ -60,8 +60,8 @@ template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int batch_size = atoi(argv[0]);
   int num_batches = 1;
-  bool profile = true;
-  bool debug = false;
+  bool profile = false;
+  bool debug = true;
 
   std::vector<TensorType> inputs = create_vector<TensorType>(batch_size);
 

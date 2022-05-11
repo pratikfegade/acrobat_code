@@ -364,7 +364,8 @@ class TECompilerImpl : public TECompilerNode {
 
     ICHECK(!value->cached_func.defined());
     auto iit = model_parameter_taints_.find(key->source_func);
-    ICHECK(iit != model_parameter_taints_.end());
+    ICHECK(iit != model_parameter_taints_.end())
+        << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName);
     auto func_model_parameter_taints = (*iit).second;
     auto lowered_cached_funcs = PrimFuncFor(
         key->source_func, key->target,
@@ -1555,7 +1556,7 @@ void UpdateFunctionMetadata(BaseFunc func,
   function_metadata.Set(prim_fn_var.value()->name_hint, fi);
 }
 
-IRModule LowerTE(const IRModule& module, const String& module_name, ProcessFn process_fn,
+IRModule LowerTE(IRModule& module, const String& module_name, ProcessFn process_fn,
                  SEScope host_se_scope) {
   auto parameter_taints = ModelParameterTaintAnalysis(module);
   auto control_flow_weights = InferTaskWeights(module);

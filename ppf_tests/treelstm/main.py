@@ -40,7 +40,7 @@ coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=True
+use_autoscheduler=False
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
@@ -54,7 +54,6 @@ mod._import(TVM_HOME + "/ppf_tests/treelstm/treelstm.rly")
 
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
 main_func = mod["main"]
-print(mod)
 
 weights_list = []
 weights_dict = {
@@ -102,7 +101,7 @@ def print_time(time):
     )
 
 log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
-def auto_schedule(tune):
+def auto_schedule():
     pgo_and_auto_schedule(mod, weights_dict, trees, batch_size, log_file,
                           target, pass_context, execution_options)
 
@@ -124,6 +123,6 @@ def execute():
                 timeit.timeit(fin_executor, number=50)
                 print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
-# print("===============================================================================", flush=True)
-# execute()
+if use_autoscheduler: auto_schedule()
+print("===============================================================================", flush=True)
+execute()

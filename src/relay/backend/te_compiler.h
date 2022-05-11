@@ -207,7 +207,7 @@ Map<Target, IRModule> GetPerTargetModules(IRModule mod, bool for_execution = fal
  * \return The lowered module, see above.
  */
 IRModule LowerTE(
-    const IRModule& module, backend::StaticMemoryPlan memory_plan, const String& module_name,
+    IRModule& module, backend::StaticMemoryPlan memory_plan, const String& module_name,
     ProcessFn process_fn = [](BaseFunc f) {});
 
 /*! \brief Pass to lower an IRModule's primitive functions to TIR.

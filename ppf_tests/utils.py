@@ -30,6 +30,9 @@ def get_random_tensor(shape):
 
 def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
                           target, pass_context, execution_options, fin_iterations=20000):
+    if os.path.exists(log_file):
+        return
+
     with pass_context:
         def tune_fn(_tasks, _task_weights, _num_iterations):
             measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)

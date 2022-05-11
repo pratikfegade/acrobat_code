@@ -28,7 +28,7 @@ namespace tvm {
 namespace relay {
 
 namespace tec {
-Map<Function, Array<Bool>> ModelParameterTaintAnalysis(const IRModule& mod);
+Map<Function, Array<Bool>> ModelParameterTaintAnalysis(IRModule& mod);
 }  // namespace tec
 }  // namespace relay
 }  // namespace tvm
