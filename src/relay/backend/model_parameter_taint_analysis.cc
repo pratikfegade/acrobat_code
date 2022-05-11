@@ -39,6 +39,7 @@
 #include "../op/memory/on_device.h"
 #include "../transforms/expr_subst.h"
 #include "../transforms/function_pointer_analysis.h"
+#include "../transforms/map_set.h"
 #include "../transforms/pass_utils.h"
 
 namespace tvm {
@@ -46,58 +47,6 @@ namespace relay {
 namespace tec {
 
 namespace {
-class MapSet {
- public:
-  template <typename T>
-  static Map<T, Bool> Create(std::initializer_list<T> values) {
-    Map<T, Bool> res;
-    for (auto value : values) {
-      res.Set(value, bool_true);
-    }
-    return res;
-  }
-
-  template <typename T>
-  static void Insert(Map<T, Bool>& map, T value) {
-    map.Set(value, bool_true);
-  }
-
-  template <typename T>
-  static void Remove(Map<T, Bool>& map, T value) {
-    map.erase(value);
-  }
-
-  template <typename T>
-  static bool Contains(Map<T, Bool>& map, T value) {
-    return map.count(value);
-  }
-
-  template <typename T>
-  static Map<T, Bool> Merge(const Map<T, Bool>& map1, const Map<T, Bool>& map2) {
-    Map<T, Bool> res;
-    for (auto kv : map1) {
-      res.Set(kv.first, kv.second);
-    }
-    for (auto kv : map2) {
-      res.Set(kv.first, kv.second);
-    }
-    return res;
-  }
-
-  template <typename T>
-  static Map<T, Bool> Merge(const Array<Map<T, Bool>>& maps) {
-    Map<T, Bool> res;
-    for (auto& map : maps) {
-      for (auto& kv : map) {
-        res.Set(kv.first, kv.second);
-      }
-    }
-    return res;
-  }
-
-  static Bool bool_true;
-};
-Bool MapSet::bool_true = Bool(true);
 
 using FunctionSet = Map<Function, Bool>;
 using ConstantSet = Map<Expr, Bool>;
@@ -195,7 +144,7 @@ bool IsSuperSet(const std::unordered_set<T>& b, const std::unordered_set<T>& a) 
 
 class TaintAnalysis : public BaseExprFunctor {
  public:
-  TaintAnalysis(const IRModule& mod) : mod_(mod) {}
+  TaintAnalysis(IRModule& mod) : mod_(mod) {}
 
   std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> PerformAnalysisPhase1() {
     RunAnalysis();
@@ -315,7 +264,7 @@ class TaintAnalysis : public BaseExprFunctor {
     return results_map;
   }
 
-  Map<Function, Array<Bool>> PerformAnalysisPhase2() {
+  IRModule PerformAnalysisPhase2() {
     RunAnalysis();
 
     std::unordered_map<const VarNode*, FullTaint> merged_var_states;
@@ -351,7 +300,8 @@ class TaintAnalysis : public BaseExprFunctor {
     Map<Function, Array<Bool>> results_map;
     for (auto kv : merged_function_states) {
       auto fn = GetRef<Function>(kv.first);
-      std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << std::endl;
+      std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " " << kv.first
+                << std::endl;
       Array<Bool> param_states;
       for (auto arg : fn->params) {
         auto it = merged_var_states.find(arg.get());
@@ -382,7 +332,36 @@ class TaintAnalysis : public BaseExprFunctor {
       results_map.Set(fn, param_states);
     }
 
-    return results_map;
+    class TaintAdder : public ExprMutator {
+     public:
+      TaintAdder(Map<Function, Array<Bool>> taints_map) : taints_map_(taints_map) {}
+
+     private:
+      Expr VisitExpr_(const FunctionNode* op) final {
+        auto mutated = Downcast<Function>(ExprMutator::VisitExpr_(op));
+        auto it = taints_map_.find(GetRef<Function>(op));
+        if (it != taints_map_.end()) {
+          auto taints = (*it).second;
+          mutated = WithAttr(mutated, tir::attr::kDBModelParamterTaints, taints);
+        }
+        return mutated;
+      }
+
+      Map<Function, Array<Bool>> taints_map_;
+    };
+
+    Map<GlobalVar, Function> updated_functions;
+    TaintAdder adder(results_map);
+    for (auto kv : mod_->functions) {
+      if (kv.second.as<FunctionNode>()) {
+        updated_functions.Set(kv.first, Downcast<Function>(adder(Downcast<Function>(kv.second))));
+      }
+    }
+    for (auto kv : updated_functions) {
+      mod_->Add(kv.first, kv.second, true);
+    }
+
+    return mod_;
   }
 
  private:
@@ -414,7 +393,7 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   std::string GetFunctionName(const Function& fn) {
-    return fn->GetAttr<String>("db.function_name").value();
+    return fn->GetAttr<String>("db.function_name", String("")).value();
   }
 
   void Reset() {
@@ -781,7 +760,7 @@ class TaintAnalysis : public BaseExprFunctor {
     return Merge(clause_taints);
   }
 
-  const IRModule& mod_;
+  IRModule& mod_;
 
   VarStateMap var_states_;
   FunctionStateMap function_states_;
@@ -880,13 +859,12 @@ class RepeatMutator : public ExprMutator {
 };
 }  // namespace
 
-Map<Function, Array<Bool>> ModelParameterTaintAnalysis(IRModule& mod) {
-  auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
-  mod = RepeatMutator(to_repeat, mod).Repeat();
-  std::cout << mod << std::endl;
-  auto ret = TaintAnalysis(mod).PerformAnalysisPhase2();
-  exit(0);
-  return ret;
+IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
+  if (repeat) {
+    auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
+    mod = RepeatMutator(to_repeat, mod).Repeat();
+  }
+  return TaintAnalysis(mod).PerformAnalysisPhase2();
 }
 
 }  // namespace tec

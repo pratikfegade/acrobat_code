@@ -17,20 +17,12 @@
  * under the License.
  */
 
-#ifndef TVM_RELAY_BACKEND_MODEL_PARAMETER_TAINT_ANALYSIS_H_
-#define TVM_RELAY_BACKEND_MODEL_PARAMETER_TAINT_ANALYSIS_H_
-
-#include <tvm/ir/attrs.h>
-#include <tvm/relay/expr.h>
-#include <tvm/relay/function.h>
+#include "map_set.h"
 
 namespace tvm {
 namespace relay {
 
-namespace tec {
-IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat = true);
-}  // namespace tec
+Bool MapSet::bool_true = Bool(true);
+
 }  // namespace relay
 }  // namespace tvm
-
-#endif  // TVM_RELAY_BACKEND_MODEL_PARAMETER_TAINT_ANALYSIS_H_

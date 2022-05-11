@@ -44,6 +44,7 @@
 #include "../op/random/db_random.h"
 #include "../op/vm/vm.h"
 #include "./function_pointer_analysis.h"
+#include "./map_set.h"
 #include "./pass_utils.h"
 #include "./pattern_utils.h"
 
@@ -240,14 +241,7 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   FunctionSet MergeFunctionSets(const FunctionSet& set1, const FunctionSet& set2) {
-    FunctionSet result;
-    for (auto kv : set1) {
-      result.Set(kv.first, kv.second);
-    }
-    for (auto kv : set2) {
-      result.Set(kv.first, kv.second);
-    }
-    return result;
+    return MapSet::Merge(set1, set2);
   }
 
   FullTaint Merge(const Array<FullTaint>& full_taints) {
@@ -340,7 +334,7 @@ class TaintAnalysis : public BaseExprFunctor {
 
     auto base_func = mod_->Lookup(GetRef<GlobalVar>(op));
     if (base_func.as<FunctionNode>()) {
-      function_points_to.Set(Downcast<Function>(base_func), Bool(true));
+      MapSet::Insert(function_points_to, Downcast<Function>(base_func));
     }
     return FullTaint(taint, function_points_to);
   }
@@ -372,7 +366,7 @@ class TaintAnalysis : public BaseExprFunctor {
     }
 
     FunctionSet function_points_to;
-    function_points_to.Set(function, Bool(true));
+    MapSet::Insert(function_points_to, function);
     return FullTaint(function_depth, function_points_to);
   }
 

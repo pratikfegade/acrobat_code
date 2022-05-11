@@ -148,9 +148,14 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
         (*f)();
 
         // std::cout << "[ASLR] Entering scope" << std::endl;
-        auto iit = model_parameter_taints_.find(Downcast<Function>(call->op));
-        ICHECK(iit != model_parameter_taints_.end());
-        auto func_model_parameter_taints = (*iit).second;
+
+        auto callee_func = Downcast<Function>(call->op);
+        auto opt_func_model_parameter_taints =
+            callee_func->GetAttr<Array<Bool>>(tir::attr::kDBModelParamterTaints);
+        ICHECK(opt_func_model_parameter_taints)
+            << callee_func->GetAttr<String>(tir::attr::kDBFunctionName) << " " << callee_func.get();
+        auto func_model_parameter_taints = opt_func_model_parameter_taints.value();
+
         tec::PrimFuncFor(
             GetRef<Function>(func), Target::Current(), [](std::string name) { return name; },
             func_model_parameter_taints, {}, batched_execution_, scattered_execution_);
@@ -172,10 +177,9 @@ Expr AutoSchedulerLayoutRewriter::VisitExpr_(const CallNode* n) {
   return new_n;
 }
 
-Expr AutoSchedulerLayoutRewrite(const Expr& expr, Map<Function, Array<Bool>> model_parameter_taints,
-                                bool batched_execution, bool scattered_execution) {
-  return AutoSchedulerLayoutRewriter(model_parameter_taints, batched_execution, scattered_execution)
-      .Mutate(expr);
+Expr AutoSchedulerLayoutRewrite(const Expr& expr, bool batched_execution,
+                                bool scattered_execution) {
+  return AutoSchedulerLayoutRewriter(batched_execution, scattered_execution).Mutate(expr);
 }
 
 namespace transform {
@@ -183,12 +187,8 @@ namespace transform {
 Pass AutoSchedulerLayoutRewrite(bool batched_execution, bool scattered_execution) {
   runtime::TypedPackedFunc<Function(Function, IRModule, PassContext)> pass_func =
       [=](Function f, IRModule m, PassContext pc) {
-        auto parameter_taints = tec::ModelParameterTaintAnalysis(m);
-        // std::cout << "\n\n\n\n\n\n[ASLR] Starting ASLR" << std::endl;
-        auto ret = Downcast<Function>(relay::AutoSchedulerLayoutRewrite(
-            f, parameter_taints, batched_execution, scattered_execution));
-        // std::cout << "[ASLR] Ending ASLR\n\n\n\n\n\n" << std::endl;
-        return ret;
+        return Downcast<Function>(
+            relay::AutoSchedulerLayoutRewrite(f, batched_execution, scattered_execution));
       };
   return CreateFunctionPass(pass_func, 3, "AutoSchedulerLayoutRewrite", {"InferType"});
 }

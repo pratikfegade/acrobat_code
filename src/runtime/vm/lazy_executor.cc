@@ -341,6 +341,12 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
             for (int j = 0; j < batch_size; ++j) {
               func_nodes[j]->args_[i]->data = ptr;
             }
+          } else {
+#ifdef DEBUG_CHECKS
+            for (int j = 1; j < batch_size; ++j) {
+              ICHECK_EQ(func_nodes[j]->args_[i]->data, arg->data);
+            }
+#endif
           }
           setter(ctr, arg);
 

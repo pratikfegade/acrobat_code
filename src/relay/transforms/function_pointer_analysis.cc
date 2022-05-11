@@ -44,6 +44,7 @@
 #include "../op/annotation/annotation.h"
 #include "../op/memory/memory.h"
 #include "../op/vm/vm.h"
+#include "./map_set.h"
 #include "./pass_utils.h"
 #include "./pattern_utils.h"
 

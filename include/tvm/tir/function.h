@@ -342,6 +342,9 @@ constexpr const char* kDBFunctionName = "db.function_name";
 
 /*! \brief Autosched unique workload keys. */
 constexpr const char* kDBAutoschedWorkloadKeys = "db.autosched_workload_keys";
+
+/*! \brief Temp storage for the results of the MPT analysis. */
+constexpr const char* kDBModelParamterTaints = "db.model_paramter_taints";
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm
