@@ -352,6 +352,7 @@ class FloatImm : public PrimExpr {
  */
 class Bool : public IntImm {
  public:
+  Bool() {}
   explicit Bool(bool value, Span span = Span()) : IntImm(DataType::Bool(), value, span) {}
   Bool operator!() const { return Bool((*this)->value == 0); }
   operator bool() const { return (*this)->value != 0; }

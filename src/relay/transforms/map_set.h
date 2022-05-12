@@ -50,6 +50,17 @@ class MapSet {
   }
 
   template <typename T>
+  static Map<T, Bool> Intersect(const Map<T, Bool>& map1, const Map<T, Bool>& map2) {
+    Map<T, Bool> res;
+    for (auto kv : map1) {
+      if (map2.count(kv.first)) {
+        res.Set(kv.first, kv.second);
+      }
+    }
+    return res;
+  }
+
+  template <typename T>
   static Map<T, Bool> Merge(const Map<T, Bool>& map1, const Map<T, Bool>& map2) {
     Map<T, Bool> res;
     for (auto kv : map1) {
@@ -70,6 +81,25 @@ class MapSet {
       }
     }
     return res;
+  }
+
+  template <typename T>
+  static std::string ToString(const Map<T, Bool>& map) {
+    if (!map.defined()) {
+      return "{NULLPTR}";
+    } else {
+      std::stringstream ss;
+      ss << "{";
+      int ctr = 0;
+      for (auto& kv : map) {
+        ss << kv.first;
+        if (ctr++ < map.size() - 1) {
+          ss << ", ";
+        }
+      }
+      ss << "}";
+      return ss.str();
+    }
   }
 
   static Bool bool_true;

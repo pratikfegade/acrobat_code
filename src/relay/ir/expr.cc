@@ -59,7 +59,7 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       ICHECK(fprint) << "unable to find printing function for constants";
       // std::string data = (*fprint)(GetRef<Constant>(node));
       // p->stream << "Constant(" << data << ")";
-      p->stream << "Constant(NDArray)";
+      p->stream << "Constant(NDArray, " << node << ")";
     });
 
 TensorType ConstantNode::tensor_type() const {

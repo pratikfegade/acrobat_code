@@ -69,8 +69,7 @@ TVM_REGISTER_OBJECT_TYPE(TECompilerNode);
 
 class TECompilerImpl : public TECompilerNode {
  public:
-  explicit TECompilerImpl(Optional<IRModule> opt_mod, Map<Function, Integer> task_weights)
-      : task_weights_(task_weights) {
+  explicit TECompilerImpl(Optional<IRModule> opt_mod) {
     // Make sure we don't collide with any existing globals in the module.
     if (opt_mod) {
       for (const auto& kv : opt_mod.value()->functions) {
@@ -286,6 +285,10 @@ class TECompilerImpl : public TECompilerNode {
             << "for target:" << std::endl
             << key->target->ToDebugString();
 
+    std::cout << "[PANSL] lowering "
+              << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
+              << key->source_func.get() << std::endl;
+
     bool batched_execution =
         PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
     bool scattered_kernels =
@@ -299,12 +302,14 @@ class TECompilerImpl : public TECompilerNode {
     // ICHECK(iiit != task_weights_.end());
     // auto func_task_weight = (*iiit).second->value;
 
-    auto iiit = task_weights_.find(key->source_func);
-    auto func_task_weight = (iiit != task_weights_.end()) ? (*iiit).second->value : 1;
+    auto opt_func_task_weight =
+        key->source_func->GetAttr<Integer>(tir::attr::kDBStaticAutoschedTaskWeight);
+    auto func_task_weight = (opt_func_task_weight) ? opt_func_task_weight.value()->value : 1;
 
     if (it != cache_.end()) {
       VLOG(1) << "already lowered to name:" << std::endl
               << PrettyPrint(it->second->cached_func->prim_fn_var);
+      std::cout << "[PANSL]  lowered already" << std::endl;
       it->second->use_count += 1;
       if (batched_execution) {
         it->second->autosched_weight += 1;
@@ -360,16 +365,6 @@ class TECompilerImpl : public TECompilerNode {
     With<Target> target_scope(key->target);
 
     ICHECK(!value->cached_func.defined());
-    // auto iit = model_parameter_taints_.find(key->source_func);
-    // if (iit == model_parameter_taints_.end()) {
-    //   for (auto kv : model_parameter_taints_) {
-    //     std::cout << kv.first->GetAttr<String>("db.function_name") << " " << kv.first.get()
-    //               << std::endl;
-    //   }
-    // }
-    // ICHECK(iit != model_parameter_taints_.end())
-    //     << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
-    //     << key->source_func.get();
     auto opt_func_model_parameter_taints =
         key->source_func->GetAttr<Array<Bool>>(tir::attr::kDBModelParamterTaints);
     ICHECK(opt_func_model_parameter_taints)
@@ -610,21 +605,17 @@ class TECompilerImpl : public TECompilerNode {
   CCacheKey cur_ccache_key_;
   /*! \brief Map of GlobalVar to C Device API context names */
   Map<GlobalVar, String> device_contexts_;
-  // Control flow aware task weights computed for autoscheduler
-  // prioritization
-  Map<Function, Integer> task_weights_;
 };
 
-TECompiler::TECompiler(Optional<IRModule> opt_mod, Map<Function, Integer> task_weights) {
-  auto object = make_object<TECompilerImpl>(std::move(opt_mod), task_weights);
+TECompiler::TECompiler(Optional<IRModule> opt_mod) {
+  auto object = make_object<TECompilerImpl>(std::move(opt_mod));
   data_ = object;
 }
 
 /*! \brief The global TE compiler */
 // TODO(mbs): To be terminated with extreme prejudice.
 TECompiler& TECompiler::Global() {
-  static TECompiler* inst =
-      new TECompiler(make_object<TECompilerImpl>(Optional<IRModule>(), Map<Function, Integer>()));
+  static TECompiler* inst = new TECompiler(make_object<TECompilerImpl>(Optional<IRModule>()));
   return *inst;
 }
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.backend.use_auto_scheduler", Bool);
@@ -1559,10 +1550,9 @@ void UpdateFunctionMetadata(BaseFunc func,
 
 IRModule LowerTE(IRModule& module, const String& module_name, ProcessFn process_fn,
                  SEScope host_se_scope) {
-  module = ModelParameterTaintAnalysis(module);
-  auto control_flow_weights = InferTaskWeights(module);
-
-  TECompiler compiler(module, control_flow_weights);
+  // module = ModelParameterTaintAnalysis(module);
+  // module = InferTaskWeights(module);
+  TECompiler compiler(module);
 
   // TODO(mbs): This is all unnecessarily convoluted. Better would be to accumulate the rewritten
   // module as we go (including rewritten Functions, lowered primitives, and runtime modules
@@ -1727,7 +1717,8 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
   };
 
   return tvm::transform::Sequential(
-      {tvm::relay::transform::RelayToTIRTargetHook(),
+      {tvm::relay::transform::RelayToTIRTargetHook(), ModelParameterTaintAnalysisPass(true),
+       DeadCodeElimination(), RemoveUnusedFunctions({"main"}, true), InferTaskWeightsPass(),
        tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}), InferType()});
 }
 }  // namespace tec

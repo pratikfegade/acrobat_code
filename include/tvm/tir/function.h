@@ -345,6 +345,9 @@ constexpr const char* kDBAutoschedWorkloadKeys = "db.autosched_workload_keys";
 
 /*! \brief Temp storage for the results of the MPT analysis. */
 constexpr const char* kDBModelParamterTaints = "db.model_paramter_taints";
+
+/*! \brief Temp storage for statically inferred task weights for the autoscheduler. */
+constexpr const char* kDBStaticAutoschedTaskWeight = "db.static_autosched_task_weight";
 }  // namespace attr
 }  // namespace tir
 }  // namespace tvm

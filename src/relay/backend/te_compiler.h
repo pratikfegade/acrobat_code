@@ -142,7 +142,7 @@ class TECompilerNode : public Object {
 /*! \brief cache entry used in compile engine */
 class TECompiler : public ObjectRef {
  public:
-  explicit TECompiler(Optional<IRModule> opt_mod = {}, Map<Function, Integer> task_weights = {});
+  explicit TECompiler(Optional<IRModule> opt_mod = {});
   explicit TECompiler(ObjectPtr<Object> n) : ObjectRef(n) {}
   TECompilerNode* operator->() { return static_cast<TECompilerNode*>(get_mutable()); }
   using ContainerType = TECompilerNode;

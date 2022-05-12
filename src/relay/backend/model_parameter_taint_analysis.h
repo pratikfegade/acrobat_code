@@ -21,6 +21,7 @@
 #define TVM_RELAY_BACKEND_MODEL_PARAMETER_TAINT_ANALYSIS_H_
 
 #include <tvm/ir/attrs.h>
+#include <tvm/ir/transform.h>
 #include <tvm/relay/expr.h>
 #include <tvm/relay/function.h>
 
@@ -29,6 +30,17 @@ namespace relay {
 
 namespace tec {
 IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat = true);
+
+inline tvm::transform::Pass ModelParameterTaintAnalysisPass(bool repeat) {
+  runtime::TypedPackedFunc<IRModule(IRModule, tvm::transform::PassContext)> pass_func =
+      [=](IRModule module, tvm::transform::PassContext ctx) {
+        return ModelParameterTaintAnalysis(module, repeat);
+      };
+
+  return tvm::transform::CreateModulePass(pass_func, 0, "ModelParameterTaintAnalysisPass",
+                                          {"InferType"});
+}
+
 }  // namespace tec
 }  // namespace relay
 }  // namespace tvm

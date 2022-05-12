@@ -62,19 +62,23 @@ class FullTaint;
 class FullTaintNode : public Object {
  public:
   TaintT taint;
+  Bool is_constant;
   FunctionSet function_points_to;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("taint", &taint);
+    v->Visit("is_constant", &is_constant);
     v->Visit("function_points_to", &function_points_to);
   }
 
   bool SEqualReduce(const FullTaintNode* other, SEqualReducer equal) const {
-    return equal(taint, other->taint) && equal(function_points_to, other->function_points_to);
+    return equal(taint, other->taint) && equal(is_constant, other->is_constant) &&
+           equal(function_points_to, other->function_points_to);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(taint);
+    hash_reduce(is_constant);
     hash_reduce(function_points_to);
   }
 
@@ -89,14 +93,16 @@ class FullTaint : public ObjectRef {
    * \param data The data of the constant tensor.
    * \param span The source span of the expression.
    */
-  TVM_DLL explicit FullTaint(TaintT taint, FunctionSet function_points_to = FunctionSet());
+  TVM_DLL explicit FullTaint(TaintT taint, Bool is_constant,
+                             FunctionSet function_points_to = FunctionSet());
 
   TVM_DEFINE_OBJECT_REF_METHODS(FullTaint, ObjectRef, FullTaintNode);
 };
 
-FullTaint::FullTaint(TaintT taint, FunctionSet function_points_to) {
+FullTaint::FullTaint(TaintT taint, Bool is_constant, FunctionSet function_points_to) {
   ObjectPtr<FullTaintNode> n = make_object<FullTaintNode>();
   n->taint = std::move(taint);
+  n->is_constant = std::move(is_constant);
   n->function_points_to = std::move(function_points_to);
   data_ = std::move(n);
 }
@@ -147,6 +153,7 @@ class TaintAnalysis : public BaseExprFunctor {
   TaintAnalysis(IRModule& mod) : mod_(mod) {}
 
   std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> PerformAnalysisPhase1() {
+    phase_ = 1;
     RunAnalysis();
 
     std::unordered_map<const VarNode*, std::unordered_map<ContextT, FullTaint>>
@@ -189,7 +196,17 @@ class TaintAnalysis : public BaseExprFunctor {
           std::cout << "[TSR]   State not found" << std::endl;
           continue;
         }
-        auto& param_states = it->second;
+        auto param_states_with_recursive_context = it->second;
+
+        std::unordered_map<ContextT, FullTaint> param_states;
+        for (auto kv : param_states_with_recursive_context) {
+          auto context = kv.first;
+          // NB: Does not handle mutual recursion
+          if (expr2functions.at(context) != fn_node) {
+            param_states[kv.first] = kv.second;
+          }
+        }
+
         if (param_states.size() <= 1) {
           std::cout << "[TSR]   Unique contexts: " << param_states.size() << std::endl;
           continue;
@@ -255,7 +272,7 @@ class TaintAnalysis : public BaseExprFunctor {
         results_map[fn_node] = split_contexts;
         std::cout << "[TSR] Splitting " << GetFunctionName(fn) << std::endl;
         for (auto ctx : split_contexts) {
-          std::cout << "[TSR]  Context:  "
+          std::cout << "[TSR]  Context: " << ctx << " "
                     << PrettyPrint(GetRef<Expr>(static_cast<const CallNode*>(ctx))) << std::endl;
         }
       }
@@ -265,6 +282,7 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   IRModule PerformAnalysisPhase2() {
+    phase_ = 2;
     RunAnalysis();
 
     std::unordered_map<const VarNode*, FullTaint> merged_var_states;
@@ -306,60 +324,34 @@ class TaintAnalysis : public BaseExprFunctor {
       for (auto arg : fn->params) {
         auto it = merged_var_states.find(arg.get());
         if (it == merged_var_states.end()) {
-          merged_var_states[arg.get()] =
-              FullTaint(CreateStateForType(arg->checked_type(), ConstantSet()), FunctionSet());
+          merged_var_states[arg.get()] = FullTaint(
+              CreateStateForType(arg->checked_type(), ConstantSet()), Bool(false), FunctionSet());
         }
-        auto arg_state = merged_var_states[arg.get()]->taint;
+        auto arg_state = merged_var_states[arg.get()];
 
-        ICHECK_EQ(arg_state.size(), GetTypeSize(arg->checked_type())) << arg->checked_type();
+        ICHECK_EQ(arg_state->taint.size(), GetTypeSize(arg->checked_type())) << arg->checked_type();
 
-        for (auto s : arg_state) {
-          param_states.push_back(Bool(s.size() == 1));
-          std::cout << "[MPT]  P " << s.size() << std::endl;
+        for (auto s : arg_state->taint) {
+          param_states.push_back(Bool((s.size() == 1) && arg_state->is_constant->value));
+          std::cout << "[MPT]  P " << arg_state->is_constant->value << " " << s.size() << " "
+                    << MapSet::ToString(s) << std::endl;
         }
       }
       auto iit = merged_function_states.find(fn.get());
       if (iit == merged_function_states.end()) {
         merged_function_states[fn.get()] =
-            FullTaint(CreateStateForType(fn->ret_type, ConstantSet()), FunctionSet());
+            FullTaint(CreateStateForType(fn->ret_type, ConstantSet()), Bool(false), FunctionSet());
       }
-      auto fn_state = merged_function_states[fn.get()]->taint;
-      for (auto s : fn_state) {
-        param_states.push_back(Bool(s.size() == 1));
+      auto fn_state = merged_function_states[fn.get()];
+      for (auto s : fn_state->taint) {
+        param_states.push_back(Bool((s.size() == 1) && fn_state->is_constant->value));
         std::cout << "[MPT]  O " << s.size() << std::endl;
       }
 
       results_map.Set(fn, param_states);
     }
 
-    class TaintAdder : public ExprMutator {
-     public:
-      TaintAdder(Map<Function, Array<Bool>> taints_map) : taints_map_(taints_map) {}
-
-     private:
-      Expr VisitExpr_(const FunctionNode* op) final {
-        auto mutated = Downcast<Function>(ExprMutator::VisitExpr_(op));
-        auto it = taints_map_.find(GetRef<Function>(op));
-        if (it != taints_map_.end()) {
-          auto taints = (*it).second;
-          mutated = WithAttr(mutated, tir::attr::kDBModelParamterTaints, taints);
-        }
-        return mutated;
-      }
-
-      Map<Function, Array<Bool>> taints_map_;
-    };
-
-    Map<GlobalVar, Function> updated_functions;
-    TaintAdder adder(results_map);
-    for (auto kv : mod_->functions) {
-      if (kv.second.as<FunctionNode>()) {
-        updated_functions.Set(kv.first, Downcast<Function>(adder(Downcast<Function>(kv.second))));
-      }
-    }
-    for (auto kv : updated_functions) {
-      mod_->Add(kv.first, kv.second, true);
-    }
+    return AddFunctionTaints(results_map, mod_, tir::attr::kDBModelParamterTaints);
 
     return mod_;
   }
@@ -372,7 +364,8 @@ class TaintAnalysis : public BaseExprFunctor {
     for (auto param : main_func->params) {
       ICHECK(!param->checked_type().as<FuncTypeNode>());
       Add(param, GetInitialContext(),
-          FullTaint(CreateStateForType(param->checked_type(), ConstantSet()), FunctionSet()),
+          FullTaint(CreateStateForType(param->checked_type(), ConstantSet()), Bool(false),
+                    FunctionSet()),
           "Main param");
     }
 
@@ -411,20 +404,36 @@ class TaintAnalysis : public BaseExprFunctor {
     return result;
   }
 
+  std::string TaintToString(const Array<ConstantSet>& taint) {
+    std::stringstream ss;
+    ss << "[";
+    for (size_t i = 0; i < taint.size(); ++i) {
+      ss << MapSet::ToString(taint[i]);
+      if (i < taint.size() - 1) {
+        ss << ", ";
+      }
+    }
+    ss << "]";
+    return ss.str();
+  }
+
   FunctionSet MergeFunctionSets(const FunctionSet& set1, const FunctionSet& set2) {
     return MapSet::Merge<Function>(set1, set2);
   }
 
   FullTaint Merge(const Array<FullTaint>& full_taints) {
     TaintT taint = ConstructSetArray(full_taints[0]->taint.size(), ConstantSet());
+    bool is_constant = true;
     FunctionSet function_points_to;
     for (auto& full_taint : full_taints) {
       auto this_taint = full_taint->taint;
+      auto this_is_constant = full_taint->is_constant;
       auto this_function_points_to = full_taint->function_points_to;
       taint = MergeTaints(taint, this_taint);
+      is_constant = is_constant && this_is_constant.operator bool();
       function_points_to = MergeFunctionSets(function_points_to, this_function_points_to);
     }
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(is_constant), function_points_to);
   }
 
   ConstantSet CollapseTaint(const Array<ConstantSet>& vals) { return MapSet::Merge(vals); }
@@ -471,7 +480,7 @@ class TaintAnalysis : public BaseExprFunctor {
     if (it == function_states_.end()) {
       auto taint = CreateStateForType(fn->ret_type, ConstantSet());
       auto function_points_to = FunctionSet();
-      auto full_taint = FullTaint(taint, function_points_to);
+      auto full_taint = FullTaint(taint, Bool(true), function_points_to);
       return full_taint;
     } else {
       return it->second;
@@ -486,26 +495,28 @@ class TaintAnalysis : public BaseExprFunctor {
     if (from_size == to_size) {
       return taint;
     }
-    return FullTaint(ConstructSetArray(to_size, CollapseTaint(taint->taint)),
+    return FullTaint(ConstructSetArray(to_size, CollapseTaint(taint->taint)), taint->is_constant,
                      taint->function_points_to);
   }
 
   FullTaint VisitExpr_(const ConstantNode* op, ContextT current_context) {
     auto taint = Array<ConstantSet>({MapSet::Create({GetRef<Expr>(op)})});
     auto function_points_to = FunctionSet();
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(true), function_points_to);
   }
 
   FullTaint VisitExpr_(const TupleNode* op, ContextT current_context) {
     TaintT taint;
+    bool is_constant = true;
     FunctionSet function_points_to;
     for (auto field : op->fields) {
       auto field_full_taint = this->VisitExpr(field, current_context);
       taint.push_back(CollapseTaint(field_full_taint->taint));
+      is_constant = is_constant && field_full_taint->is_constant;
       function_points_to =
           MergeFunctionSets(function_points_to, field_full_taint->function_points_to);
     }
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(is_constant), function_points_to);
   }
 
   FullTaint VisitExpr_(const VarNode* op, ContextT current_context) {
@@ -530,7 +541,8 @@ class TaintAnalysis : public BaseExprFunctor {
     auto key = std::make_pair(current_context, op);
     auto iit = var_states_.find(key);
     if (iit == var_states_.end()) {
-      auto taint = FullTaint(CreateStateForType(op->checked_type(), ConstantSet()), FunctionSet());
+      auto taint = FullTaint(CreateStateForType(op->checked_type(), ConstantSet()), Bool(true),
+                             FunctionSet());
       var_states_[key] = taint;
       if (print) {
         std::cout << "[MPT]  Not found" << std::endl;
@@ -552,7 +564,7 @@ class TaintAnalysis : public BaseExprFunctor {
     if (base_func.as<FunctionNode>()) {
       function_points_to.Set(Downcast<Function>(base_func), Bool(true));
     }
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(false), function_points_to);
   }
 
   VarSet GetFreeVars(const Function& expr) {
@@ -582,7 +594,7 @@ class TaintAnalysis : public BaseExprFunctor {
     FunctionSet function_points_to;
     MapSet::Insert(function_points_to, function);
     TaintT taint = ConstructSetArray(1, ConstantSet());
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(false), function_points_to);
   }
 
   FullTaint VisitBody(const Function& fn, ContextT context, const CallNode* call) {
@@ -614,7 +626,7 @@ class TaintAnalysis : public BaseExprFunctor {
     if (op->op.as<OpNode>() || op->op.as<ConstructorNode>()) {
       auto taint = CreateStateForType(op->checked_type(), ConstantSet());
       auto function_points_to = FunctionSet();
-      return FullTaint(taint, function_points_to);
+      return FullTaint(taint, Bool(false), function_points_to);
     }
 
     auto caller_context = current_context;
@@ -632,7 +644,7 @@ class TaintAnalysis : public BaseExprFunctor {
       callees_[op].insert(callee_fn.get());
 
       auto callee_name = callee_fn->GetAttr<String>("db.function_name");
-      bool print = false;  //(callee_name == "map" || callee_name == "lstm_cell");
+      bool print = (phase_ == 2) && (callee_name == "rnn_f0_dup1" || callee_name == "rnn_dup0");
       if (print) {
         std::cout << "[MPT] Calling " << callee_name << " at " << GetRef<Expr>(op) << std::endl;
       }
@@ -649,6 +661,8 @@ class TaintAnalysis : public BaseExprFunctor {
         auto param_full_taint =
             ResizeTaint(arg_full_taint, arg->checked_type(), param->checked_type());
 
+        auto add_res = Add(param, callee_context, param_full_taint, "function param");
+
         //////////////////////////////
         if (print) {
           std::string arg_str = "";
@@ -656,17 +670,14 @@ class TaintAnalysis : public BaseExprFunctor {
             arg_str = vn->vid->name_hint;
           }
           std::cout << "[MPT]  Param " << current_context << " " << arg_str << " "
-                    << param->vid->name_hint << " " << param_full_taint->taint << std::endl;
+                    << param->vid->name_hint << " " << TaintToString(param_full_taint->taint) << " "
+                    << TaintToString(add_res->taint) << std::endl;
         }
         //////////////////////////////
-
-        Add(param, callee_context, param_full_taint, "function param");
       }
 
       FullTaint callee_return_full_taint;
-      if (on_stack_.count(std::make_pair(callee_context, callee_fn.get())) ||
-          // callee_name == "lstm_cell") {
-          false) {
+      if (on_stack_.count(std::make_pair(callee_context, callee_fn.get()))) {
         callee_return_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
         if (print) {
           std::cout << "[MPT] Return value 1 " << callee_name << " "
@@ -704,7 +715,7 @@ class TaintAnalysis : public BaseExprFunctor {
   FullTaint VisitExpr_(const OpNode* op, ContextT current_context) {
     auto taint = Array<ConstantSet>({ConstantSet()});
     auto function_points_to = FunctionSet();
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(false), function_points_to);
   }
 
   FullTaint VisitExpr_(const TupleGetItemNode* op, ContextT current_context) {
@@ -712,7 +723,7 @@ class TaintAnalysis : public BaseExprFunctor {
     ICHECK_GT(tuple_taint->taint.size(), op->index);
     auto taint = CreateStateForType(op->checked_type(), tuple_taint->taint[op->index]);
     auto function_points_to = tuple_taint->function_points_to;
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, tuple_taint->is_constant, function_points_to);
   }
 
   FullTaint VisitExpr_(const RefCreateNode* op, ContextT current_context) {
@@ -731,13 +742,13 @@ class TaintAnalysis : public BaseExprFunctor {
     ICHECK(false) << "Do not support " << op->GetTypeKey();
     auto taint = Array<ConstantSet>({ConstantSet()});
     auto function_points_to = FunctionSet();
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(false), function_points_to);
   }
 
   FullTaint VisitExpr_(const ConstructorNode* op, ContextT current_context) {
     auto taint = Array<ConstantSet>({ConstantSet()});
     auto function_points_to = FunctionSet();
-    return FullTaint(taint, function_points_to);
+    return FullTaint(taint, Bool(false), function_points_to);
   }
 
   FullTaint VisitExpr_(const MatchNode* op, ContextT current_context) {
@@ -751,7 +762,7 @@ class TaintAnalysis : public BaseExprFunctor {
       for (auto& var : pattern_vars) {
         Add(var, current_context,
             FullTaint(CreateStateForType(var->checked_type(), collapsed_data_taint),
-                      data_full_taint->function_points_to),
+                      data_full_taint->is_constant, data_full_taint->function_points_to),
             "Match pattern");
       }
       clause_taints.push_back(this->VisitExpr(clause->rhs, current_context));
@@ -773,9 +784,50 @@ class TaintAnalysis : public BaseExprFunctor {
   std::vector<Function> function_stack_;
   std::unordered_map<const CallNode*, std::unordered_set<const FunctionNode*>> callees_;
   int max_iterations_{10};
+  int phase_ = 1;
 };
 
-class RepeatMutator : public ExprMutator {
+class AbstractDuplicator : public ExprMutator {
+ protected:
+  Expr VisitExpr_(const VarNode* op) override {
+    auto var = GetRef<Var>(op);
+    auto it = var_rmap_.find(var);
+    if (it != var_rmap_.end()) {
+      return (*it).second;
+    } else {
+      auto new_var = Var(var->vid->name_hint + "_d", var->type_annotation, var->span);
+      new_var->checked_type_ = var->checked_type();
+      var_rmap_.Set(var, new_var);
+      return new_var;
+    }
+  }
+
+  Pattern VisitPattern(const Pattern& p) override {
+    if (p.as<PatternWildcardNode>()) {
+      return p;
+    } else if (auto pv = p.as<PatternVarNode>()) {
+      return PatternVar(Downcast<Var>(this->VisitExpr(pv->var)));
+    } else if (auto pc = p.as<PatternConstructorNode>()) {
+      Array<Pattern> patterns;
+      for (auto field : pc->patterns) {
+        patterns.push_back(this->VisitPattern(field));
+      }
+      return PatternConstructor(pc->constructor, patterns);
+    } else if (auto pt = p.as<PatternTupleNode>()) {
+      Array<Pattern> patterns;
+      for (auto field : pt->patterns) {
+        patterns.push_back(this->VisitPattern(field));
+      }
+      return PatternTuple(patterns);
+    }
+    ICHECK(false) << p;
+    return p;
+  }
+
+  Map<Var, Var> var_rmap_;
+};
+
+class RepeatMutator : public AbstractDuplicator {
  public:
   RepeatMutator(std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> to_repeat,
                 IRModule mod)
@@ -806,7 +858,7 @@ class RepeatMutator : public ExprMutator {
     auto mutated = ExprMutator::VisitExpr_(old_op);
     auto op = mutated.as<CallNode>();
     ICHECK(op);
-    auto it = to_repeat_call_nodes_.find(op);
+    auto it = to_repeat_call_nodes_.find(old_op);
     if (it != to_repeat_call_nodes_.end()) {
       auto callee = it->second;
       if (op->op.as<GlobalVarNode>()) {
@@ -814,10 +866,12 @@ class RepeatMutator : public ExprMutator {
         mutated = Call(DuplicateGlobalVar(Downcast<GlobalVar>(op->op)), op->args, op->attrs,
                        op->type_args, op->span);
       } else {
-        mutated = Call(DuplicateFunction(callee), op->args, op->attrs, op->type_args, op->span);
+        mutated =
+            Call(DuplicateFunction(callee, "", NullValue<GlobalVar>(), NullValue<GlobalVar>()),
+                 op->args, op->attrs, op->type_args, op->span);
       }
     }
-    mutated->checked_type_ = op->checked_type_;
+    mutated->checked_type_ = old_op->checked_type_;
     return mutated;
   }
 
@@ -826,17 +880,59 @@ class RepeatMutator : public ExprMutator {
     std::string new_name = gv->name_hint + "_dup" + std::to_string(ctr_++);
     GlobalVar new_gv = GlobalVar(new_name, gv->checked_type_);
     new_gv->checked_type_ = gv->checked_type_;
-    new_global_functions_.Set(new_gv, DuplicateFunction(fn, new_name));
+    new_global_functions_.Set(new_gv, DuplicateFunction(fn, new_name, gv, new_gv));
     return new_gv;
   }
 
-  Function DuplicateFunction(const Function& fn, std::string new_name = "") {
+  // NB: Does not handle mutually recursive functions
+  Function DuplicateFunction(const Function& fn, std::string new_name, const GlobalVar& old_gv,
+                             const GlobalVar& new_gv) {
+    class DuplicateExprSubstituter : public ExprMutator {
+     public:
+      explicit DuplicateExprSubstituter(
+          std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> subst_map, int& ctr)
+          : subst_map_(subst_map), ctr_(ctr) {}
+
+      Expr VisitExpr(const Expr& expr) final {
+        auto it = subst_map_.find(expr);
+        if (it != subst_map_.end()) {
+          return ExprMutator::VisitExpr((*it).second);
+        }
+        return ExprMutator::VisitExpr(expr);
+      }
+
+      Expr VisitExpr_(const FunctionNode* op) final {
+        auto fn = ExprMutator::VisitExpr_(op).as<FunctionNode>();
+        ICHECK(fn);
+        auto new_func =
+            Function(fn->params, fn->body, fn->ret_type, fn->type_params, fn->attrs, fn->span);
+
+        auto opt_old_name = fn->GetAttr<String>(tir::attr::kDBFunctionName);
+        if (opt_old_name) {
+          new_func = WithAttr(new_func, tir::attr::kDBFunctionName,
+                              opt_old_name.value() + "_dup" + std::to_string(ctr_++));
+        }
+        new_func->checked_type_ = op->checked_type();
+
+        std::cout << "[PANSL] Duplicating " << op << " " << new_func.get() << std::endl;
+
+        return new_func;
+      }
+
+     private:
+      tvm::Map<Expr, Expr> subst_map_;
+      int& ctr_;
+    };
+
     if (new_name.size() == 0) {
       auto old_name = fn->GetAttr<String>("db.function_name").value();
       new_name = old_name + "_dup" + std::to_string(ctr_++);
     }
     Array<Var> new_params;
     std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> rmap;
+    if (old_gv.defined()) {
+      rmap[old_gv] = new_gv;
+    }
     for (auto param : fn->params) {
       auto new_param = Var(param->vid->name_hint + "_d", param->type_annotation, param->span);
       new_param->checked_type_ = param->checked_type();
@@ -844,9 +940,11 @@ class RepeatMutator : public ExprMutator {
       rmap[param] = new_param;
     }
 
-    auto new_func = WithAttr(Function(new_params, ExprSubst(fn->body, rmap), fn->ret_type,
-                                      fn->type_params, fn->attrs, fn->span),
-                             tir::attr::kDBFunctionName, String(new_name));
+    auto new_body = DuplicateExprSubstituter(std::move(rmap), ctr_).Mutate(fn->body);
+    auto new_func =
+        WithAttr(Function(new_params, new_body, fn->ret_type, fn->type_params, fn->attrs, fn->span),
+                 tir::attr::kDBFunctionName, String(new_name));
+    new_func = Downcast<Function>(AbstractDuplicator()(new_func));
     new_func->checked_type_ = fn->checked_type();
     return new_func;
   }
@@ -863,6 +961,7 @@ IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
   if (repeat) {
     auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
     mod = RepeatMutator(to_repeat, mod).Repeat();
+    std::cout << "[After Repeating]\n" << mod << std::endl;
   }
   return TaintAnalysis(mod).PerformAnalysisPhase2();
 }

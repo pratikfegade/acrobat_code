@@ -24,14 +24,27 @@
  * \brief This is a backend-aware optimization pass.
  *   Fuse necessary ops into a single one.
  */
+#ifndef TVM_RELAY_BACKEND_CONTROL_FLOW_TASK_WEIGHTS_H_
+#define TVM_RELAY_BACKEND_CONTROL_FLOW_TASK_WEIGHTS_H_
+
 #include <tvm/ir/module.h>
+#include <tvm/ir/transform.h>
 
 namespace tvm {
 namespace relay {
 namespace tec {
 
-Map<Function, Integer> InferTaskWeights(const IRModule& mod);
+IRModule InferTaskWeights(IRModule& mod);
+
+inline tvm::transform::Pass InferTaskWeightsPass() {
+  runtime::TypedPackedFunc<IRModule(IRModule, tvm::transform::PassContext)> pass_func =
+      [=](IRModule module, tvm::transform::PassContext ctx) { return InferTaskWeights(module); };
+
+  return tvm::transform::CreateModulePass(pass_func, 0, "InferTaskWeightsPass", {"InferType"});
+}
 
 }  // namespace tec
 }  // namespace relay
 }  // namespace tvm
+
+#endif

@@ -140,7 +140,7 @@ void AssignLevelsSCC(std::vector<std::unordered_set<int>>& scc_graph, std::vecto
 
 }  // namespace
 
-Map<Function, Integer> InferTaskWeights(const IRModule& mod) {
+IRModule InferTaskWeights(IRModule& mod) {
   // std::cout << "Determining weights" << std::endl;
   std::unordered_map<const BaseFuncNode*, std::string> func_name_map;
   for (auto kv : mod->functions) {
@@ -223,7 +223,7 @@ Map<Function, Integer> InferTaskWeights(const IRModule& mod) {
     res.Set(GetRef<Function>(kv.first), Integer(kv.second * recursive_multiplier + 1));
   }
 
-  return res;
+  return AddFunctionTaints(res, mod, tir::attr::kDBStaticAutoschedTaskWeight);
 }
 
 }  // namespace tec

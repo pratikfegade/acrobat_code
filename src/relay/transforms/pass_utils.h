@@ -317,6 +317,42 @@ inline std::string DebugPrint(const ObjectRef& obj) {
   return tvm::TextPrinter(false, nullptr, true).PrintFinal(obj).str();
 }
 
+template <typename T>
+inline IRModule AddFunctionTaints(Map<Function, T> taints, IRModule& mod,
+                                  const std::string& attr_name) {
+  class TaintAdder : public ExprMutator {
+   public:
+    TaintAdder(Map<Function, T> taints_map, const std::string& attr_name)
+        : taints_map_(taints_map), attr_name_(attr_name) {}
+
+   private:
+    Expr VisitExpr_(const FunctionNode* op) final {
+      auto mutated = Downcast<Function>(ExprMutator::VisitExpr_(op));
+      auto it = taints_map_.find(GetRef<Function>(op));
+      if (it != taints_map_.end()) {
+        auto taints = (*it).second;
+        mutated = WithAttr(mutated, attr_name_, taints);
+      }
+      return mutated;
+    }
+
+    Map<Function, T> taints_map_;
+    const std::string& attr_name_;
+  };
+
+  Map<GlobalVar, Function> updated_functions;
+  TaintAdder adder(taints, attr_name);
+  for (auto kv : mod->functions) {
+    if (kv.second.as<FunctionNode>()) {
+      updated_functions.Set(kv.first, Downcast<Function>(adder(Downcast<Function>(kv.second))));
+    }
+  }
+  for (auto kv : updated_functions) {
+    mod->Add(kv.first, kv.second, true);
+  }
+  return mod;
+}
+
 // ToANormalForm for expressions and as a Pass are declared in transform.h
 
 }  // namespace relay
