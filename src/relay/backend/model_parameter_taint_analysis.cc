@@ -840,15 +840,17 @@ class RepeatMutator : public AbstractDuplicator {
   }
 
   IRModule Repeat() {
-    for (auto kv : mod_->functions) {
-      auto base_func = kv.second;
-      if (base_func.as<FunctionNode>()) {
-        auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
-        new_global_functions_.Set(kv.first, func);
+    if (to_repeat_call_nodes_.size() > 0) {
+      for (auto kv : mod_->functions) {
+        auto base_func = kv.second;
+        if (base_func.as<FunctionNode>()) {
+          auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
+          new_global_functions_.Set(kv.first, func);
+        }
       }
-    }
-    for (auto kv : new_global_functions_) {
-      mod_->Add(kv.first, kv.second, true);
+      for (auto kv : new_global_functions_) {
+        mod_->Add(kv.first, kv.second, true);
+      }
     }
     return mod_;
   }
@@ -902,7 +904,12 @@ class RepeatMutator : public AbstractDuplicator {
       }
 
       Expr VisitExpr_(const FunctionNode* op) final {
-        auto fn = ExprMutator::VisitExpr_(op).as<FunctionNode>();
+        // std::cout << "[PANSL] Duplicate visiting " << GetRef<Expr>(op) << std::endl;
+
+        auto visited = ExprMutator::VisitExpr_(op);
+        // std::cout << "[PANSL]  visited " << visited << std::endl;
+        auto fn = visited.as<FunctionNode>();
+
         ICHECK(fn);
         auto new_func =
             Function(fn->params, fn->body, fn->ret_type, fn->type_params, fn->attrs, fn->span);
@@ -913,9 +920,6 @@ class RepeatMutator : public AbstractDuplicator {
                               opt_old_name.value() + "_dup" + std::to_string(ctr_++));
         }
         new_func->checked_type_ = op->checked_type();
-
-        std::cout << "[PANSL] Duplicating " << op << " " << new_func.get() << std::endl;
-
         return new_func;
       }
 
@@ -928,6 +932,7 @@ class RepeatMutator : public AbstractDuplicator {
       auto old_name = fn->GetAttr<String>("db.function_name").value();
       new_name = old_name + "_dup" + std::to_string(ctr_++);
     }
+    // std::cout << "[PANSL] Duplicating " << new_name << std::endl;
     Array<Var> new_params;
     std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> rmap;
     if (old_gv.defined()) {
@@ -959,8 +964,10 @@ class RepeatMutator : public AbstractDuplicator {
 
 IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
   if (repeat) {
-    auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
-    mod = RepeatMutator(to_repeat, mod).Repeat();
+    for (int i = 0; i < 2; ++i) {
+      auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
+      mod = RepeatMutator(to_repeat, mod).Repeat();
+    }
     std::cout << "[After Repeating]\n" << mod << std::endl;
   }
   return TaintAnalysis(mod).PerformAnalysisPhase2();
