@@ -380,7 +380,7 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
   if (lazy_execution_) {
     if (batched_execution_) {
       std::cout << "YOLO" << std::endl;
-      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+      shared_state_->lazy_executor_.BatchedExecute(true, coarsened_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
     }
@@ -1045,7 +1045,7 @@ void ConcurrentVirtualMachine::RunLoop() {
     if (batched_execution_) {
       // std::cout << "[VM] Batched execution " << shared_state_->lazy_executor_.nodes_.size()
       // << std::endl;
-      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_, !lazy_execution_);
+      shared_state_->lazy_executor_.BatchedExecute(true, coarsened_execution_, !lazy_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
     }
@@ -1078,7 +1078,7 @@ ObjectRef ConcurrentVirtualMachine::Invoke(const VMFunction& func,
 
   if (lazy_execution_) {
     if (batched_execution_) {
-      shared_state_->lazy_executor_.BatchedExecute(coarsened_execution_);
+      shared_state_->lazy_executor_.BatchedExecute(true, coarsened_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
     }

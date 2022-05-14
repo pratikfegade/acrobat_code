@@ -186,14 +186,14 @@ class TaintAnalysis : public BaseExprFunctor {
     std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> results_map;
     for (auto fn_node : all_functions) {
       auto fn = GetRef<Function>(fn_node);
-      std::cout << "[TSR] TrySplit " << GetFunctionName(fn) << std::endl;
+      // std::cout << "[TSR] TrySplit " << GetFunctionName(fn) << std::endl;
       std::unordered_set<ContextT> split_contexts;
       bool no_split = false;
       for (auto param : fn->params) {
-        std::cout << "[TSR]  Param " << param->vid->name_hint << std::endl;
+        // std::cout << "[TSR]  Param " << param->vid->name_hint << std::endl;
         auto it = aggregate_var_states.find(param.get());
         if (it == aggregate_var_states.end()) {
-          std::cout << "[TSR]   State not found" << std::endl;
+          // std::cout << "[TSR]   State not found" << std::endl;
           continue;
         }
         auto param_states_with_recursive_context = it->second;
@@ -208,7 +208,7 @@ class TaintAnalysis : public BaseExprFunctor {
         }
 
         if (param_states.size() <= 1) {
-          std::cout << "[TSR]   Unique contexts: " << param_states.size() << std::endl;
+          // std::cout << "[TSR]   Unique contexts: " << param_states.size() << std::endl;
           continue;
         }
         for (size_t j = 0; j < GetTypeSize(GetVarType(param)); ++j) {
@@ -218,7 +218,7 @@ class TaintAnalysis : public BaseExprFunctor {
           }
           ConstantSet merged_constants = MapSet::Merge(all_constants);
           if (merged_constants.size() <= 1) {
-            std::cout << "[TSR]   Unique constants: " << merged_constants.size() << std::endl;
+            // std::cout << "[TSR]   Unique constants: " << merged_constants.size() << std::endl;
             continue;
           }
           std::unordered_set<ContextT> param_split_contexts;
@@ -231,14 +231,14 @@ class TaintAnalysis : public BaseExprFunctor {
           if (split_contexts.size() == 0 ||
               IsSuperSet(param_split_contexts, param_split_contexts)) {
           } else {
-            std::cout << "[TSR]   No superset: " << merged_constants.size() << std::endl;
+            // std::cout << "[TSR]   No superset: " << merged_constants.size() << std::endl;
             no_split = true;
             break;
           }
         }
       }
       if (split_contexts.size() <= 1) {
-        std::cout << "[TSR]   Too few contexts: " << split_contexts.size() << std::endl;
+        // std::cout << "[TSR]   Too few contexts: " << split_contexts.size() << std::endl;
         continue;
       }
 
@@ -250,19 +250,19 @@ class TaintAnalysis : public BaseExprFunctor {
       for (auto cn : split_contexts) {
         auto it = callees_.find(static_cast<const CallNode*>(cn));
         if (it == callees_.end()) {
-          std::cout << "[TSR]   No callees: " << split_contexts.size() << std::endl;
+          // std::cout << "[TSR]   No callees: " << split_contexts.size() << std::endl;
           no_split = true;
           continue;
         }
         auto callees = it->second;
         if (callees.size() != 1 || *(callees.begin()) != fn_node) {
-          std::cout << "[TSR]   Too many callees : " << split_contexts.size() << std::endl;
+          // std::cout << "[TSR]   Too many callees : " << split_contexts.size() << std::endl;
           no_split = true;
           continue;
         }
         if (!global_functions.count(fn_node) &&
             expr2functions.at(cn) != expr2functions.at(fn_node)) {
-          std::cout << "[TSR]   Non-local callee: " << split_contexts.size() << std::endl;
+          // std::cout << "[TSR]   Non-local callee: " << split_contexts.size() << std::endl;
           no_split = true;
           continue;
         }
@@ -270,10 +270,10 @@ class TaintAnalysis : public BaseExprFunctor {
 
       if (!no_split) {
         results_map[fn_node] = split_contexts;
-        std::cout << "[TSR] Splitting " << GetFunctionName(fn) << std::endl;
+        // std::cout << "[TSR] Splitting " << GetFunctionName(fn) << std::endl;
         for (auto ctx : split_contexts) {
-          std::cout << "[TSR]  Context: " << ctx << " "
-                    << PrettyPrint(GetRef<Expr>(static_cast<const CallNode*>(ctx))) << std::endl;
+          // std::cout << "[TSR]  Context: " << ctx << " "
+          // << PrettyPrint(GetRef<Expr>(static_cast<const CallNode*>(ctx))) << std::endl;
         }
       }
     }
@@ -318,8 +318,9 @@ class TaintAnalysis : public BaseExprFunctor {
     Map<Function, Array<Bool>> results_map;
     for (auto kv : merged_function_states) {
       auto fn = GetRef<Function>(kv.first);
-      std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " " << kv.first
-                << std::endl;
+      // std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " " <<
+      // kv.first
+      // << std::endl;
       Array<Bool> param_states;
       for (auto arg : fn->params) {
         auto it = merged_var_states.find(arg.get());
@@ -333,8 +334,8 @@ class TaintAnalysis : public BaseExprFunctor {
 
         for (auto s : arg_state->taint) {
           param_states.push_back(Bool((s.size() == 1) && arg_state->is_constant->value));
-          std::cout << "[MPT]  P " << arg_state->is_constant->value << " " << s.size() << " "
-                    << MapSet::ToString(s) << std::endl;
+          // std::cout << "[MPT]  P " << arg_state->is_constant->value << " " << s.size() << " "
+          // << MapSet::ToString(s) << std::endl;
         }
       }
       auto iit = merged_function_states.find(fn.get());
@@ -345,7 +346,7 @@ class TaintAnalysis : public BaseExprFunctor {
       auto fn_state = merged_function_states[fn.get()];
       for (auto s : fn_state->taint) {
         param_states.push_back(Bool((s.size() == 1) && fn_state->is_constant->value));
-        std::cout << "[MPT]  O " << s.size() << std::endl;
+        // std::cout << "[MPT]  O " << s.size() << std::endl;
       }
 
       results_map.Set(fn, param_states);
@@ -644,7 +645,8 @@ class TaintAnalysis : public BaseExprFunctor {
       callees_[op].insert(callee_fn.get());
 
       auto callee_name = callee_fn->GetAttr<String>("db.function_name");
-      bool print = (phase_ == 2) && (callee_name == "rnn_f0_dup1" || callee_name == "rnn_dup0");
+      bool print =
+          false;  //(phase_ == 2) && (callee_name == "rnn_f0_dup1" || callee_name == "rnn_dup0");
       if (print) {
         std::cout << "[MPT] Calling " << callee_name << " at " << GetRef<Expr>(op) << std::endl;
       }
@@ -752,7 +754,7 @@ class TaintAnalysis : public BaseExprFunctor {
   }
 
   FullTaint VisitExpr_(const MatchNode* op, ContextT current_context) {
-    ICHECK(!op->data->checked_type().as<TupleTypeNode>());
+    // ICHECK(!op->data->checked_type().as<TupleTypeNode>());
     auto data_full_taint = this->VisitExpr(op->data, current_context);
     auto collapsed_data_taint = CollapseTaint(data_full_taint->taint);
 
@@ -968,7 +970,7 @@ IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
       auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
       mod = RepeatMutator(to_repeat, mod).Repeat();
     }
-    std::cout << "[After Repeating]\n" << mod << std::endl;
+    // std::cout << "[After Repeating]\n" << mod << std::endl;
   }
   return TaintAnalysis(mod).PerformAnalysisPhase2();
 }

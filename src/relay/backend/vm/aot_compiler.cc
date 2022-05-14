@@ -493,16 +493,20 @@ class VMAOTFunctionCompiler : SourcePrinter {
     stream_ << "\n";
   }
 
-  void EmitTriggerEvaluation() {
+  void EmitTriggerEvaluation(bool sync = true) {
     if (lazy_execution()) {
+      auto sync_str = sync ? "true" : "false";
       this->PrintIndent(stream_);
       if (concurrent_execution()) {
-        stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id);\n";
+        stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id, " << sync_str
+                << ");\n";
       } else {
-        stream_ << GetExecutorType() << "::Current()->LazyExecute();\n";
+        stream_ << GetExecutorType() << "::Current()->LazyExecute(" << sync_str << ");\n";
       }
     }
   }
+
+  bool InMainFunction() { return vm_func_.name == "main"; }
 
   int VisitBytecode() {
     // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
@@ -513,10 +517,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
       if (lazy_execution() && instr.op == Opcode::AllocStorage) {
         continue;
       }
-      if (print && instr.op == Opcode::Ret) {
-        // std::cout << "[BT]  Read registers instruction " << instr << std::endl;
-        // std::cout << "[BT]    " << support::PrintVector(Instruction::ReadRegisters(instr))
-        // << std::endl;
+      if (instr.op == Opcode::Invoke && (instr.packed_index == DB_PHASE_CHANGE_INDEX ||
+                                         instr.packed_index == DB_RANDOM_UNIFORM_INDEX)) {
+        used_regs[instr.dst] = true;
       }
       for (auto reg : Instruction::ReadRegisters(instr)) {
         used_regs[reg] = true;
@@ -545,6 +548,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
     }
 
     this->GenerateLocalDecls(used_regs, scalar_outs_of_tensor_ops);
+
+    if (InMainFunction() && !concurrent_execution()) {
+      this->PrintIndent(stream_);
+      stream_ << GetRuntimeType() << "::Current()->ResetProgramPhase();\n";
+    }
 
     // std::cout << "[BT] Visiting BT" << std::endl;
     std::unordered_map<Index, std::string> targets;
@@ -644,6 +652,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto lo_var = GetVarForReg(instr.invoke_args_registers[0]);
               auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
               stream_ << dst_var << " = GetRandom(" << lo_var << ", " << hi_var << ");\n";
+            } else if (instr.packed_index == DB_PHASE_CHANGE_INDEX) {
+              ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
+              ICHECK_EQ(GetNestLevel(), 0)
+                  << "Phase changes are only allowed in the outermost scope of the main function";
+              if (concurrent_execution()) {
+                EmitTriggerEvaluation(false);
+              } else {
+                this->PrintIndent(stream_);
+                stream_ << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
+              }
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
               auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
@@ -1487,7 +1505,9 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
     this->PrintIndent(os);
-    os << "DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->LazyExecute();\n";
+    os << "bool sync = tvm::runtime::vm::FiberRuntime::Current().PerformSync();\n";
+    this->PrintIndent(os);
+    os << "DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->LazyExecute(sync);\n";
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
     this->EndScope();

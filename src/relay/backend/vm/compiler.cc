@@ -52,6 +52,7 @@
 #include "../../../target/metadata_module.h"
 #include "../../../target/source/codegen_source_base.h"
 #include "../../op/annotation/annotation.h"
+#include "../../op/db/db_ops.h"
 #include "../../op/memory/device_copy.h"
 #include "../../op/op_common.h"
 #include "../../op/random/db_random.h"
@@ -726,6 +727,18 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     DBRandomUniformProps db_random_uniform_props = GetDBRandomUniformProps(call_node);
     CallLoweredProps call_lowered_props = GetCallLoweredProps(call_node);
     ICHECK(!call_lowered_props.lowered_func.defined());
+
+    auto emit_db_inbuilt_op = [&](int func_index, const CallNode* cn) {
+      std::vector<Index> argument_registers;
+      for (auto arg : cn->args) {
+        VisitExpr(arg);
+        argument_registers.push_back(last_register_);
+      }
+      auto new_register = NewRegister();
+      Emit(Instruction::Invoke(func_index, argument_registers, new_register));
+      AddRegisterTypeInfo(new_register, cn->checked_type_);
+    };
+
     if (device_copy_props.body.defined()) {
       // TODO(mbs): device_copy cleanup.
       VisitExpr(device_copy_props.body);
@@ -744,17 +757,11 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       ICHECK_EQ(call_node->args.size(), 2);
       ICHECK_EQ(db_random_uniform_props.out_shape.size(), 0);
       ICHECK(db_random_uniform_props.out_dtype.is_int());
-
-      std::vector<Index> argument_registers;
-
-      VisitExpr(call_node->args[0]);
-      argument_registers.push_back(last_register_);
-      VisitExpr(call_node->args[1]);
-      argument_registers.push_back(last_register_);
-
-      auto new_register = NewRegister();
-      Emit(Instruction::Invoke(DB_RANDOM_UNIFORM_INDEX, argument_registers, new_register));
-      AddRegisterTypeInfo(new_register, db_random_uniform_props.low->checked_type_);
+      emit_db_inbuilt_op(DB_RANDOM_UNIFORM_INDEX, call_node);
+      return;
+    } else if (call_node->op == GetDBPhaseChangeOp()) {
+      ICHECK_EQ(call_node->args.size(), 0);
+      emit_db_inbuilt_op(DB_PHASE_CHANGE_INDEX, call_node);
       return;
     }
 

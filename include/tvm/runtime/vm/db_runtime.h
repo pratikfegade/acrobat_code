@@ -196,6 +196,16 @@ class DynBatchRuntime : public runtime::ModuleNode {
   NDArray ShapeOf(const NDArray& input_array);
 
   /*!
+   * \brief Increments the program phase.
+   */
+  void NextProgramPhase();
+
+  /*!
+   * \brief Reset the program phase.
+   */
+  void ResetProgramPhase();
+
+  /*!
    * \brief Initialize the virtual machine for a set of (physical) devices.
    * \param physical_devices The set of TVM devices.
    * \param alloc_types The allocator types for each device.
@@ -205,8 +215,9 @@ class DynBatchRuntime : public runtime::ModuleNode {
 
   /*!
    * \brief Execute all lazily collected packed funcs
+   * \param sync Sync GPU execution.
    */
-  void LazyExecute();
+  void LazyExecute(bool sync = true);
 
   /*!
    * \brief Recycle arena allocated memory

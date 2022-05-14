@@ -212,9 +212,19 @@ NDArray DynBatchRuntime<ExecutorType, TensorType>::ShapeOf(const NDArray& input_
 }
 
 template <typename ExecutorType, typename TensorType>
-void DynBatchRuntime<ExecutorType, TensorType>::LazyExecute() {
+void DynBatchRuntime<ExecutorType, TensorType>::NextProgramPhase() {
+  shared_state_.lazy_executor_.NextProgramPhase();
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
+  shared_state_.lazy_executor_.ResetProgramPhase();
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::LazyExecute(bool sync) {
   if (batched_execution_) {
-    shared_state_.lazy_executor_.BatchedExecute(coarsened_execution_);
+    shared_state_.lazy_executor_.BatchedExecute(sync, coarsened_execution_);
   } else {
     shared_state_.lazy_executor_.Execute();
   }

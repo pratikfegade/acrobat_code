@@ -62,6 +62,8 @@ class SourcePrinter {
 
   inline void EndScope() { indent_ -= 2; }
 
+  inline int GetNestLevel() { return (indent_ / 2) - 1; }
+
   inline void PrintIndent(std::ostream& stream, int offset = 0) {
     for (int i = 0; i < indent_ + offset; ++i) {
       stream << ' ';

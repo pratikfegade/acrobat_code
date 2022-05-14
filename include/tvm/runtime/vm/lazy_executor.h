@@ -87,7 +87,8 @@ class AbstractExecutor {
 
   virtual void Execute() = 0;
 
-  virtual void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false) = 0;
+  virtual void BatchedExecute(bool sync, bool coarsened_execution,
+                              bool all_nodes_same_depth = false) = 0;
 
   virtual void ExecuteOpNodeBatch(const Index func_idx,
                                   const std::vector<OpNode<TensorType>*>& nodes) = 0;
@@ -103,12 +104,18 @@ class AbstractExecutor {
 
   inline size_t GetArity(const Index idx) const { return vm_shared_state_->args_end[idx]; }
 
+  inline void NextProgramPhase() { phase_++; }
+
+  inline void ResetProgramPhase() { phase_ == 0; }
+
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
   VMSharedState<ConcreteExecutorType>* vm_shared_state_;
   /*! \brief The index of the primary execution device. We support the host CPU or a GPU for this
    * field. The host CPU is always 0, while a GPU is 1 */
   int accelerator_device_{0};
+  /*! \brief Current program phase */
+  int phase_{0};
   /*! \brief Profiling */
   runtime::profiling::Profiler* profiler_{nullptr};
 };
@@ -137,7 +144,7 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
 
   void Execute();
 
-  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
+  void BatchedExecute(bool sync, bool coarsened_execution, bool all_nodes_same_depth = false);
 
   void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
 
@@ -169,11 +176,11 @@ template <>
 void LazyAllocationLazyExecutor::Execute();
 
 template <>
-void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+void EagerAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
                                                  bool all_nodes_same_depth);
 
 template <>
-void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+void LazyAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
                                                 bool all_nodes_same_depth);
 
 template <>
@@ -200,12 +207,12 @@ class DepthTrackingExecutor final : public AbstractExecutor<DepthTrackingExecuto
 
   void Execute();
 
-  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
+  void BatchedExecute(bool sync, bool coarsened_execution, bool all_nodes_same_depth = false);
 
   void ExecuteOpNodeBatch(const Index func_idx, const std::vector<LazyOpNode*>& nodes);
 
   /*! \brief list of nodes to execute sorted by depth */
-  std::vector<std::vector<OpNode<DLTensor*>>> nodes_;
+  std::vector<std::vector<std::vector<OpNode<DLTensor*>>>> nodes_{MAX_PROGRAM_PHASES};
 };
 
 }  // namespace vm

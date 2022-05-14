@@ -722,21 +722,21 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
 }
 
 template <>
-void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+void EagerAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
                                                  bool all_nodes_same_depth) {
   BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
 
-  if (accelerator_device_ == GPU_INDEX) {
+  if (sync && accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
 }
 
 template <>
-void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
+void LazyAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
                                                 bool all_nodes_same_depth) {
   BatchedExecuteImpl<DLTensor*, DLTensor*>(this, coarsened_execution, all_nodes_same_depth);
-  if (accelerator_device_ == GPU_INDEX) {
+  if (sync && accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
@@ -744,12 +744,13 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
-  auto size = nodes_.size();
+  auto& phase_nodes = nodes_[phase_];
+  auto size = phase_nodes.size();
   auto depthp1 = depth + 1;
   if (size < depthp1) {
-    nodes_.resize(depthp1);
+    phase_nodes.resize(depthp1);
   }
-  nodes_[depth].emplace_back(size, func_idx, args, num_args);
+  phase_nodes[depth].emplace_back(size, func_idx, args, num_args);
 }
 
 void DepthTrackingExecutor::ExecuteOpNodeBatch(const Index func_idx,
@@ -762,37 +763,38 @@ void DepthTrackingExecutor::Execute() {
       << "Not implemented. Please use LazyExecutor<DLTensor*> class for this functionality.";
 }
 
-void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
+void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
+                                           bool all_nodes_same_depth) {
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("scheduling");
   }
 #endif
-  int total_nodes = 0;
-  for (size_t j = 0; j < nodes_.size(); ++j) {
-    auto& depth_nodes = nodes_[j];
-    total_nodes += depth_nodes.size();
-    // std::cout << "[LZ] Depth " << j << " " << depth_nodes.size() << std::endl;
-    std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
+  for (size_t k = 0; k <= phase_; ++k) {
+    auto& phase_nodes = nodes_[k];
+    for (size_t j = 0; j < phase_nodes.size(); ++j) {
+      auto& depth_nodes = phase_nodes[j];
+      // std::cout << "[LZ] Depth " << j << " " << depth_nodes.size() << std::endl;
+      std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
 
-    for (auto& node : depth_nodes) {
-      func_to_node[node.func_idx_].push_back(&node);
-    }
+      for (auto& node : depth_nodes) {
+        func_to_node[node.func_idx_].push_back(&node);
+      }
 
-    for (auto kv : func_to_node) {
-      if (kv.first == REDUCE_SUM_FUNC_INDEX) {
-        ExecuteReduceSum<DepthTrackingExecutor>(*this, kv.second);
-      } else {
-        ExecuteOpNodeBatch(kv.first, kv.second);
+      for (auto kv : func_to_node) {
+        if (kv.first == REDUCE_SUM_FUNC_INDEX) {
+          ExecuteReduceSum<DepthTrackingExecutor>(*this, kv.second);
+        } else {
+          ExecuteOpNodeBatch(kv.first, kv.second);
+        }
       }
     }
   }
   nodes_.clear();
-  if (accelerator_device_ == GPU_INDEX) {
+  if (sync && accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
-  // std::cout << "[LZ] Total nodes " << total_nodes << std::endl;
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();

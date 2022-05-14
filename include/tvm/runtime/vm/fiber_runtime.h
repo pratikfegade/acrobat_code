@@ -40,11 +40,13 @@ class FiberRuntime {
         start_channels_(num_fibers),
         stop_channels_(num_fibers),
         alive_(num_fibers, true),
-        alive_num_(num_fibers) {}
+        alive_num_(num_fibers),
+        sync_next_(false) {}
 
-  void WorkerYield(int idx) {
+  void WorkerYield(int idx, bool sync_next = true) {
     /* std::cout << "[" << idx << "] Worker yielding" << std::endl; */
     stop_channels_[idx].push(kYield);
+    sync_next_ = sync_next_ || sync_next;
     FiberState state;
     start_channels_[idx].pop(state);
   }
@@ -75,6 +77,7 @@ class FiberRuntime {
         start_channels_[i].push(kResume);
       }
     }
+    sync_next_ = false;
   }
 
   void AddFiber(int idx, fiber_t* fiber) { fibers_[idx] = fiber; }
@@ -82,6 +85,8 @@ class FiberRuntime {
   bool ContinueExecution() { return alive_num_ > 0; }
 
   bool IsAlive(int idx) { return alive_[idx]; }
+
+  bool PerformSync() { return sync_next_; }
 
   void MainEndFiberExecution() {
     for (auto fiber : fibers_) {
@@ -104,6 +109,7 @@ class FiberRuntime {
   std::vector<channel_t> stop_channels_;
   std::vector<bool> alive_;
   int alive_num_;
+  bool sync_next_;
 
   static FiberRuntime* instance_;
 };

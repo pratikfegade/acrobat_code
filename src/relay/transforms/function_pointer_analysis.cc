@@ -62,7 +62,7 @@ std::vector<Var> CollectPatternVars(const Pattern& p) {
           this->VisitPattern(pattern);
         }
       } else if (auto ptn = p.as<PatternTupleNode>()) {
-        for (auto pattern : pcn->patterns) {
+        for (auto pattern : ptn->patterns) {
           this->VisitPattern(pattern);
         }
       }

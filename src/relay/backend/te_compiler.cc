@@ -48,6 +48,7 @@
 #include "../../support/utils.h"
 #include "../op/annotation/annotation.h"
 #include "../op/call/call.h"
+#include "../op/db/db_ops.h"
 #include "../op/memory/device_copy.h"
 #include "../op/random/db_random.h"
 #include "../transforms/device_aware_visitors.h"
@@ -1020,6 +1021,10 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator,
         ICHECK_EQ(new_args.size(), 2);
         return MakeDBRandomUniform(new_args[0], new_args[1], db_random_uniform_props.out_shape,
                                    db_random_uniform_props.out_dtype);
+      } else if (function_node->body.as<CallNode>() &&
+                 function_node->body.as<CallNode>()->op == GetDBPhaseChangeOp()) {
+        ICHECK_EQ(new_args.size(), 0);
+        return MakeDBPhaseChange();
       }
     }
 
