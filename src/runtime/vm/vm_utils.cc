@@ -148,6 +148,19 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
   TestPointerNDArray(ptr_array, total_nums, batch_size);
 }
 
+bool CheckEqualShape(const DLTensor& t1, const DLTensor& t2) {
+  if (t1.ndim != t2.ndim) {
+    return false;
+  }
+
+  for (int i = 0; i < t1.ndim; ++i) {
+    if (t1.shape[i] != t2.shape[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void FillInPointers(void** host_raw_ptrs, size_t size, const std::vector<OpNode<DLTensor*>*>& nodes,
                     int arg_num, Allocator* allocator) {
   auto first_arg = nodes[0]->args_[arg_num];

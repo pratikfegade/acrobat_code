@@ -31,6 +31,7 @@ def get_random_tensor(shape):
 def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
                           target, pass_context, execution_options, fin_iterations=20000):
     if os.path.exists(log_file):
+        print("LOG FILE EXISTS")
         return
 
     with pass_context:

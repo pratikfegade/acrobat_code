@@ -286,9 +286,9 @@ class TECompilerImpl : public TECompilerNode {
             << "for target:" << std::endl
             << key->target->ToDebugString();
 
-    std::cout << "[PANSL] lowering "
-              << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
-              << key->source_func.get() << std::endl;
+    // std::cout << "[PANSL] lowering "
+    //           << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
+    //           << key->source_func.get() << std::endl;
 
     bool batched_execution =
         PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
@@ -310,7 +310,7 @@ class TECompilerImpl : public TECompilerNode {
     if (it != cache_.end()) {
       VLOG(1) << "already lowered to name:" << std::endl
               << PrettyPrint(it->second->cached_func->prim_fn_var);
-      std::cout << "[PANSL]  lowered already" << std::endl;
+      // std::cout << "[PANSL]  lowered already" << std::endl;
       it->second->use_count += 1;
       if (batched_execution) {
         it->second->autosched_weight += 1;

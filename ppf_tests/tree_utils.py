@@ -40,16 +40,16 @@ class RoseTree:
             self.children[0].printTree(level + 1)
 
 # creates relay list from a list
-def from_list(mod, l, t):
+def from_list(mod, l):
     if len(l) == 0:
         return ADT(mod.get_type("List")[2].tag, [])
     else:
-        return ADT(mod.get_type("List")[1].tag, [l[0], from_list(mod, l[1:], t)])
+        return ADT(mod.get_type("List")[1].tag, [l[0], from_list(mod, l[1:])])
 
 def from_tree_treelstm(mod, rt, t):
     return ADT(mod.get_type("Tree")[1].tag,
                [rt.head,
-                from_list(mod, [from_tree_treelstm(mod, x, t) for x in rt.children], t)])
+                from_list(mod, [from_tree_treelstm(mod, x, t) for x in rt.children])])
 
 def from_tree_mvrnn(mod, rt):
     if len(rt.children) == 0:
@@ -86,3 +86,7 @@ def generate_complete_mvrnn_trees(tree_height, batch_size, hidden_size, mod):
         else: return []
     trees = [generate_complete_tree(tree_height, data_fn) for i in range(batch_size)]
     return [from_tree_mvrnn(mod, tree) for tree in trees]
+
+def generate_random_tensor_lists(batch_size, tensor_shape, mod):
+    lists = [[get_random_tensor(tensor_shape) for j in range(random.randrange(0, 20))] for i in range(batch_size)]
+    return [from_list(mod, l) for l in lists]

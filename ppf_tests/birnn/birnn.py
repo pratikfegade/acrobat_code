@@ -12,7 +12,8 @@ from tvm import relay
 from tvm import auto_scheduler
 import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
+from tree_utils import generate_random_tensor_lists
 
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
@@ -47,7 +48,7 @@ coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=False
-use_autoscheduler=False
+use_autoscheduler=True
 use_depth_tracking=True
 perform_static_scheduling=False
 aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
@@ -83,21 +84,12 @@ def print_time(time):
         time
     )
 
-log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
-def auto_schedule(tune):
-    with pass_context:
-        tasks, task_weights = auto_scheduler.extract_tasks(mod, weights_dict, target, pass_context,
-                                                           include_simple_tasks=True)
+inputs = generate_random_tensor_lists(batch_size, (1, 256), mod)
 
-        if tune:
-            measure_ctx = auto_scheduler.LocalRPCMeasureContext(repeat=1, min_repeat_ms=300, timeout=100)
-            tuner = auto_scheduler.TaskScheduler(tasks, task_weights, load_log_file=log_file)
-            tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=20,
-                runner=measure_ctx.runner,
-                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-            )
-            tuner.tune(tune_option)
+log_file = get_ansor_log_file(model_name, [hidden_size], pass_context, target)
+def auto_schedule():
+    pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
+                          target, pass_context, execution_options, fin_iterations=20)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
@@ -108,7 +100,7 @@ def execute():
             else:
                 fin_executor = executor._make_executor(execution_options=execution_options, params=weights_dict)
                 params_list = []
-                for tree in trees: params_list += [tree]
+                for tree in inputs: params_list += [tree]
 
                 executor.vm.set_input("main", batch_size, *params_list)
                 exit()
@@ -117,6 +109,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
+if use_autoscheduler: auto_schedule()
 print("===============================================================================", flush=True)
 execute()

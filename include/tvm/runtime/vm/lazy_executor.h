@@ -106,7 +106,7 @@ class AbstractExecutor {
 
   inline void NextProgramPhase() { phase_++; }
 
-  inline void ResetProgramPhase() { phase_ == 0; }
+  inline void ResetProgramPhase() { phase_ = 0; }
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */

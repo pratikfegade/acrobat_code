@@ -296,9 +296,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     setter(0, batch_size);
     int ctr = 1;
 
-    // std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " <<
-    // func_nodes.size()
-    // << std::endl;
+    std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " << func_nodes.size()
+              << std::endl;
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
@@ -344,14 +343,14 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           } else {
 #ifdef DEBUG_CHECKS
             for (int j = 1; j < batch_size; ++j) {
-              ICHECK_EQ(func_nodes[j]->args_[i]->data, arg->data);
+              ICHECK_EQ(func_nodes[j]->args_[i]->data, arg->data) << i << " " << j;
             }
 #endif
           }
           setter(ctr, arg);
 
-          // std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
-          // << std::endl;
+          std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
+                    << std::endl;
 
           ctr += 1;
           break;
@@ -378,8 +377,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           }
           setter(ctr, result);
 
-          // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(tensor) << " "
-          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+          std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
+                    << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
           scattered_ctr++;
           ctr += 1;
@@ -772,9 +771,10 @@ void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
 #endif
   for (size_t k = 0; k <= phase_; ++k) {
     auto& phase_nodes = nodes_[k];
+    std::cout << "[LZ] Phase " << k << " " << phase_nodes.size() << std::endl;
     for (size_t j = 0; j < phase_nodes.size(); ++j) {
       auto& depth_nodes = phase_nodes[j];
-      // std::cout << "[LZ] Depth " << j << " " << depth_nodes.size() << std::endl;
+      std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
       std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
 
       for (auto& node : depth_nodes) {
@@ -791,6 +791,7 @@ void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
     }
   }
   nodes_.clear();
+  nodes_.resize(MAX_PROGRAM_PHASES);
   if (sync && accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);

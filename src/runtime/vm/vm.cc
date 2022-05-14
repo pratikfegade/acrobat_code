@@ -668,6 +668,8 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         auto output_reg = instr.dst;
         WriteRegister(output_reg, tensor);
         pc_++;
+      } else if (instr.func_index == DB_PHASE_CHANGE_INDEX) {
+        pc_++;
       } else {
         std::vector<ObjectRef> args;
         for (Index i = 0; i < instr.num_args; ++i) {

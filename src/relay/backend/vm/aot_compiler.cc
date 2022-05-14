@@ -662,6 +662,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 this->PrintIndent(stream_);
                 stream_ << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
               }
+              this->PrintIndent(stream_);
+              if (use_depth_tracking_executor()) {
+                stream_ << "depth == 0;\n";
+              }
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
               auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
@@ -1071,7 +1075,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             this->PrintIndent(stream_);
             stream_ << dst_var << " = [";
             for (int i = 0; i < instr.num_freevar; ++i) {
-              stream_ << "&" << GetVarForReg(instr.invoke_args_registers[i]);
+              stream_ << GetVarForReg(instr.invoke_args_registers[i]);
               if (i < instr.num_freevar - 1) {
                 stream_ << ",";
               }
