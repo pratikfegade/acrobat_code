@@ -196,6 +196,13 @@ TVM_DLL Pass DefuseOps();
 TVM_DLL Pass MarkScalarCalls();
 
 /*!
+ * \brief Mark vars that need to be converted to scalars
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass MarkScalarVars();
+
+/*!
  * \brief Identify foldl-style
  *
  * \return The pass.

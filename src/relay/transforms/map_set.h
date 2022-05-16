@@ -90,7 +90,7 @@ class MapSet {
     } else {
       std::stringstream ss;
       ss << "{";
-      int ctr = 0;
+      size_t ctr = 0;
       for (auto& kv : map) {
         ss << kv.first;
         if (ctr++ < map.size() - 1) {

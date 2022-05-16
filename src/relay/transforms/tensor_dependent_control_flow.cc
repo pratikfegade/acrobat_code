@@ -204,7 +204,7 @@ class TensorDependentControlOpsTaintAnalysis : public TDCOTABaseExprFunctor {
                     const FunctionNode* map_context) {
     auto map_fn_node = GetMapFuncNode();
     auto lambda_var = map_fn_node->params[0];
-    FunctionSet lambda_callees;
+    OrderedFunctionSet lambda_callees;
     PostOrderVisit(map_fn_node->body, [&](const Expr& expr) {
       if (auto cn = expr.as<CallNode>()) {
         if (cn->op == lambda_var) {

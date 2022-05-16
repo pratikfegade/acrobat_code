@@ -372,7 +372,7 @@ class TECompilerImpl : public TECompilerNode {
         << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
         << key->source_func.get();
     auto func_model_parameter_taints = opt_func_model_parameter_taints.value();
-    std::cout << "Found taints " << func_model_parameter_taints << std::endl;
+    // std::cout << "Found taints " << func_model_parameter_taints << std::endl;
     auto lowered_cached_funcs = PrimFuncFor(
         key->source_func, key->target,
         [&](std::string name) {

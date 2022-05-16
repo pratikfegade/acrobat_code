@@ -46,9 +46,10 @@ namespace relay {
 namespace tec {
 
 using NodeT = const FunctionNode*;
-using UFunctionSet = std::unordered_set<NodeT>;
 
 namespace {
+using UFunctionSet = std::unordered_set<NodeT>;
+
 class TarjansAlgorithm {
  public:
   TarjansAlgorithm(PreciseCallGraph& call_graph,
@@ -61,7 +62,7 @@ class TarjansAlgorithm {
     stk.push(u);
     stkItem[u] = true;
 
-    FunctionSet callees;
+    OrderedFunctionSet callees;
     auto it = call_graph_.find(u);
     if (it != call_graph_.end()) {
       callees = it->second;
@@ -202,7 +203,7 @@ IRModule InferTaskWeights(IRModule& mod) {
   std::unordered_map<NodeT, int> prim_func_weights;
   for (size_t i = 0; i < sccs.size(); ++i) {
     for (auto fn : sccs[i]) {
-      FunctionSet callees;
+      OrderedFunctionSet callees;
       auto it = call_graph.find(fn);
       if (it != call_graph.end()) {
         callees = it->second;

@@ -1454,8 +1454,11 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   // distinguish homogeneous vs hetrogeneous execution.
   pass_seqs.push_back(transform::PlanDevices(config_));
 
+  pass_seqs.push_back(transform::NameAllFunctions());
+
   pass_seqs.push_back(transform::InferType());
   // pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   pass_seqs.push_back(transform::FuseOps());
@@ -1487,10 +1490,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(DeadCodeElimination(/*inline_once=*/false));
   pass_seqs.push_back(transform::LabelOps());
 
-  pass_seqs.push_back(transform::NameAllFunctions());
-
   // lower all functions annotated as "primitive" by FuseOps.
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1516,11 +1517,13 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
 
+  pass_seqs.push_back(transform::PrintCurrentIR("Before Scalaring", true, true));
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before hoisting", true, true));
     pass_seqs.push_back(transform::HoistNonSequentialOps());
   }
+
+  pass_seqs.push_back(transform::MarkScalarVars());
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
@@ -1539,7 +1542,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

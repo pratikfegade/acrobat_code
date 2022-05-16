@@ -39,20 +39,22 @@
 namespace tvm {
 namespace relay {
 
-using FPAVarKey = std::pair<const FunctionNode*, const VarNode*>;
-using FPAFunctionKey = std::pair<const FunctionNode*, const FunctionNode*>;
-using FPAOpKey = std::pair<const FunctionNode*, const CallNode*>;
-
 using PairHash = support::PairHash;
 using PairEquals = support::PairEquals;
 
-using FunctionSet = std::set<const FunctionNode*>;
-using FPAVarStateMap = std::unordered_map<FPAVarKey, FunctionSet, PairHash, PairEquals>;
-using FPAFunctionStateMap = std::unordered_map<FPAFunctionKey, FunctionSet, PairHash, PairEquals>;
-using FPABaseExprFunctor = ExprFunctor<FunctionSet(const Expr& n)>;
-using PreciseCallGraph = std::unordered_map<const FunctionNode*, FunctionSet>;
-using CalleesMap = std::unordered_map<FPAOpKey, FunctionSet, PairHash, PairEquals>;
-using CallDepthMap = std::unordered_map<const CallNode*, int>;
+using FunctionSet = Map<Function, Bool>;
+using OrderedFunctionSet = std::set<const FunctionNode*>;
+
+using FPAContextT = const Object*;
+
+using FPAVarStateMap =
+    std::unordered_map<std::pair<FPAContextT, const VarNode*>, FunctionSet, PairHash, PairEquals>;
+using FPAFunctionStateMap = std::unordered_map<std::pair<FPAContextT, const FunctionNode*>,
+                                               FunctionSet, PairHash, PairEquals>;
+
+using PreciseCallGraph = std::unordered_map<const FunctionNode*, OrderedFunctionSet>;
+using CalleesMap = std::unordered_map<std::pair<FPAContextT, const CallNode*>, OrderedFunctionSet,
+                                      PairHash, PairEquals>;
 
 std::pair<FunctionSet, CalleesMap> GetRecursiveFunctions(const IRModule& mod);
 

@@ -183,7 +183,7 @@ inline bool IsOpOnScalars(const CallNode* op) {
   if (op->op == GetInvokeTVMOp()) {
     auto check_tuple = [&](const Expr& e) {
       for (auto f : e.as<TupleNode>()->fields) {
-        if (!IsScalarTensorType(e->checked_type())) {
+        if (!IsScalarTensorType(f->checked_type())) {
           return false;
         }
       }

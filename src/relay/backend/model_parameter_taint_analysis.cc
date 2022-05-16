@@ -315,11 +315,14 @@ class TaintAnalysis : public BaseExprFunctor {
       merged_function_states[kv.first.second] = merged_taint;
     }
 
+    bool print = false;
     Map<Function, Array<Bool>> results_map;
     for (auto kv : merged_function_states) {
       auto fn = GetRef<Function>(kv.first);
-      std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " " << kv.first
-                << std::endl;
+      if (print) {
+        std::cout << "[MPT] Function " << fn->GetAttr<String>("db.function_name") << " " << kv.first
+                  << std::endl;
+      }
       Array<Bool> param_states;
       for (auto arg : fn->params) {
         auto it = merged_var_states.find(arg.get());
@@ -333,8 +336,10 @@ class TaintAnalysis : public BaseExprFunctor {
 
         for (auto s : arg_state->taint) {
           param_states.push_back(Bool((s.size() == 1) && arg_state->is_constant->value));
-          std::cout << "[MPT]  P " << arg_state->is_constant->value << " " << s.size() << " "
-                    << MapSet::ToString(s) << std::endl;
+          if (print) {
+            std::cout << "[MPT]  P " << arg_state->is_constant->value << " " << s.size() << " "
+                      << MapSet::ToString(s) << std::endl;
+          }
         }
       }
       auto iit = merged_function_states.find(fn.get());
@@ -345,7 +350,9 @@ class TaintAnalysis : public BaseExprFunctor {
       auto fn_state = merged_function_states[fn.get()];
       for (auto s : fn_state->taint) {
         param_states.push_back(Bool((s.size() == 1) && fn_state->is_constant->value));
-        std::cout << "[MPT]  O " << s.size() << std::endl;
+        if (print) {
+          std::cout << "[MPT]  O " << s.size() << std::endl;
+        }
       }
 
       results_map.Set(fn, param_states);

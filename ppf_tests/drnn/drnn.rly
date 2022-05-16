@@ -6,8 +6,8 @@ def @compute_probabilities(
   %x_sibling: Tensor[(1, 256), float32],
   %h_f_sibling: Tensor[(1, 256), float32],
 
-  %tree_depth: Tensor[(), int32],
-  %sibling_depth: Tensor[(), int32],
+  %tree_depth1: Tensor[(), int32],
+  %sibling_depth1: Tensor[(), int32],
 
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
@@ -73,9 +73,9 @@ def @compute_probabilities(
     %p_af_i_split.1 * %vf_bias
   );
 
-  let %have_children = random.db_uniform(0, 3 - %tree_depth, out_shape=[], out_dtype="int32");
-  let %have_sibling = random.db_uniform(0, 3 - %sibling_depth, out_shape=[], out_dtype="int32");
-  (%x_i, %h_a_i, %h_f_i, %have_children, %have_sibling)
+  let %have_children1 = random.db_uniform(0, 3 - %tree_depth1, out_shape=[], out_dtype="int32");
+  let %have_sibling1 = random.db_uniform(0, 3 - %sibling_depth1, out_shape=[], out_dtype="int32");
+  (%x_i, %h_a_i, %h_f_i, %have_children1, %have_sibling1)
 }
 
 def @create_siblings(
@@ -84,8 +84,8 @@ def @create_siblings(
   %x_sibling: Tensor[(1, 256), float32],
   %h_f_sibling: Tensor[(1, 256), float32],
 
-  %tree_depth: Tensor[(), int32],
-  %sibling_depth: Tensor[(), int32],
+  %tree_depth2: Tensor[(), int32],
+  %sibling_depth2: Tensor[(), int32],
 
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
@@ -98,14 +98,14 @@ def @create_siblings(
   %dot_uaf_weight: Tensor[(2, 256), float32],
 ) -> List[(Tensor[(1, 256), float32], Tensor[(1, 256), float32], Tensor[(), int32])] {
   let %cp_res = @compute_probabilities(
-    %x_parent, %h_a_parent, %x_sibling, %h_f_sibling, %tree_depth, %sibling_depth,
+    %x_parent, %h_a_parent, %x_sibling, %h_f_sibling, %tree_depth2, %sibling_depth2,
     %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
     %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
   );
-  let %have_sibling = %cp_res.4;
-  if (%have_sibling != 0) {
+  let %have_sibling2 = %cp_res.4;
+  if (%have_sibling2 != 0) {
     let %cc_res = @create_siblings(
-      %x_parent, %h_a_parent, %cp_res.0, %cp_res.2, %tree_depth, %sibling_depth + 1,
+      %x_parent, %h_a_parent, %cp_res.0, %cp_res.2, %tree_depth2, %sibling_depth2 + 1,
       %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
       %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
     );
@@ -133,7 +133,7 @@ def @create_tree(
   %x_parent: Tensor[(1, 256), float32],
   %h_a_parent: Tensor[(1, 256), float32],
 
-  %tree_depth: Tensor[(), int32],
+  %tree_depth3: Tensor[(), int32],
 
   %a_rnn_weight: Tensor[(256, 512), float32],
   %a_rnn_bias: Tensor[(1, 256), float32],
@@ -146,7 +146,7 @@ def @create_tree(
   %dot_uaf_weight: Tensor[(2, 256), float32],
 ) -> Tree[(Tensor[(1, 256), float32], Tensor[(1, 256), float32])] {
   let %children_res = @create_siblings(
-    %x_parent, %h_a_parent, %x_parent, %h_a_parent, %tree_depth, 0,
+    %x_parent, %h_a_parent, %x_parent, %h_a_parent, %tree_depth3, 0,
     %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
     %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
   );
@@ -156,12 +156,12 @@ def @create_tree(
   ) {
     let %x_node = %input.0;
     let %h_a_node = %input.1;
-    let %have_children = %input.2;
+    let %have_children3 = %input.2;
 
-    if (%have_children != 0) {
+    if (%have_children3 != 0) {
       Some(
         @create_tree(
-          %x_node, %h_a_node, %tree_depth + 1,
+          %x_node, %h_a_node, %tree_depth3 + 1,
           %a_rnn_weight, %a_rnn_bias, %f_rnn_weight, %f_rnn_bias,
           %ufa_pred_weight, %out_weight, %va_bias, %vf_bias, %dot_uaf_weight
         )

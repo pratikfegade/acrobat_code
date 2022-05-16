@@ -125,6 +125,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
+# if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
 print("===============================================================================", flush=True)
 execute()

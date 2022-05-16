@@ -96,7 +96,9 @@ def @bertxit(
   %certainty_w: Tensor[(1, 512), float32],
   %certainty_b: Tensor[(1, 1), float32],
   %classification_w: Tensor[(16, 512), float32],
-  %classification_b: Tensor[(1, 16), float32]
+  %classification_b: Tensor[(1, 16), float32],
+
+  %dummy: Tensor[(1, 1), float32],
 ) -> Tensor[(), int32] {
 
   let %certainty_fn = fn (
@@ -128,8 +130,6 @@ def @bertxit(
     %input
   );
 
-  // let %layer_out = %input;
-
   let %confidence = %certainty_fn(%layer_out, %certainty_w, %certainty_b);
   let %to_exit = random.db_uniform(0, %num_layers - %execution_ctr, out_shape=[], out_dtype="int32");
   if (%to_exit > 0) {
@@ -146,6 +146,7 @@ def @bertxit(
         %ln2_g, %ln2_b,
         %certainty_w, %certainty_b,
         %classification_w, %classification_b,
+        %confidence
       )
     } else {
       argmax(nn.softmax(%classification_fn(%layer_out, %classification_w, %classification_b)))
@@ -192,6 +193,7 @@ def @main(
     %ln2_g, %ln2_b,
     %certainty_w, %certainty_b,
     %classification_w, %classification_b,
+    reshape(0f, newshape=[1,1]),
   )
 
   // @transformer_encoder(

@@ -76,27 +76,23 @@ std::vector<Var> CollectPatternVars(const Pattern& p) {
   return collector.vars_;
 }
 
-class FunctionPointerAnalysis : public FPABaseExprFunctor {
+namespace {
+
+using BaseExprFunctor = ExprFunctor<FunctionSet(const Expr& n, FPAContextT)>;
+
+using FPAContextT = const Object*;
+using VarSet = std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>;
+
+using FunctionEnvironmentMap = std::unordered_map<const FunctionNode*, Map<Var, FunctionSet>>;
+using OnStackSet =
+    std::unordered_set<std::pair<FPAContextT, const FunctionNode*>, PairHash, PairEquals>;
+
+class FunctionPointerAnalysis : public BaseExprFunctor {
  public:
-  FunctionPointerAnalysis(const IRModule& mod) : mod_(mod) {
-    for (auto kv : mod_->functions) {
-      func_name_map_[kv.second.get()] = kv.first->name_hint;
-    }
-    stack_.push_back(nullptr);
-  }
+  FunctionPointerAnalysis(const IRModule& mod) : mod_(mod) {}
 
   void PerformAnalysis() {
-    auto call_graph = CallGraph(mod_);
-    size_t i = 0;
-    for (; i < max_iterations_; ++i) {
-      // std::cout << "[FPA] ITERATION " << i << std::endl;
-      visited_functions_.clear();
-      changed_ = false;
-      VisitBody(Downcast<Function>(mod_->Lookup("main")));
-      if (!changed_) {
-        break;
-      }
-    }
+    RunAnalysis();
 
     for (auto kv : callees_map_) {
       auto context = kv.first.first;
@@ -112,16 +108,13 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
       if (auto fn = kv.second.as<FunctionNode>()) {
         PostOrderVisit(fn->body, [&](const Expr& expr) {
           if (auto callsite = expr.as<CallNode>()) {
-            FunctionSet callees;
             auto it = callees_per_callsite_.find(callsite);
-            if (it == callees_per_callsite_.end()) {
-              return;
+            if (it != callees_per_callsite_.end()) {
+              auto callees_per_context = it->second;
+              for (auto kvkv : callees_per_context) {
+                call_graph[fn].insert(kvkv.second.begin(), kvkv.second.end());
+              }
             }
-            auto callees_per_context = it->second;
-            for (auto kvkv : callees_per_context) {
-              callees.insert(kvkv.second.begin(), kvkv.second.end());
-            }
-            call_graph[fn].insert(callees.begin(), callees.end());
           }
         });
       }
@@ -135,9 +128,9 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     FunctionSet recursive_functions;
     for (auto kv : mod_->functions) {
       if (auto fn = kv.second.as<FunctionNode>()) {
-        FunctionSet visited;
+        OrderedFunctionSet visited;
         if (Reachable(call_graph, fn, fn, visited, true)) {
-          recursive_functions.insert(fn);
+          MapSet::Insert(recursive_functions, GetRef<Function>(fn));
           // std::cout << "[ADF] Recursive func " << fn << " " << func_name_map_[fn] << std::endl;
         }
       }
@@ -145,75 +138,83 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     return recursive_functions;
   }
 
-  CalleesMap GetCalleesMap() {
-    // for (auto kv : callees_map_) {
-    // std::cout << "[FPA] Callees " << func_name_map_[kv.first.first] << " "
-    // << func_name_map_[callsite_to_function_[kv.first.second]] << " "
-    // << kv.first.second->op << std::endl;
-    // for (auto f : kv.second) {
-    // std::cout << "[FPA]    " << func_name_map_[f] << std::endl;
-    // }
-    // }
-
-    return callees_map_;
-  }
+  CalleesMap GetCalleesMap() { return callees_map_; }
 
   FPAVarStateMap GetVarPointsToMap() { return var_states_; }
 
  private:
-  const FunctionNode* GetCurrentContext() {
-    ICHECK_GE(stack_.size(), 2);
-    return stack_[stack_.size() - 2];
+  void RunAnalysis() {
+    auto main_func = Downcast<Function>(mod_->Lookup("main"));
+
+    ICHECK_EQ(main_func->type_params.size(), 0);
+    for (auto param : main_func->params) {
+      ICHECK(!param->checked_type().as<FuncTypeNode>());
+      Add(param, GetInitialContext(), FunctionSet(), "Main param");
+    }
+
+    for (int i = 0; i < max_iterations_; ++i) {
+      // std::cout << "[FPA] ITERATION " << i << std::endl;
+      this->Reset();
+      type_environment_stack_.push_back(Map<TypeVar, Type>());
+      environment_stack_.push_back(Map<Var, FunctionSet>());
+      auto context_fn_key = std::make_pair(GetInitialContext(), main_func.get());
+      on_stack_.insert(context_fn_key);
+      function_stack_.push_back(main_func);
+      auto full_taint = this->VisitExpr(main_func->body, GetInitialContext());
+      function_stack_.pop_back();
+      on_stack_.erase(context_fn_key);
+      environment_stack_.pop_back();
+      type_environment_stack_.pop_back();
+    }
   }
 
-  const FunctionNode* GetCurrentFunction() { return stack_.back(); }
+  std::string GetFunctionName(const Function& fn) {
+    return fn->GetAttr<String>("db.function_name", String("")).value();
+  }
 
-  std::pair<FunctionSet, bool> Merge(const FunctionSet& s1, const FunctionSet& s2) {
-    FunctionSet ret;
-    ret.insert(s1.begin(), s1.end());
-    ret.insert(s2.begin(), s2.end());
-    bool changed = (s1.size() != ret.size());
-    return std::make_pair(ret, changed);
+  void Reset() {
+    on_stack_.clear();
+    environment_stack_.clear();
+    type_environment_stack_.clear();
+  }
+
+  FunctionSet MergeFunctionSets(const FunctionSet& set1, const FunctionSet& set2) {
+    return MapSet::Merge<Function>(set1, set2);
+  }
+
+  FunctionSet Merge(const Array<FunctionSet>& full_taints) {
+    FunctionSet function_points_to;
+    for (auto& full_taint : full_taints) {
+      function_points_to = MergeFunctionSets(function_points_to, full_taint);
+    }
+    return function_points_to;
   }
 
   template <typename T, typename MapType>
-  FunctionSet Add(MapType& map, const T& key, const FunctionSet& to_add) {
-    auto old_size = map[key].size();
-    map[key].insert(to_add.begin(), to_add.end());
-    auto new_size = map[key].size();
-    if (old_size != new_size) {
-      changed_ = true;
+  FunctionSet Add(MapType& map, const T& obj, FPAContextT context, const FunctionSet& to_add) {
+    auto key = std::make_pair(context, obj.get());
+    auto it = map.find(key);
+    if (it == map.end()) {
+      map[key] = to_add;
+      return to_add;
+    } else {
+      auto merged = Merge(Array<FunctionSet>({it->second, to_add}));
+      map[key] = merged;
+      return merged;
     }
-    return map.at(key);
   }
 
-  FunctionSet Add(const FPAVarKey& var, const FunctionSet& to_add) {
-    return Add<FPAVarKey, FPAVarStateMap>(var_states_, var, to_add);
+  FunctionSet Add(const Var& var, FPAContextT current_context, const FunctionSet& to_add,
+                  const std::string& reason) {
+    return Add<Var, FPAVarStateMap>(var_states_, var, current_context, to_add);
   }
 
-  FunctionSet Add(const FPAFunctionKey& func, const FunctionSet& to_add) {
-    return Add<FPAFunctionKey, FPAFunctionStateMap>(function_states_, func, to_add);
-  }
-
-  FPAVarKey VarKey(const FunctionNode* ctx, const VarNode* var) { return std::make_pair(ctx, var); }
-
-  FPAFunctionKey FunctionKey(const FunctionNode* ctx, const FunctionNode* func) {
-    return std::make_pair(ctx, func);
-  }
-
-  FPAOpKey OpKey(const FunctionNode* ctx, const CallNode* op) { return std::make_pair(ctx, op); }
-
-  FunctionSet VisitBody(const Function& func) {
-    stack_.push_back(func.get());
-    // std::cout << "[FPA]  Visiting function body " << func_name_map_[func.get()] << " in context "
-    // << func_name_map_[GetCurrentContext()] << std::endl;
-    auto res = VisitExpr(func->body);
-    stack_.pop_back();
-    return res;
+  FunctionSet Add(const Function& fn, FPAContextT current_context, const FunctionSet& to_add) {
+    return Add<Function, FPAFunctionStateMap>(function_states_, fn, current_context, to_add);
   }
 
   bool Reachable(const PreciseCallGraph& call_graph, const FunctionNode* src,
-                 const FunctionNode* dst, FunctionSet& visited, bool start = false) {
+                 const FunctionNode* dst, OrderedFunctionSet& visited, bool start = false) {
     if (!start && src == dst) {
       return true;
     }
@@ -233,167 +234,277 @@ class FunctionPointerAnalysis : public FPABaseExprFunctor {
     return false;
   }
 
-  FunctionSet VisitExpr_(const ConstantNode* op) override { return {}; }
+  FunctionSet GetOrCreateFunctionState(const Function& fn, FPAContextT context) {
+    auto key = std::make_pair(context, fn.get());
+    auto it = function_states_.find(key);
+    if (it == function_states_.end()) {
+      return FunctionSet();
+    } else {
+      return it->second;
+    }
+  }
 
-  FunctionSet VisitExpr_(const TupleNode* op) override {
-    FunctionSet ret;
+  FPAContextT GetInitialContext() { return nullptr; }
+
+  FunctionSet VisitExpr_(const ConstantNode* op, FPAContextT current_context) {
+    return FunctionSet();
+  }
+
+  FunctionSet VisitExpr_(const TupleNode* op, FPAContextT current_context) {
+    FunctionSet function_points_to;
     for (auto field : op->fields) {
-      auto field_ret = VisitExpr(field);
-      ret.insert(field_ret.begin(), field_ret.end());
+      auto field_full_taint = this->VisitExpr(field, current_context);
+      function_points_to = MergeFunctionSets(function_points_to, field_full_taint);
     }
-    return ret;
+    return function_points_to;
   }
 
-  FunctionSet VisitExpr_(const VarNode* op) override {
-    auto var_key = VarKey(GetCurrentContext(), op);
-    auto it = var_states_.find(var_key);
-    if (it == var_states_.end()) {
-      var_states_[var_key] = {};
-      changed_ = true;
+  FunctionSet VisitExpr_(const VarNode* op, FPAContextT current_context) {
+    bool print = false;  // op->checked_type().as<TypeCallNode>();
+
+    if (print) {
+      std::cout << "[MPT] Getting var " << current_context << " " << op->vid->name_hint
+                << std::endl;
     }
-    return var_states_[var_key];
-  }
 
-  FunctionSet VisitExpr_(const GlobalVarNode* op) override {
-    return {mod_->Lookup(GetRef<GlobalVar>(op)).as<FunctionNode>()};
-  }
-
-  FunctionSet VisitExpr_(const FunctionNode* op) override { return {op}; }
-
-  std::string FunctionSetToStr(const FunctionSet& set) {
-    std::stringstream os;
-    os << "Set(" << set.size() << ")[";
-    for (auto f : set) {
-      os << func_name_map_[f] << " ";
+    auto var = GetRef<Var>(op);
+    auto current_environment = environment_stack_.back();
+    auto it = current_environment.find(var);
+    if (it != current_environment.end()) {
+      auto full_taint = (*it).second;
+      if (print) {
+        std::cout << "[MPT]  In env " << MapSet::ToString(full_taint) << std::endl;
+      }
+      return full_taint;
     }
-    os << "]";
-    return os.str();
+
+    auto key = std::make_pair(current_context, op);
+    auto iit = var_states_.find(key);
+    if (iit == var_states_.end()) {
+      auto taint = FunctionSet();
+      var_states_[key] = taint;
+      if (print) {
+        std::cout << "[MPT]  Not found" << std::endl;
+      }
+      return taint;
+    } else {
+      if (print) {
+        std::cout << "[MPT]  Found " << MapSet::ToString(iit->second) << std::endl;
+      }
+      return iit->second;
+    }
   }
 
-  FunctionSet VisitExpr_(const CallNode* op) override {
-    callsite_to_function_[op] = GetCurrentFunction();
+  FunctionSet VisitExpr_(const GlobalVarNode* op, FPAContextT current_context) {
+    auto function_points_to = FunctionSet();
+    auto base_func = mod_->Lookup(GetRef<GlobalVar>(op));
+    if (base_func.as<FunctionNode>()) {
+      MapSet::Insert(function_points_to, Downcast<Function>(base_func));
+    }
+    return function_points_to;
+  }
+
+  VarSet GetFreeVars(const Function& expr) {
+    auto it = free_vars_map_.find(expr.get());
+    if (it == free_vars_map_.end()) {
+      auto free_vars = FreeVarsDedup(expr);
+      free_vars_map_[expr.get()] = free_vars;
+      return free_vars;
+    } else {
+      return it->second;
+    }
+  }
+
+  FunctionSet VisitExpr_(const FunctionNode* op, FPAContextT current_context) {
+    auto function = GetRef<Function>(op);
+    auto free_vars = GetFreeVars(function);
+    for (auto free_var : free_vars) {
+      auto taint = this->VisitExpr(free_var, current_context);
+      auto it = function_environments_[op].find(free_var);
+      if (it != function_environments_[op].end()) {
+        auto preexisting_taint = (*it).second;
+        taint = Merge(Array<FunctionSet>({taint, preexisting_taint}));
+      }
+      function_environments_[op].Set(free_var, taint);
+    }
+
+    FunctionSet function_points_to;
+    MapSet::Insert(function_points_to, function);
+    return function_points_to;
+  }
+
+  FunctionSet VisitBody(const Function& fn, FPAContextT context, const CallNode* call) {
+    // std::cout << "[MPT] Visiting body " << GetFunctionName(fn) << std::endl;
+    Map<TypeVar, Type> type_environment;
+    ICHECK_EQ(fn->type_params.size(), call->type_args.size());
+    for (size_t i = 0; i < call->type_args.size(); ++i) {
+      type_environment.Set(fn->type_params[i], call->type_args[i]);
+    }
+
+    type_environment_stack_.push_back(type_environment);
+    environment_stack_.push_back(function_environments_[fn.get()]);
+    auto context_fn_key = std::make_pair(context, fn.get());
+    on_stack_.insert(context_fn_key);
+    function_stack_.push_back(fn);
+    auto full_taint = this->VisitExpr(fn->body, context);
+    function_stack_.pop_back();
+    on_stack_.erase(context_fn_key);
+    environment_stack_.pop_back();
+    type_environment_stack_.pop_back();
+    return full_taint;
+  }
+
+  FunctionSet VisitExpr_(const CallNode* op, FPAContextT current_context) {
     auto on_device_props = GetOnDeviceProps(op);
     if (on_device_props.body.defined()) {
-      return VisitExpr(on_device_props.body);
+      return this->VisitExpr(on_device_props.body, current_context);
     }
+
     if (op->op.as<OpNode>() || op->op.as<ConstructorNode>()) {
-      return {};
-    }
-    auto callee_set = VisitExpr(op->op);
-    callees_map_[OpKey(GetCurrentContext(), op)] =
-        Merge(callees_map_[OpKey(GetCurrentContext(), op)], callee_set).first;
-    // std::cout << "[FPA]   Setting callee " << func_name_map_[GetCurrentContext()] << " "
-    // << GetCurrentContext() << " " << op->op << " " << FunctionSetToStr(callee_set)
-    // << std::endl;
-    if (callee_set.empty()) {
       for (auto arg : op->args) {
-        this->VisitExpr(arg);
+        this->VisitExpr(arg, current_context);
       }
+      return FunctionSet();
     }
-    FunctionSet ret;
-    for (auto callee : callee_set) {
-      auto callee_key = FunctionKey(GetCurrentFunction(), callee);
-      bool print = false;  //(func_name_map_[callee] == "map");
-      auto callee_fn = GetRef<Function>(callee);
-      bool args_changed = false;
-      for (size_t i = 0; i < op->args.size(); ++i) {
-        auto param_state = VisitExpr(op->args[i]);
-        bool old_changed = false;
-        std::swap(old_changed, changed_);
-        auto res = Add(VarKey(GetCurrentFunction(), callee->params[i].get()), param_state);
-        std::swap(old_changed, changed_);
-        changed_ = changed_ || old_changed;
-        args_changed = args_changed || old_changed;
 
+    auto callee_context = op;
+
+    auto callees = this->VisitExpr(op->op, current_context);
+    auto key = std::make_pair(current_context, op);
+
+    Array<FunctionSet> callee_taints;
+    // std::cout << "[MPT] Call " << op->op << " " << callees.size() << std::endl;
+    for (auto kv : callees) {
+      auto callee_fn = kv.first;
+      callees_map_[key].insert(callee_fn.get());
+      // std::cout << "[MPT]  Callee " << GetFunctionName(callee_fn) << std::endl;
+
+      //////////////////////////////
+      auto callee_name = callee_fn->GetAttr<String>("db.function_name");
+      bool print = false;  //(callee_name == "map" || callee_name == "get_classification_fn_f0");
+      if (print) {
+        std::cout << "[MPT] Calling " << callee_name << " at " << GetRef<Expr>(op) << std::endl;
+      }
+      //////////////////////////////
+
+      ICHECK_EQ(callee_fn->params.size(), op->args.size());
+      for (size_t i = 0; i < callee_fn->params.size(); ++i) {
+        auto arg = op->args[i];
+        auto param = callee_fn->params[i];
+        // if (op->args.size() == 10) {
+        // this->VisitExpr(op->args[9], current_context);
+        // }
+        auto param_full_taint = this->VisitExpr(arg, current_context);
+        auto add_res = Add(param, callee_context, param_full_taint, "function param");
+
+        //////////////////////////////
         if (print) {
-          std::cout << "[FPA]   call " << func_name_map_[callee] << " " << op->args[i] << " "
-                    << args_changed << " " << FunctionSetToStr(param_state) << std::endl;
-          for (auto pt : res) {
-            std::cout << "[FPA]    Pointeee " << func_name_map_[pt] << std::endl;
+          std::string arg_str = "";
+          if (auto vn = arg.as<VarNode>()) {
+            arg_str = vn->vid->name_hint;
           }
+          std::cout << "[MPT]  Param " << current_context << " " << arg_str << " "
+                    << param->vid->name_hint << " " << param_full_taint.size() << " "
+                    << add_res.size() << std::endl;
         }
+        //////////////////////////////
       }
 
-      bool visited = visited_functions_.count(callee_key);
-      if (args_changed || !visited) {
-        visited_functions_.insert(callee_key);
+      FunctionSet callee_full_taint;
+      if (on_stack_.count(std::make_pair(callee_context, callee_fn.get()))) {
+        callee_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
         if (print) {
-          std::cout << "[FPA]  Visiting body " << func_name_map_[callee] << std::endl;
+          std::cout << "[MPT] Return value 1 " << callee_name << " "
+                    << MapSet::ToString(callee_full_taint) << std::endl;
         }
-        auto res = VisitBody(callee_fn);
-        Add(callee_key, res);
-        ret.insert(res.begin(), res.end());
-      } else if (!visited) {
-        auto it = function_states_.find(callee_key);
-        if (it != function_states_.end()) {
-          ret.insert(it->second.begin(), it->second.end());
+      } else {
+        callee_full_taint = VisitBody(callee_fn, callee_context, op);
+        callee_full_taint = Add(callee_fn, callee_context, callee_full_taint);
+        if (print) {
+          std::cout << "[MPT] Return value 2 " << callee_name << " "
+                    << MapSet::ToString(callee_full_taint) << std::endl;
         }
       }
+      callee_taints.push_back(callee_full_taint);
     }
-    return ret;
+
+    return Merge(callee_taints);
   }
 
-  FunctionSet VisitExpr_(const LetNode* op) override {
-    auto value_res = VisitExpr(op->value);
-    // std::cout << "[FPA]   Setting callee " << func_name_map_[GetCurrentFunction()] << " "
-    // << op->var->vid->name_hint << " " << FunctionSetToStr(value_res) << std::endl;
-    Add(VarKey(GetCurrentContext(), op->var.get()), value_res);
-    return VisitExpr(op->body);
+  FunctionSet VisitExpr_(const LetNode* op, FPAContextT current_context) {
+    auto value_res = this->VisitExpr(op->value, current_context);
+    auto added_res = Add(op->var, current_context, value_res, "Let value");
+    return this->VisitExpr(op->body, current_context);
   }
 
-  FunctionSet VisitExpr_(const IfNode* op) override {
-    VisitExpr(op->cond);
-    FunctionSet ret;
-    auto then_ret = VisitExpr(op->true_branch);
-    ret.insert(then_ret.begin(), then_ret.end());
-    auto else_ret = VisitExpr(op->false_branch);
-    ret.insert(else_ret.begin(), else_ret.end());
-    return ret;
+  FunctionSet VisitExpr_(const IfNode* op, FPAContextT current_context) {
+    auto cond_taint = this->VisitExpr(op->cond, current_context);
+    auto true_taint = this->VisitExpr(op->true_branch, current_context);
+    auto false_taint = this->VisitExpr(op->false_branch, current_context);
+    return Merge(Array<FunctionSet>({true_taint, false_taint}));
   }
 
-  FunctionSet VisitExpr_(const OpNode* op) override { return FunctionSet(); }
+  FunctionSet VisitExpr_(const OpNode* op, FPAContextT current_context) { return FunctionSet(); }
 
-  FunctionSet VisitExpr_(const TupleGetItemNode* op) override { return VisitExpr(op->tuple); }
-
-  FunctionSet VisitExpr_(const RefCreateNode* op) override {
-    ICHECK(false) << "Refs not supported for now";
-    return {};
+  FunctionSet VisitExpr_(const TupleGetItemNode* op, FPAContextT current_context) {
+    return this->VisitExpr(op->tuple, current_context);
   }
 
-  FunctionSet VisitExpr_(const RefReadNode* op) override {
-    ICHECK(false) << "Refs not supported for now";
-    return {};
+  FunctionSet VisitExpr_(const RefCreateNode* op, FPAContextT current_context) {
+    return UnsupportedFunction(op, current_context);
   }
 
-  FunctionSet VisitExpr_(const RefWriteNode* op) override {
-    ICHECK(false) << "Refs not supported for now";
-    return {};
+  FunctionSet VisitExpr_(const RefReadNode* op, FPAContextT current_context) {
+    return UnsupportedFunction(op, current_context);
   }
 
-  FunctionSet VisitExpr_(const ConstructorNode* op) override { return {}; }
+  FunctionSet VisitExpr_(const RefWriteNode* op, FPAContextT current_context) {
+    return UnsupportedFunction(op, current_context);
+  }
 
-  FunctionSet VisitExpr_(const MatchNode* op) override {
-    FunctionSet ret;
+  FunctionSet UnsupportedFunction(const ExprNode* op, FPAContextT current_context) {
+    ICHECK(false) << "Do not support " << op->GetTypeKey();
+    return FunctionSet();
+  }
+
+  FunctionSet VisitExpr_(const ConstructorNode* op, FPAContextT current_context) {
+    return FunctionSet();
+  }
+
+  FunctionSet VisitExpr_(const MatchNode* op, FPAContextT current_context) {
+    auto data_taint = this->VisitExpr(op->data, current_context);
+
+    Array<FunctionSet> clause_taints;
     for (auto clause : op->clauses) {
-      auto clause_ret = VisitExpr(clause->rhs);
-      ret.insert(clause_ret.begin(), clause_ret.end());
+      auto pattern_vars = CollectPatternVars(clause->lhs);
+      for (auto& var : pattern_vars) {
+        Add(var, current_context, data_taint, "Match pattern");
+      }
+      // std::cout << "[MPT]   Visiting clause " << clause->lhs << std::endl;
+      clause_taints.push_back(this->VisitExpr(clause->rhs, current_context));
     }
-    return ret;
+
+    return Merge(clause_taints);
   }
 
   const IRModule& mod_;
+
   FPAVarStateMap var_states_;
   FPAFunctionStateMap function_states_;
-  std::unordered_set<FPAFunctionKey, PairHash, PairEquals> visited_functions_;
-  size_t max_iterations_{50};
-  bool changed_{false};
-  std::unordered_map<const BaseFuncNode*, std::string> func_name_map_;
-  std::vector<const FunctionNode*> stack_;
+  FunctionEnvironmentMap function_environments_;
+  std::unordered_map<const FunctionNode*, VarSet> free_vars_map_;
+  OnStackSet on_stack_;
+  std::vector<Map<Var, FunctionSet>> environment_stack_;
+  std::vector<Map<TypeVar, Type>> type_environment_stack_;
+
+  std::vector<Function> function_stack_;
   CalleesMap callees_map_;
-  std::unordered_map<const CallNode*, std::unordered_map<const FunctionNode*, FunctionSet>>
+  std::unordered_map<const CallNode*, std::unordered_map<FPAContextT, OrderedFunctionSet>>
       callees_per_callsite_;
-  std::unordered_map<const CallNode*, const FunctionNode*> callsite_to_function_;
+  int max_iterations_{10};
 };
+
+}  // namespace
 
 std::pair<FunctionSet, CalleesMap> GetRecursiveFunctions(const IRModule& mod) {
   FunctionPointerAnalysis analysis(mod);
