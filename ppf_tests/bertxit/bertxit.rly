@@ -74,8 +74,8 @@ def @transformer_encoder(
 def @bertxit(
   %input: Tensor[(128, 512), float32],
 
-  %execution_ctr: Tensor[(), int32],
-  %num_layers: Tensor[(), int32],
+  %execution_ctr: Tensor[(), int32SS],
+  %num_layers: Tensor[(), int32SS],
 
   %prelinear_wq: Tensor[(512, 512), float32],
   %prelinear_wk: Tensor[(512, 512), float32],

@@ -97,6 +97,8 @@ class VMAOTCompiler : SourcePrinter {
       const std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>>& call_attrs,
       const std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>>&
           if_offsets,
+      std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
+          reg_scalarification_taints,
       const std::string& output_directory, const std::string& model_name)
       : exec_(exec),
         mod_(mod),
@@ -106,6 +108,7 @@ class VMAOTCompiler : SourcePrinter {
         get_field_tags_(get_field_tags),
         call_attrs_(call_attrs),
         if_offsets_(if_offsets),
+        reg_scalarification_taints_(reg_scalarification_taints),
         output_directory_(output_directory),
         model_name_(model_name) {}
 
@@ -142,6 +145,8 @@ class VMAOTCompiler : SourcePrinter {
   const std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>>& call_attrs_;
   const std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>>&
       if_offsets_;
+  std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
+      reg_scalarification_taints_;
   const std::string& output_directory_;
   const std::string& model_name_;
   std::stringstream hpp_stream_;

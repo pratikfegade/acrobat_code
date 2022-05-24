@@ -213,10 +213,10 @@ bool DBUniformRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
                                      << "type int32, got " << out_dtype << ".");
     return false;
   }
-  reporter->Assign(types[0], TensorType({}, out_dtype));
-  reporter->Assign(types[1], TensorType({}, out_dtype));
+  reporter->Assign(types[0], TensorType({}, out_dtype, true));
+  reporter->Assign(types[1], TensorType({}, out_dtype, true));
   // generate returns the next key and an array of random values
-  reporter->Assign(types[2], TensorType(oshape, out_dtype));
+  reporter->Assign(types[2], TensorType(oshape, out_dtype, true));
   return true;
 }
 

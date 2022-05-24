@@ -94,7 +94,8 @@ TensorType ConcreteBroadcast(const TensorType& t1, const TensorType& t2, DataTyp
   for (; i <= max_ndim; ++i) {
     oshape.push_back(rshape[max_ndim - i]);
   }
-  return TensorType(Array<IndexExpr>(oshape.rbegin(), oshape.rend()), output_dtype);
+  return TensorType(Array<IndexExpr>(oshape.rbegin(), oshape.rend()), output_dtype,
+                    t1->db_scalar || t2->db_scalar);
 }
 
 bool BroadcastRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
@@ -140,7 +141,8 @@ bool BroadcastCompRel(const Array<Type>& types, int num_inputs, const Attrs& att
 bool IdentityCompRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
                      const TypeReporter& reporter) {
   if (auto* t0 = types[0].as<TensorTypeNode>()) {
-    Type out_type = TensorType(GetRef<TensorType>(t0)->shape, DataType::Bool());
+    Type out_type = TensorType(GetRef<TensorType>(t0)->shape, DataType::Bool(),
+                               GetRef<TensorType>(t0)->db_scalar);
     reporter->Assign(types[1], out_type);
     return true;
   }

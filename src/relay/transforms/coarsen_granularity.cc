@@ -1032,16 +1032,16 @@ class Coarsener : public ExprMutator {
             attrs_map.Set(tir::attr::kDBGraphDepth, Integer(it->second));
           }
           bool has_static_output = false;
-          std::cout << "[TENET] Group " << std::endl;
+          // std::cout << "[TENET] Group " << std::endl;
           for (auto e : group) {
-            std::cout << "[TENET]  Call " << e << std::endl;
+            // std::cout << "[TENET]  Call " << e << std::endl;
             auto cn = e.as<CallNode>();
             has_static_output =
                 has_static_output || Downcast<DictAttrs>(cn->attrs)
                                          .GetAttr(tir::attr::kDBScalarOutputOp, Bool(false))
                                          .value()
                                          ->value;
-            std::cout << "[TENET]    " << has_static_output << std::endl;
+            // std::cout << "[TENET]    " << has_static_output << std::endl;
           }
           if (has_static_output) {
             attrs_map.Set(tir::attr::kDBScalarOutputOp, Bool(true));

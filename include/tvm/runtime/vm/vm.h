@@ -82,6 +82,8 @@ struct VMFunction {
   std::string name;
   /*! \brief The function parameter names. */
   std::vector<std::string> params;
+  /*! \brief The return register. */
+  Index return_register;
   /*! \brief The instructions representing the function. */
   std::vector<Instruction> instructions;
   /*! \brief The size of the frame for this function */
@@ -89,11 +91,12 @@ struct VMFunction {
   /*! \brief The indexes for the device holding each function parameter. */
   std::vector<Index> param_device_indexes;
 
-  VMFunction(std::string name, std::vector<std::string> params,
+  VMFunction(std::string name, std::vector<std::string> params, Index return_register,
              std::vector<Instruction> instructions, Index register_file_size,
              std::vector<Index> param_device_indexes)
       : name(std::move(name)),
         params(std::move(params)),
+        return_register(std::move(return_register)),
         instructions(std::move(instructions)),
         register_file_size(register_file_size),
         param_device_indexes(std::move(param_device_indexes)) {}

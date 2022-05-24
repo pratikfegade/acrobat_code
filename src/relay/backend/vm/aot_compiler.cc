@@ -129,9 +129,9 @@ inline std::string GetTensorType() {
 }
 
 void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = false,
-                       const std::string& replacement = "", bool scalarize = true) {
+                       const std::string& replacement = "", std::vector<bool> scalarize = {}) {
   if (auto tn = type.as<TensorTypeNode>()) {
-    if (scalarize && tn->shape.size() == 0) {
+    if (tn->shape.size() == 0 && tn->db_scalar) {
       auto dtype_str = DTypeToTypeStr(tn->dtype);
       if (dtype_str.size() > 0) {
         os << dtype_str;
@@ -161,10 +161,10 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
   } else if (auto ft = type.as<FuncTypeNode>()) {
     ICHECK_EQ(ft->type_params.size(), 0);
     os << "std::function<";
-    RelayTypeToCppStr(os, ft->ret_type);
+    RelayTypeToCppStr(os, ft->ret_type, false, "", scalarize);
     os << "(";
     for (size_t i = 0; i < ft->arg_types.size(); ++i) {
-      RelayTypeToCppStr(os, ft->arg_types[i]);
+      RelayTypeToCppStr(os, ft->arg_types[i], false, "", scalarize);
       if (i < ft->arg_types.size() - 1) {
         os << ",";
       }
@@ -184,7 +184,13 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     }
     os << "std::tuple<";
     for (size_t i = 0; i < tt->fields.size(); ++i) {
-      RelayTypeToCppStr(os, tt->fields[i]);
+      std::vector<bool> field_scalarize;
+      if (scalarize.size() == tt->fields.size()) {
+        field_scalarize = {scalarize[i]};
+      } else if (scalarize.size() > 0) {
+        field_scalarize = {scalarize[0]};
+      }
+      RelayTypeToCppStr(os, tt->fields[i], false, "", field_scalarize);
       if (i < tt->fields.size() - 1) {
         os << ",";
       }
@@ -209,7 +215,7 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     if (tc->args.size() > 0) {
       os << "<";
       for (size_t i = 0; i < tc->args.size(); ++i) {
-        RelayTypeToCppStr(os, tc->args[i]);
+        RelayTypeToCppStr(os, tc->args[i], false, "", scalarize);
         if (i < tc->args.size() - 1) {
           os << ",";
         }
@@ -227,7 +233,8 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
 }
 
 std::string RelayTypeToCppStrString(const Type& type, bool no_shared_ptr = false,
-                                    const std::string& replacement = "", bool scalarize = true) {
+                                    const std::string& replacement = "",
+                                    std::vector<bool> scalarize = {}) {
   std::stringstream ss;
   RelayTypeToCppStr(ss, type, no_shared_ptr, replacement, scalarize);
   return ss.str();
@@ -281,16 +288,17 @@ void PrintArray(const std::array<T, N>& A) {
 
 class VMAOTFunctionCompiler : SourcePrinter {
  public:
-  VMAOTFunctionCompiler(const Executable& exec, const IRModule& mod, const VMFunction& vm_func,
-                        const Function& relay_func,
-                        const std::unordered_map<size_t, Type>& register_types,
-                        const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
-                        const std::unordered_map<std::string, Function>& compiled_functions,
-                        const std::unordered_map<Index, int32_t>& get_field_tags,
-                        const std::unordered_map<Index, DictAttrs>& call_attrs,
-                        const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
-                        std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types,
-                        std::ostream& stream)
+  VMAOTFunctionCompiler(
+      const Executable& exec, const IRModule& mod, const VMFunction& vm_func,
+      const Function& relay_func, const std::unordered_map<size_t, Type>& register_types,
+      const std::unordered_map<Index, Array<Type>>& invoke_type_vars,
+      const std::unordered_map<std::string, Function>& compiled_functions,
+      const std::unordered_map<Index, int32_t>& get_field_tags,
+      const std::unordered_map<Index, DictAttrs>& call_attrs,
+      const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
+      const std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
+          all_reg_scalarification_taints,
+      std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types, std::ostream& stream)
       : exec_(exec),
         mod_(mod),
         vm_func_(vm_func),
@@ -301,6 +309,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
         get_field_tags_(get_field_tags),
         call_attrs_(call_attrs),
         if_offsets_(if_offsets),
+        reg_scalarification_taints_(all_reg_scalarification_taints.at(vm_func.name)),
+        all_reg_scalarification_taints_(all_reg_scalarification_taints),
         p_invoke_reduce_sum_types_(p_invoke_reduce_sum_types),
         stream_(stream) {
     inbuilt_ops_.insert({"subtract", "-"});
@@ -367,6 +377,25 @@ class VMAOTFunctionCompiler : SourcePrinter {
     return false;
   }
 
+  std::vector<bool> GetScalarizeTaints(int i) {
+    auto it = reg_scalarification_taints_.find(i);
+    if (it != reg_scalarification_taints_.end()) {
+      return it->second;
+    }
+    return {false};
+  }
+
+  std::vector<bool> GetScalarizeTaints(const std::string& func_name, int i) {
+    auto it = all_reg_scalarification_taints_.find(func_name);
+    if (it != all_reg_scalarification_taints_.end()) {
+      auto iit = it->second.find(i);
+      if (iit != it->second.end()) {
+        return iit->second;
+      }
+    }
+    return {false};
+  }
+
   bool DoIncrementDepth(int pc) {
     auto it = call_attrs_.find(pc);
     if (it != call_attrs_.end()) {
@@ -401,12 +430,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
       stream_ << ">\n";
     }
-    RelayTypeToCppStr(stream_, function_type->ret_type);
+    // TODO(ppf): Scalarification
+    RelayTypeToCppStr(stream_, function_type->ret_type, false, "",
+                      GetScalarizeTaints(vm_func_.return_register));
     stream_ << " " << GetCppFunctionName(vm_func.name) << "(";
 
     for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
       auto arg_type = function_type->arg_types[i];
-      RelayTypeToCppStr(stream_, arg_type);
+      RelayTypeToCppStr(stream_, arg_type, false, "", GetScalarizeTaints(i));
       if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
         stream_ << "&";
       }
@@ -429,6 +460,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
       return IsStorageType(tc->func);
     } else if (auto td = type.as<TypeDataNode>()) {
       return td->header->name_hint == "Storage";
+    } else if (auto tv = type.as<GlobalTypeVarNode>()) {
+      return tv->name_hint == "Storage";
     } else {
       return false;
     }
@@ -436,6 +469,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
   bool IsTupleMapFunction(const std::string& name) {
     return use_depth_tracking_executor() && support::StartsWith(name, "tuple_map_");
+  }
+
+  bool AnyScalarField(const std::vector<bool>& vec) {
+    bool res = false;
+    for (auto v : vec) {
+      res = res || v;
+    }
+    return res;
   }
 
   void GenerateLocalDecls(const std::vector<bool>& used_regs,
@@ -448,10 +489,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
       auto it = register_types_.find(i);
       ICHECK(it != register_types_.end()) << i;
       Type reg_type = it->second;
-      if (scalar_op_outputs.count(i)) {
+
+      auto scalar_taint = GetScalarizeTaints(i);
+      if (AnyScalarField(scalar_taint) && scalar_op_outputs.count(i)) {
         ICHECK(reg_type.as<TensorTypeNode>());
-        auto tensor_type = RelayTypeToCppStrString(reg_type, false, "", false);
-        auto scalar_type = RelayTypeToCppStrString(reg_type, false, "", true);
+        auto tensor_type = RelayTypeToCppStrString(reg_type, false, "", {false});
+        auto scalar_type = RelayTypeToCppStrString(reg_type, false, "", {true});
         auto tensor_var = GetVarForReg(i, true);
         auto scalar_var = GetVarForReg(i);
         type2vars[tensor_type].push_back(tensor_var);
@@ -460,14 +503,15 @@ class VMAOTFunctionCompiler : SourcePrinter {
         if (lazy_execution() && IsStorageType(reg_type)) {
           continue;
         }
+
         if (reg_type.as<TensorTypeNode>() || reg_type.as<PrimTypeNode>() ||
             IsStorageType(reg_type)) {
           std::stringstream ss;
-          RelayTypeToCppStr(ss, reg_type);
+          RelayTypeToCppStr(ss, reg_type, false, "", scalar_taint);
           auto type_str = ss.str();
           type2vars[type_str].push_back(GetVarForReg(i));
         } else {
-          auto type_str = RelayTypeToCppStrString(reg_type);
+          auto type_str = RelayTypeToCppStrString(reg_type, false, "", scalar_taint);
           this->PrintIndent(stream_);
           stream_ << type_str << " " << GetVarForReg(i) << ";\n";
         }
@@ -509,7 +553,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   bool InMainFunction() { return vm_func_.name == "main"; }
 
   int VisitBytecode() {
-    // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
     bool print = (vm_func_.name == "main");
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
@@ -554,7 +598,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
       stream_ << GetRuntimeType() << "::Current()->ResetProgramPhase();\n";
     }
 
-    // std::cout << "[BT] Visiting BT" << std::endl;
+    // std::cout << "[BT] Visiting BT " << vm_func_.name << std::endl;
     std::unordered_map<Index, std::string> targets;
     int target_count = 0;
 
@@ -605,7 +649,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           // std::cout << "[BT] MAIN RET" << std::endl;
         }
 
-        // std::cout << "[BT]     " << instr << std::endl;
+        std::cout << "[BT]     " << instr << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
           continue;
@@ -639,6 +683,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::LoadConsti: {
+            std::cout << "[AOTC] Load Constant " << register_types_.at(instr.dst) << std::endl;
             auto dst_var = GetVarForReg(instr.dst);
             this->PrintIndent(stream_);
             stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
@@ -710,6 +755,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                   auto types = it->second;
                   stream_ << "<";
                   for (size_t j = 0; j < types.size(); ++j) {
+                    // TODO(ppf): Scalarification
                     RelayTypeToCppStr(stream_, types[j]);
                     if (j < types.size() - 1) {
                       stream_ << ",";
@@ -752,7 +798,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
                                            ")");
                 }
               } else if (scalar_outs_of_tensor_ops.count(arg_reg)) {
-                flattened_args.push_back(GetVarForReg(arg_reg, !generate_inbuilt_scalar_op));
+                bool is_scalarized = !generate_inbuilt_scalar_op;
+                auto scalar_taint = GetScalarizeTaints(arg_reg);
+                if (scalar_taint.size() > 0) {
+                  is_scalarized = is_scalarized && AnyScalarField(scalar_taint);
+                }
+                flattened_args.push_back(GetVarForReg(arg_reg, is_scalarized));
               } else {
                 flattened_args.push_back(GetVarForReg(arg_reg));
               }
@@ -821,6 +872,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
               if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
                 for (int j = 0; j < instr.arity; ++j) {
                   if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+                    bool is_scalarized = !generate_inbuilt_scalar_op;
+                    auto scalar_taint = GetScalarizeTaints(instr.packed_args[j]);
+                    if (scalar_taint.size() > 0) {
+                      is_scalarized = is_scalarized && AnyScalarField(scalar_taint);
+                    }
+
+                    if (!is_scalarized) {
+                      continue;
+                    }
+
                     auto dtype =
                         register_types_.at(instr.packed_args[j]).as<TensorTypeNode>()->dtype;
                     EmitTriggerEvaluation();
@@ -870,7 +931,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto tag = get_field_tags_.at(i);
               auto constructor_name = mod_->LookupTag(tag)->name_hint;
               stream_ << dst_var << " = static_cast<";
-              RelayTypeToCppStr(stream_, register_types_.at(instr.object), true, constructor_name);
+              RelayTypeToCppStr(stream_, register_types_.at(instr.object), {true},
+                                constructor_name);
               stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
                       << ";\n";
             }
@@ -951,10 +1013,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
             if (scalar_outs_of_scalar_ops.count(instr.dst)) {
               break;
             }
-            auto dst_var = GetVarForReg(instr.dst);
-            if (scalar_outs_of_tensor_ops.count(instr.dst)) {
-              dst_var = GetVarForReg(instr.dst, true);
+            bool is_scalarized = scalar_outs_of_tensor_ops.count(instr.dst);
+            auto scalar_taint = GetScalarizeTaints(instr.dst);
+            if (scalar_taint.size() > 0) {
+              is_scalarized = is_scalarized && AnyScalarField(scalar_taint);
             }
+            auto dst_var = GetVarForReg(instr.dst, is_scalarized);
             auto storage_var = GetVarForReg(instr.alloc_tensor.storage);
             auto offset_var = GetVarForReg(instr.alloc_tensor.offset);
             std::string dtype_str = DTypeToStr(instr.alloc_tensor.dtype);
@@ -1019,6 +1083,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           }
           case Opcode::AllocADT: {
             auto dst_var = GetVarForReg(instr.dst);
+            auto scalar_taint = GetScalarizeTaints(instr.dst);
             this->PrintIndent(stream_);
             if (instr.constructor_tag == 0) {
               std::stringstream types_str, args_str;
@@ -1026,7 +1091,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
                 auto field_type = register_types_.at(instr.datatype_fields[j]);
                 auto field_var = GetVarForReg(instr.datatype_fields[j]);
-                RelayTypeToCppStr(types_str, field_type);
+                std::vector<bool> field_scalar_taint;
+                if (scalar_taint.size() == instr.num_fields) {
+                  field_scalar_taint = {scalar_taint[j]};
+                } else if (scalar_taint.size() > 0) {
+                  field_scalar_taint = {scalar_taint[0]};
+                }
+                RelayTypeToCppStr(types_str, field_type, false, "", field_scalar_taint);
                 args_str << field_var;
                 if (j < instr.num_fields - 1) {
                   args_str << ", ";
@@ -1043,9 +1114,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
             } else {
               auto constructor = mod_->LookupTag(instr.constructor_tag);
               auto concrete_type_without_shptr =
-                  RelayTypeToCppStrString(register_types_.at(instr.dst), true);
+                  RelayTypeToCppStrString(register_types_.at(instr.dst), true, "", scalar_taint);
               auto concrete_constructor_without_shptr = RelayTypeToCppStrString(
-                  register_types_.at(instr.dst), true, constructor->name_hint);
+                  register_types_.at(instr.dst), true, constructor->name_hint, scalar_taint);
 
               stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
                       << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
@@ -1084,7 +1155,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
             int closure_params_size = static_cast<int>(closure_func.params.size());
             for (int j = instr.num_freevar; j < closure_params_size; ++j) {
               Type arg_type = closure_relay_func->params[j]->checked_type_;
-              RelayTypeToCppStr(stream_, arg_type);
+              // TODO(ppf): Scalarification
+              RelayTypeToCppStr(stream_, arg_type, false, "",
+                                GetScalarizeTaints(closure_func.name, j));
               stream_ << " " << GetTmpVarName(j);
               if (j < closure_params_size - 1) {
                 stream_ << ", ";
@@ -1264,6 +1337,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<Index, int32_t>& get_field_tags_;
   const std::unordered_map<Index, DictAttrs>& call_attrs_;
   const std::unordered_map<Index, std::array<Index, 4>>& if_offsets_;
+  const std::unordered_map<size_t, std::vector<bool>> reg_scalarification_taints_;
+  const std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
+      all_reg_scalarification_taints_;
   std::unordered_map<std::string, std::string> inbuilt_ops_;
   std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types_;
   std::ostream& stream_;
@@ -1331,6 +1407,7 @@ void VMAOTCompiler::DeclareADT(std::ostream& os, const TypeData& adt, bool inclu
       for (size_t i = 0; i < constructor->inputs.size(); ++i) {
         auto field = constructor->inputs[i];
         this->PrintIndent(os);
+        // TODO(ppf): Scalarification
         RelayTypeToCppStr(os, field);
         os << " " << GetFieldName(i) << ";\n";
       }
@@ -1443,6 +1520,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
 
   this->PrintIndent(os);
   os << "std::vector<";
+  // TODO(ppf): Scalarification
   RelayTypeToCppStr(os, function_type->ret_type);
   os << "> res(batch_size);\n";
   this->PrintIndent(os);
@@ -1546,11 +1624,13 @@ void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
     os << ">\n";
   }
   os << "std::vector<";
+  // TODO(ppf): Scalarification
   RelayTypeToCppStr(os, function_type->ret_type);
   os << "> batched_main(";
   for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
     auto arg_type = function_type->arg_types[i];
     os << "std::vector<";
+    // TODO(ppf): Scalarification
     RelayTypeToCppStr(os, arg_type);
     if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
       os << "&";
@@ -1683,7 +1763,7 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
         compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
-        &invoke_reduce_sum_types, cpp_model_stream_);
+        reg_scalarification_taints_, &invoke_reduce_sum_types, cpp_model_stream_);
     max_static_depth = std::max(max_static_depth, function_compiler.GenerateCPPForFunction(true));
     cpp_stream_ << "\n";
   }
@@ -1756,7 +1836,7 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
         compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
-        nullptr, hpp_stream_);
+        reg_scalarification_taints_, nullptr, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 

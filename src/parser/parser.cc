@@ -34,6 +34,7 @@
 
 #include <fstream>
 
+#include "../support/utils.h"
 #include "./meta_ref.h"
 #include "./op_table.h"
 #include "./span_check.h"
@@ -1797,10 +1798,16 @@ class Parser {
           Match(TokenType::kLSquare);
           auto shape = ParseShape();
           Match(TokenType::kComma);
-          auto dtype_tok = Match(TokenType::kIdentifier);
-          auto dtype = DataType(String2DLDataType(dtype_tok.ToString()));
+          auto dtype_str = Match(TokenType::kIdentifier).ToString();
+          bool scalar = false;
+          if (support::EndsWith(dtype_str, "SS")) {
+            scalar = true;
+            dtype_str = dtype_str.substr(0, dtype_str.size() - 2);
+            std::cout << "[PARSE] Parsing scalar type " << dtype_str << std::endl;
+          }
+          auto dtype = DataType(String2DLDataType(dtype_str));
           Match(TokenType::kRSquare);
-          return TensorType(shape, dtype);
+          return TensorType(shape, dtype, scalar);
         } else {
           auto ty = tok.ToString();
           if (ty.rfind("int", 0) == 0 || ty.find("float", 0) == 0 || ty.find("uint", 0) == 0 ||
@@ -1913,6 +1920,7 @@ IRModule ParseModule(const std::string& file_name, const std::string& file_conte
   VLOG(9) << "parsing and type-checking " << file_name;
   auto parser = InitParser(file_name, file_content, init_module, init_meta_table);
   auto mod = parser.ParseModule();
+  // std::cout << "[MODL] To import\n" << mod << std::endl;
   ICHECK(mod.defined()) << "The parser must return a non-null module.";
   // NB(@jroesch): it is very important that we render any errors before we proceed
   // if there were any errors which allow the parser to proceed we must render them

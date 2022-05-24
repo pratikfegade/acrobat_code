@@ -17,7 +17,6 @@ from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
 mod = tvm.IRModule()
 mod._import(TVM_HOME + "/ppf_tests/bertxit/bertxit.rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
-
 main_func = mod["main"]
 
 num_heads=8
@@ -61,7 +60,7 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
-coarsened_execution=True
+coarsened_execution=False
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True

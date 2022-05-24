@@ -30,14 +30,17 @@ namespace tvm {
 using tvm::ReprPrinter;
 using namespace tvm::runtime;
 
-TensorType::TensorType(Array<PrimExpr> shape, DataType dtype) {
+TensorType::TensorType(Array<PrimExpr> shape, DataType dtype, bool db_scalar) {
   ObjectPtr<TensorTypeNode> n = make_object<TensorTypeNode>();
   n->shape = std::move(shape);
   n->dtype = std::move(dtype);
+  n->db_scalar = std::move(db_scalar);
   data_ = std::move(n);
 }
 
-TensorType TensorType::Scalar(DataType dtype) { return TensorType({}, dtype); }
+TensorType TensorType::Scalar(DataType dtype, bool db_scalar) {
+  return TensorType({}, dtype, db_scalar);
+}
 
 PrimExpr TensorTypeNode::Size() const {
   if (shape.size() == 0) {
@@ -60,7 +63,8 @@ TVM_REGISTER_GLOBAL("ir.TensorType").set_body_typed([](Array<PrimExpr> shape, Da
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<TensorTypeNode>([](const ObjectRef& ref, ReprPrinter* p) {
       auto* node = static_cast<const TensorTypeNode*>(ref.get());
-      p->stream << "TensorType(" << node->shape << ", " << node->dtype << ")";
+      p->stream << "TensorType(" << node->shape << ", " << node->dtype << ", " << node->db_scalar
+                << ")";
     });
 
 }  // namespace tvm

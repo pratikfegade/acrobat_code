@@ -67,15 +67,20 @@ class TensorTypeNode : public BaseTensorTypeNode {
   Array<PrimExpr> shape;
   /*! \brief The content data type */
   DataType dtype;
+  /*! \brief Whethe the type is to be represented as a scalar in the
+      generated AOT code */
+  bool db_scalar;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("shape", &shape);
     v->Visit("dtype", &dtype);
     v->Visit("span", &span);
+    v->Visit("db_scalar", &db_scalar);
   }
 
   bool SEqualReduce(const TensorTypeNode* other, SEqualReducer equal) const {
-    return equal(shape, other->shape) && equal(dtype, other->dtype);
+    return equal(shape, other->shape) && equal(dtype, other->dtype) &&
+           db_scalar == other->db_scalar;
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
@@ -103,14 +108,14 @@ class TensorType : public Type {
    * \param shape The shape of the tensor.
    * \param dtype The runtime dtype of the tensor's elements.
    */
-  TVM_DLL TensorType(Array<PrimExpr> shape, DataType dtype);
+  TVM_DLL TensorType(Array<PrimExpr> shape, DataType dtype, bool db_scalar = false);
 
   /*!
    * \brief Construct an scalar containing elements of dtype.
    * \param dtype The runtime dtype of the tensor's elements.
    * \return THe constructed type.
    */
-  TVM_DLL static TensorType Scalar(DataType dtype);
+  TVM_DLL static TensorType Scalar(DataType dtype, bool db_scalar = false);
 
   TVM_DEFINE_OBJECT_REF_METHODS(TensorType, Type, TensorTypeNode);
 };

@@ -144,6 +144,7 @@ class FunctionPointerAnalysis : public BaseExprFunctor {
 
  private:
   void RunAnalysis() {
+    ICHECK(mod_->ContainGlobalVar("main")) << mod_;
     auto main_func = Downcast<Function>(mod_->Lookup("main"));
 
     ICHECK_EQ(main_func->type_params.size(), 0);

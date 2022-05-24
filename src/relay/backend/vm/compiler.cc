@@ -49,6 +49,7 @@
 #include <tuple>
 #include <vector>
 
+#include "../../../support/utils.h"
 #include "../../../target/metadata_module.h"
 #include "../../../target/source/codegen_source_base.h"
 #include "../../op/annotation/annotation.h"
@@ -57,6 +58,7 @@
 #include "../../op/op_common.h"
 #include "../../op/random/db_random.h"
 #include "../../transforms/device_aware_visitors.h"
+#include "../../transforms/mark_scalar_calls.h"
 #include "../../transforms/pass_utils.h"
 #include "../utils.h"
 #include "aot_compiler.h"
@@ -330,16 +332,20 @@ struct VMFunctionCompilerResult {
   std::unordered_map<Index, int32_t> get_field_tags;
   std::unordered_map<Index, DictAttrs> call_attrs;
   std::unordered_map<Index, std::array<Index, 4>> if_offsets;
+  std::unordered_map<size_t, std::vector<bool>> reg_scalarification_taints;
 };
 
 class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
  public:
-  VMFunctionCompiler(VMCompilerContext* context, SEScope host_se_scope, bool batched_execution,
-                     bool generate_register_type_information)
+  VMFunctionCompiler(
+      VMCompilerContext* context,
+      std::unordered_map<const ExprNode*, std::vector<bool>> expr_scalarification_taints,
+      SEScope host_se_scope, bool batched_execution, bool generate_register_type_information)
       : DeviceAwareExprFunctor(context->module),
         last_register_(0),
         registers_num_(0),
         context_(context),
+        expr_scalarification_taints_(expr_scalarification_taints),
         host_se_scope_(std::move(host_se_scope)),
         batched_execution_(batched_execution),
         generate_aot_information_(generate_register_type_information) {}
@@ -396,15 +402,22 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       }
       VisitExpr(func);
     }
-    // std::cout << RemoveOnDeviceCalls(compiled_function) << std::endl;
+    std::vector<bool> ret_taints;
+    auto it = expr_scalarification_taints_.find(func->body.get());
+    if (it != expr_scalarification_taints_.end()) {
+      ret_taints = it->second;
+      std::cout << "[VMFC] Function ret scalar taints: " << support::PrintVector(ret_taints)
+                << std::endl;
+    }
     return {compiled_function,
-            VMFunction(var->name_hint, params_, instructions_, registers_num_,
+            VMFunction(var->name_hint, params_, last_register_, instructions_, registers_num_,
                        std::move(param_device_indexes)),
             register_types_,
             invoke_type_vars_,
             get_field_tags_,
             call_attrs_,
-            if_offsets_};
+            if_offsets_,
+            reg_scalarification_taints_};
   }
 
   /*! \brief Attrs objects for each op. */
@@ -506,6 +519,24 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
   using DeviceAwareExprFunctor<void(const Expr&)>::VisitExpr_;
 
+  void AddScalarTaint(size_t reg, const ExprNode* e) {
+    auto it = expr_scalarification_taints_.find(e);
+    if (it != expr_scalarification_taints_.end()) {
+      auto taints = it->second;
+      reg_scalarification_taints_[reg] = taints;
+      std::cout << "[ITSLR] " << PrettyPrint(GetRef<Expr>(e)) << " " << reg << " "
+                << support::PrintVector(taints) << std::endl;
+    }
+  }
+
+  void AddScalarTaint(size_t reg, size_t src_reg) {
+    auto it = reg_scalarification_taints_.find(src_reg);
+    if (it != reg_scalarification_taints_.end()) {
+      auto taints = it->second;
+      reg_scalarification_taints_[reg] = taints;
+    }
+  }
+
   void VisitExpr_(const ConstantNode* const_node) final {
     // Check the shape is valid
     NDArray data = const_node->data;
@@ -517,6 +548,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     auto const_ndarr = const_node->data;
     context_->constants.push_back(const_ndarr);
     auto new_register = NewRegister();
+
+    AddScalarTaint(new_register, const_node);
 
     if (const_ndarr.Shape().size() == 0 &&
         (const_ndarr.DataType().is_int() || const_ndarr.DataType().is_uint())) {
@@ -547,6 +580,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
     // TODO(@jroesch): use correct tag
     auto new_register = NewRegister();
+    AddScalarTaint(new_register, tuple_node);
     Emit(Instruction::AllocADT(0, tuple->fields.size(), fields_registers, new_register));
     if (!tuple_node->checked_type_.defined()) {
       std::cout << "[TYP] " << tuple << std::endl;
@@ -568,6 +602,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         << "bound to var '" << var->name_hint() << "'. Did you set opt_level = 2?";
     VisitExpr(value);
     var_register_map_.emplace(var, this->last_register_);
+    AddScalarTaint(this->last_register_, var.get());
   }
 
   void VisitExpr_(const TupleGetItemNode* get_node) final {
@@ -575,6 +610,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     this->VisitExpr(get->tuple);
     auto tuple_register = last_register_;
     auto new_register = NewRegister();
+    AddScalarTaint(new_register, get_node);
     Emit(Instruction::GetField(tuple_register, get->index, new_register));
     AddRegisterTypeInfo(new_register, get_node->checked_type_);
   }
@@ -586,6 +622,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     ICHECK(it != context_->global_map.end()) << PrettyPrint(var);
     // Allocate closure with zero free vars
     auto new_register = NewRegister();
+    AddScalarTaint(new_register, gvar);
     Emit(Instruction::AllocClosure(it->second, 0, {}, new_register));
     AddRegisterTypeInfo(new_register, func->checked_type_);
   }
@@ -597,6 +634,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
     auto new_register = NewRegister();
     this->Emit(Instruction::LoadConsti(1, new_register));
+    reg_scalarification_taints_[new_register] = {true};
     AddRegisterTypeInfo(new_register, if_node->cond->checked_type_);
     auto after_cond = instructions_.size();
     auto target_register = last_register_;
@@ -606,6 +644,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
     // It saves the result of If-Else expression.
     auto merge_register = NewRegister();
+    AddScalarTaint(merge_register, if_node);
     Emit(Instruction::Move(last_register_, merge_register));
     AddRegisterTypeInfo(merge_register, if_node->checked_type_);
     Emit(Instruction::Goto(0));
@@ -710,6 +749,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       auto reg = var_register_map_.find(Downcast<Var>(output));
       ICHECK(reg != var_register_map_.end())
           << "internal error: all variables should be in the register mapping";
+
+      std::cout << "[BTMN] Adding taint for " << global_var_node->name_hint << " " << output << " "
+                << expr_scalarification_taints_.count(output.get()) << std::endl;
+      AddScalarTaint(reg->second, output.get());
       argument_registers.push_back(reg->second);
     }
 
@@ -735,6 +778,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         argument_registers.push_back(last_register_);
       }
       auto new_register = NewRegister();
+      AddScalarTaint(new_register, cn);
       Emit(Instruction::Invoke(func_index, argument_registers, new_register));
       AddRegisterTypeInfo(new_register, cn->checked_type_);
     };
@@ -749,6 +793,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       // deal only with devices, the copy may be unnecessary.
       if (src_index != dst_index) {
         auto new_register = NewRegister();
+        AddScalarTaint(new_register, src_reg);
         Emit(Instruction::DeviceCopy(src_reg, src_index, dst_index, new_register));
         AddRegisterTypeInfo(new_register, device_copy_props.body->checked_type_);
       }
@@ -806,6 +851,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    auto const_shape = AsIgnoringOnDevice<ConstantNode>(args[2]);
 
                    auto tensor_register = NewRegister();
+                   AddScalarTaint(tensor_register, call_node);
                    if (const_shape) {
                      NDArray shape = const_shape->data;
                      // TODO(@jroesch): we need to get an RFC done to standarize shape dtype
@@ -844,6 +890,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    auto dtype = alloc_attrs->dtype;
 
                    auto storage_register = NewRegister();
+                   AddScalarTaint(storage_register, call_node);
                    Emit(Instruction::AllocStorage(size_register, alignment, dtype,
                                                   GetDeviceIndex(alloc_attrs->se_scope),
                                                   storage_register));
@@ -861,6 +908,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                        << DLDataType2String(shape_of_attrs->dtype);
                    this->VisitExpr(args[0]);
                    auto shape_register = NewRegister();
+                   AddScalarTaint(shape_register, call_node);
                    Emit(Instruction::ShapeOf(last_register_, shape_register));
                    AddRegisterTypeInfo(shape_register, call_node->checked_type_);
                  })
@@ -873,6 +921,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    this->VisitExpr(args[1]);
                    auto shape_reg = last_register_;
                    auto tensor_register = NewRegister();
+                   AddScalarTaint(tensor_register, call_node);
                    Emit(Instruction::ReshapeTensor(tensor_reg, shape_reg, tensor_register));
                    AddRegisterTypeInfo(tensor_register, call_node->checked_type_);
                  })
@@ -912,6 +961,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
       auto new_register = NewRegister();
       if (IsClosure(func)) {
+        // Is this correct?
+        AddScalarTaint(new_register, call_node);
         auto arity = func->params.size();
         Emit(Instruction::AllocClosure(it->second, arity, args_registers, new_register));
         AddRegisterTypeInfo(new_register, call_node->checked_type_);
@@ -923,6 +974,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
             call_attrs_[invoke_pc] = Downcast<DictAttrs>(call_node->attrs);
           }
         }
+        AddScalarTaint(new_register, call_node);
         AddRegisterTypeInfo(new_register, call_node->checked_type_);
       }
     } else if (const auto* constructor_node = call_node->op.as<ConstructorNode>()) {
@@ -930,6 +982,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       // and emit a call to allocate the data structure.
       auto constructor = GetRef<Constructor>(constructor_node);
       auto new_register = NewRegister();
+      AddScalarTaint(new_register, call_node);
       auto invoke_pc = Emit(Instruction::AllocADT(constructor->tag, call_node->args.size(),
                                                   args_registers, new_register));
       if (generate_aot_information_) {
@@ -941,11 +994,13 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       // emit invoke closure here.
       VisitExpr(GetRef<Var>(var_node));
       auto new_register = NewRegister();
+      AddScalarTaint(new_register, call_node);
       Emit(Instruction::InvokeClosure(last_register_, args_registers, new_register));
       AddRegisterTypeInfo(new_register, call_node->checked_type_);
     } else if (auto inner_call_node = call_node->op.as<CallNode>()) {
       VisitExpr(GetRef<Call>(inner_call_node));
       auto new_register = NewRegister();
+      AddScalarTaint(new_register, call_node);
       Emit(Instruction::InvokeClosure(last_register_, args_registers, new_register));
       AddRegisterTypeInfo(new_register, call_node->checked_type_);
     } else {
@@ -973,6 +1028,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     size_t i = 0;
     for (auto param : func_node->params) {
       auto arg_register = NewRegister();
+      AddScalarTaint(arg_register, param.get());
       ICHECK_EQ(i, arg_register);
       var_register_map_.insert({param, arg_register});
       params_.push_back(param->name_hint());
@@ -1021,7 +1077,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
         Emit(Instruction::GetTag(r, NewRegister()));
         auto operand1 = last_register_;
         AddRegisterTypeInfo(last_register_, PrimType(DataType::Int(64)));
-        Emit(Instruction::LoadConsti(cond->target_tag, NewRegister()));
+        auto const_one_register = NewRegister();
+        Emit(Instruction::LoadConsti(cond->target_tag, const_one_register));
+        reg_scalarification_taints_[const_one_register] = {true};
         auto operand2 = last_register_;
         AddRegisterTypeInfo(last_register_, PrimType(DataType::Int(64)));
 
@@ -1106,6 +1164,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
   std::unordered_map<Index, DictAttrs> call_attrs_;
   /*! \brief If offset information, used in AOT code generation. */
   std::unordered_map<Index, std::array<Index, 4>> if_offsets_;
+  /*! \brief Expr scalarication taints. */
+  std::unordered_map<const ExprNode*, std::vector<bool>> expr_scalarification_taints_;
+  /*! \brief Copied over register scalarication taints. */
+  std::unordered_map<size_t, std::vector<bool>> reg_scalarification_taints_;
 };
 
 PackedFunc VMCompiler::GetFunction(const std::string& name, const ObjectPtr<Object>& sptr_to_self) {
@@ -1186,6 +1248,10 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
     }
   }
 
+  auto expr_scalarification_taints = relay::transform::GetScalarificationTaints(context_.module);
+
+  std::cout << "[ITSLR] Taint sizes: " << expr_scalarification_taints.size() << std::endl;
+
   bool batched_execution =
       PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
   std::unordered_map<std::string, std::unordered_map<size_t, Type>> register_types;
@@ -1194,6 +1260,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
   std::unordered_map<std::string, std::unordered_map<Index, int32_t>> get_field_tags;
   std::unordered_map<std::string, std::unordered_map<Index, DictAttrs>> call_attrs;
   std::unordered_map<std::string, std::unordered_map<Index, std::array<Index, 4>>> if_offsets;
+  std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
+      reg_scalarification_taints;
   for (const auto& pair : context_.module->functions) {
     auto gvar = pair.first;
     if (auto* n = pair.second.as<FunctionNode>()) {
@@ -1202,7 +1270,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
         continue;
       }
       auto func = GetRef<Function>(n);
-      VMFunctionCompiler func_compiler(&context_, config_->host_se_scope, batched_execution, true);
+      VMFunctionCompiler func_compiler(&context_, expr_scalarification_taints,
+                                       config_->host_se_scope, batched_execution, true);
       auto result = func_compiler.Compile(gvar, func);
       auto vm_func = result.vm_func;
       auto func_register_types = result.register_types;
@@ -1213,6 +1282,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
       get_field_tags[vm_func.name] = result.get_field_tags;
       call_attrs[vm_func.name] = result.call_attrs;
       if_offsets[vm_func.name] = result.if_offsets;
+      reg_scalarification_taints[vm_func.name] = result.reg_scalarification_taints;
 
       size_t func_index = context_.global_map.at(gvar);
       ICHECK(func_index < exec_->functions.size());
@@ -1344,7 +1414,8 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
                           ->GetConfig<String>("relay.db_model_name", String("model_name"))
                           .value();
     VMAOTCompiler(*exec_, context_.module, register_types, invoke_type_vars, compiled_functions,
-                  get_field_tags, call_attrs, if_offsets, output_directory, model_name)
+                  get_field_tags, call_attrs, if_offsets, reg_scalarification_taints,
+                  output_directory, model_name)
         .Codegen();
   }
 }
@@ -1458,7 +1529,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::InferType());
   // pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   pass_seqs.push_back(transform::FuseOps());
@@ -1499,7 +1570,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, true));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1517,7 +1588,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Before Scalaring", true, true));
   if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
     pass_seqs.push_back(transform::HoistNonSequentialOps());
@@ -1542,7 +1612,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

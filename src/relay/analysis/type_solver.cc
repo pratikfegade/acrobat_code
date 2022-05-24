@@ -268,7 +268,7 @@ class TypeSolver::Unifier : public TypeFunctor<Type(const Type&, const Type&)> {
       return Type(nullptr);
     }
 
-    return TensorType(shape, tt1->dtype);
+    return TensorType(shape, tt1->dtype, tt1->db_scalar);
   }
 
   Type VisitType_(const TupleTypeNode* op, const Type& tn) final {

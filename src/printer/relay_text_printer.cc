@@ -715,7 +715,11 @@ Doc RelayTextPrinter::PrintDType(DataType dtype) {
 Doc RelayTextPrinter::VisitType_(const TensorTypeNode* node) {
   // scalar type
   if (node->shape.size() == 0) {
-    return PrintDType(node->dtype);
+    auto doc = PrintDType(node->dtype);
+    if (node->db_scalar) {
+      doc << "SS";
+    }
+    return doc;
   }
   Doc doc;
   if (VERBOSE_PRINT) {

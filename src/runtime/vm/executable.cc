@@ -1048,9 +1048,17 @@ void Executable::LoadCodeSection(dmlc::Stream* strm) {
       instructions.push_back(DeserializeInstruction(instr));
     }
 
+    Index return_register;
+    for (int i = instructions.size() - 1; i >= 0; --i) {
+      if (instructions[i].op == Opcode::Ret) {
+        return_register = instructions[i].result;
+        break;
+      }
+    }
+
     // Create the VM function.
     VMFunction vm_func =
-        VMFunction(loaded_func.name, loaded_func.params, instructions,
+        VMFunction(loaded_func.name, loaded_func.params, return_register, instructions,
                    loaded_func.register_file_size, loaded_func.param_device_indexes);
     auto it = this->global_map.find(loaded_func.name);
     ICHECK(it != this->global_map.end());

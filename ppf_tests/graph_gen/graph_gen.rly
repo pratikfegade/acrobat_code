@@ -79,7 +79,7 @@ def @gru_cell(
 }
 
 def @create_edges(
-  %num_edges: Tensor[(), int32],
+  %num_edges: Tensor[(), int32SS],
   %node_state: Tensor[(1, 256), float32],
   %edge_state: Tensor[(1, 256), float32],
 
@@ -101,8 +101,8 @@ def @create_nodes(
   %h_state: Tensor[(1, 256), float32],
   %s_state: Tensor[(1, 256), float32],
 
-  %node_ctr: Tensor[(), int32],
-  %total_num_nodes: Tensor[(), int32],
+  %node_ctr: Tensor[(), int32SS],
+  %total_num_nodes: Tensor[(), int32SS],
 
   %node_rnn_zweight: Tensor[(256, 512), float32],
   %node_rnn_rweight: Tensor[(256, 512), float32],
@@ -173,7 +173,7 @@ def @main(
   %edge_rnn_weight: Tensor[(256, 512), float32],
   %edge_rnn_bias: Tensor[(1, 256), float32],
 
-  %total_num_nodes: Tensor[(), int32],
+  %total_num_nodes: Tensor[(), int32SS],
   %input: Tensor[(1, 256), float32]
 ) -> List[Node] {
   let %node_state = zeros(shape=[1, 256], dtype="float32");

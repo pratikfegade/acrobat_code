@@ -23,6 +23,8 @@
  * this expr should be handled by the external compiler.
  */
 
+#include "mark_scalar_calls.h"
+
 #include <tvm/relay/attrs/annotation.h>
 #include <tvm/relay/expr_functor.h>
 #include <tvm/relay/op_attr_types.h>
@@ -30,7 +32,8 @@
 
 #include "../../support/utils.h"
 #include "../op/random/db_random.h"
-#include "../transforms/function_pointer_analysis.h"
+#include "function_pointer_analysis.h"
+#include "mark_scalar_calls.h"
 #include "pass_utils.h"
 
 namespace tvm {
@@ -71,7 +74,7 @@ std::vector<bool> CreateStateForType(const Type& type, bool value) {
 
 class ScalarTaintAnalysis : public BaseExprFunctor {
  public:
-  ScalarTaintAnalysis(IRModule& mod, const CalleesMap& callees_map) : mod_(mod) {
+  ScalarTaintAnalysis(const IRModule& mod, const CalleesMap& callees_map) : mod_(mod) {
     for (auto kv : callees_map) {
       auto call = kv.first.second;
       auto callees = kv.second;
@@ -85,20 +88,28 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
     }
   }
 
-  IRModule PerformAnalysis() {
+  std::unordered_map<const ExprNode*, std::vector<bool>> PerformAnalysis() {
     RunAnalysis();
 
+    std::unordered_map<const ExprNode*, std::vector<bool>> negated;
+    for (auto kv : expr_taints_map_) {
+      negated[kv.first] = Negate(kv.second);
+    }
     for (auto kv : var_states_) {
-      if (IsScalarTensorType(kv.first->checked_type_)) {
-        std::cout << "[GDFTR] Var " << kv.first->vid->name_hint << " "
-                  << support::PrintVector(kv.second) << std::endl;
-      }
+      negated[kv.first] = Negate(kv.second);
     }
 
-    return mod_;
+    return negated;
   }
 
  private:
+  std::vector<bool> Negate(std::vector<bool>& vec) {
+    for (size_t i = 0; i < vec.size(); ++i) {
+      vec[i] = !vec[i];
+    }
+    return vec;
+  }
+
   void RunAnalysis() {
     auto main_func = Downcast<Function>(mod_->Lookup("main"));
 
@@ -146,8 +157,9 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
 
   std::vector<bool> Add(const Var& var, const std::vector<bool>& to_add,
                         const std::string& reason) {
-    std::cout << "[STA]  Adding var " << var->vid->name_hint << " " << support::PrintVector(to_add)
-              << std::endl;
+    // std::cout << "[STA]  Adding var " << var->vid->name_hint << " " <<
+    // support::PrintVector(to_add)
+    // << std::endl;
     ICHECK_EQ(to_add.size(), GetTypeSize(var->checked_type()))
         << var << " " << support::PrintVector(to_add) << " " << reason;
     return Add<Var, VarStateMap>(var_states_, var, to_add);
@@ -200,6 +212,15 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
     }
   }
 
+  void VisitExpr(const Expr& e, std::vector<bool> taint) override {
+    // if (auto vn = e.as<VarNode>()) {
+    // std::cout << "[STA] Adding var " << vn->vid->name_hint << " " << support::PrintVector(taint)
+    // << std::endl;
+    // }
+    expr_taints_map_[e.get()] = taint;
+    BaseExprFunctor::VisitExpr(e, taint);
+  }
+
   void VisitExpr_(const ConstantNode* op, std::vector<bool> taint) {}
 
   void VisitExpr_(const TupleNode* op, std::vector<bool> taint) {
@@ -216,8 +237,8 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
   void VisitExpr_(const FunctionNode* op, std::vector<bool> taint) {}
 
   void VisitBody(const Function& fn, TaintT taint) {
-    std::cout << "[STA] Visiting body of " << GetFunctionName(fn) << " "
-              << support::PrintVector(taint) << std::endl;
+    // std::cout << "[STA] Visiting body of " << GetFunctionName(fn) << " "
+    // << support::PrintVector(taint) << std::endl;
     auto context_fn_key = fn.get();
     on_stack_.insert(context_fn_key);
     function_stack_.push_back(fn);
@@ -231,7 +252,7 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
     if (on_device_props.body.defined()) {
       return this->VisitExpr(on_device_props.body, taint);
     }
-    std::cout << "[STA] Visiting call " << GetRef<Expr>(op) << std::endl;
+    // std::cout << "[STA] Visiting call " << GetRef<Expr>(op) << std::endl;
 
     if (op->op == GetInvokeTVMOp() && IsOpOnScalars(op)) {
       // std::cout << "[STA]  Visiting op " << op->args[0] << " " << support::PrintVector(taint)
@@ -253,7 +274,7 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
         }
       }
       auto input_taint = CollapseTaint(Merge(out_taints));
-      std::cout << "[STA]  I " << input_taint << std::endl;
+      // std::cout << "[STA]  I " << input_taint << std::endl;
       for (auto in : ins->fields) {
         this->VisitExpr(in, CreateStateForType(in->checked_type_, input_taint));
       }
@@ -296,8 +317,8 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
       }
 
       for (size_t i = 0; i < op->args.size(); ++i) {
-        std::cout << "[STA]  Arg taint " << op->args[i] << " "
-                  << support::PrintVector(arg_taints[i]) << std::endl;
+        // std::cout << "[STA]  Arg taint " << op->args[i] << " "
+        // << support::PrintVector(arg_taints[i]) << std::endl;
         this->VisitExpr(op->args[i], arg_taints[i]);
       }
     }
@@ -348,7 +369,7 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
                     CreateStateForType(op->data->checked_type_, CollapseTaint(pattern_var_taints)));
   }
 
-  IRModule& mod_;
+  const IRModule& mod_;
 
   VarStateMap var_states_;
   TupleStateMap tuple_states_;
@@ -358,7 +379,8 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
 
   std::vector<Function> function_stack_;
   std::unordered_map<const CallNode*, std::unordered_set<const FunctionNode*>> callees_map_;
-  int max_iterations_{2};
+  std::unordered_map<const ExprNode*, std::vector<bool>> expr_taints_map_;
+  int max_iterations_{10};
 };
 
 Function MarkScalarCallsInFunc(const Function& func) {
@@ -406,6 +428,11 @@ Pass MarkScalarCalls() {
 }
 
 TVM_REGISTER_GLOBAL("relay._transform.MarkScalarCalls").set_body_typed(MarkScalarCalls);
+
+std::unordered_map<const ExprNode*, std::vector<bool>> GetScalarificationTaints(const IRModule& m) {
+  ScalarTaintAnalysis analysis(m, GetCalleesMap(m));
+  return analysis.PerformAnalysis();
+}
 
 Pass MarkScalarVars() {
   runtime::TypedPackedFunc<IRModule(IRModule, PassContext)> pass_func = [=](IRModule m,
