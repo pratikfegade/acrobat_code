@@ -120,7 +120,11 @@ void InferRootBound(const Schedule& sch, const Stage& stage, const GraphContext&
       //   std::cout << "[FG] " << kv.first->op.get() << " " << kv.first->op->name << " "
       //             << kv.first->value_index << " " << kv.first->op << std::endl;
       // }
-      LOG(INFO) << "not in feed graph consumer = " << t->op->name;
+      static bool warned = false;
+      if (!warned) {
+        LOG(INFO) << "not in feed graph consumer = " << t->op->name;
+        warned = true;
+      }
     }
   }
   // storage scope.

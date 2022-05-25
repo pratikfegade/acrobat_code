@@ -252,7 +252,8 @@ class ScalarTaintAnalysis : public BaseExprFunctor {
     if (on_device_props.body.defined()) {
       return this->VisitExpr(on_device_props.body, taint);
     }
-    // std::cout << "[STA] Visiting call " << GetRef<Expr>(op) << std::endl;
+    // std::cout << "[STA] Visiting call " << GetRef<Expr>(op) << " " << support::PrintVector(taint)
+    // << std::endl;
 
     if (op->op == GetInvokeTVMOp() && IsOpOnScalars(op)) {
       // std::cout << "[STA]  Visiting op " << op->args[0] << " " << support::PrintVector(taint)

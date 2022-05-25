@@ -46,6 +46,14 @@ inline int max(std::initializer_list<int> numbers) {
   return res;
 }
 
+inline int max(std::vector<int> numbers) {
+  int res = std::numeric_limits<int>::min();
+  for (auto& num : numbers) {
+    res = (res > num) ? res : num;
+  }
+  return res;
+}
+
 inline int64_t NDToInt64(const NDArray& nd) {
   static auto int64_dtype = DataType::Int(64);
   DLDevice cpu_ctx{kDLCPU, 0};

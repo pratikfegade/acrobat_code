@@ -213,13 +213,11 @@ NDArray DynBatchRuntime<ExecutorType, TensorType>::ShapeOf(const NDArray& input_
 
 template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::NextProgramPhase() {
-  std::cout << "[DBR] Incr phase" << std::endl;
   shared_state_.lazy_executor_.NextProgramPhase();
 }
 
 template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
-  std::cout << "[DBR] Reset phase" << std::endl;
   shared_state_.lazy_executor_.ResetProgramPhase();
 }
 

@@ -1803,7 +1803,7 @@ class Parser {
           if (support::EndsWith(dtype_str, "SS")) {
             scalar = true;
             dtype_str = dtype_str.substr(0, dtype_str.size() - 2);
-            std::cout << "[PARSE] Parsing scalar type " << dtype_str << std::endl;
+            // std::cout << "[PARSE] Parsing scalar type " << dtype_str << std::endl;
           }
           auto dtype = DataType(String2DLDataType(dtype_str));
           Match(TokenType::kRSquare);

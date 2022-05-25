@@ -927,6 +927,7 @@ class RepeatMutator : public AbstractDuplicator {
           new_func = WithAttr(new_func, tir::attr::kDBFunctionName,
                               opt_old_name.value() + "_dup" + std::to_string(ctr_++));
         }
+        new_func = WithAttr(new_func, "db.mpta.original_function", visited);
         new_func->checked_type_ = op->checked_type();
         return new_func;
       }
@@ -957,6 +958,7 @@ class RepeatMutator : public AbstractDuplicator {
     auto new_func =
         WithAttr(Function(new_params, new_body, fn->ret_type, fn->type_params, fn->attrs, fn->span),
                  tir::attr::kDBFunctionName, String(new_name));
+    new_func = WithAttr(new_func, "db.mpta.original_function", fn);
     new_func = Downcast<Function>(AbstractDuplicator()(new_func));
     new_func->checked_type_ = fn->checked_type();
     return new_func;

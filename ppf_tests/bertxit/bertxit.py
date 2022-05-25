@@ -60,7 +60,7 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 lazy_execution=True
-coarsened_execution=False
+coarsened_execution=True
 batched_execution=True
 scattered_kernels=True
 concurrent_execution=True
@@ -101,10 +101,9 @@ def print_time(time):
     )
 
 log_file = get_ansor_log_file(model_name, [ff_size, num_heads, head_size, model_size], pass_context, target)
-def auto_schedule(tune):
-    if (tune):
-        pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
-                              target, pass_context, execution_options, fin_iterations=100)
+def auto_schedule():
+    pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,
+                          target, pass_context, execution_options, fin_iterations=1000)
 
 def execute():
     with tvm.auto_scheduler.ApplyHistoryBest(log_file):
@@ -124,6 +123,6 @@ def execute():
                 # timeit.timeit(fin_executor, number=50)
                 # print_time(timeit.timeit(fin_executor, number=iters)*1000/iters)
 
-# if use_autoscheduler: auto_schedule((not os.path.exists(log_file)))
+if use_autoscheduler: auto_schedule()
 print("===============================================================================", flush=True)
 execute()

@@ -128,7 +128,9 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     all_gen_time_ms /= num_batches;
     all_exe_time_ms /= num_batches;
     if (profile) {
-      std::cout << VMDBProfiler::GetReport(100) << std::endl;
+      std::cout << VMDBProfiler::GetReport(dmlc::GetEnv("DB_WARM_UP_ITERATIONS", 1) +
+                                           dmlc::GetEnv("DB_MEASURE_ITERATIONS", 1))
+                << std::endl;
     }
     std::cout << "RESULTS," << all_gen_time_ms << "," << all_exe_time_ms << ","
               << (all_exe_time_ms + all_gen_time_ms) << std::endl;

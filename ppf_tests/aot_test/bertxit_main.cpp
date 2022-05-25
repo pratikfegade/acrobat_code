@@ -61,7 +61,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
   int batch_size = atoi(argv[0]);
   int num_batches = 1;
   bool profile = false;
-  bool debug = true;
+  bool debug = false;
 
   std::vector<TensorType> inputs = create_vector<TensorType>(batch_size);
 
@@ -106,7 +106,9 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     all_gen_time_ms /= num_batches;
     all_exe_time_ms /= num_batches;
     if (profile) {
-      std::cout << VMDBProfiler::GetReport(100) << std::endl;
+      std::cout << VMDBProfiler::GetReport(dmlc::GetEnv("DB_WARM_UP_ITERATIONS", 1) +
+                                           dmlc::GetEnv("DB_MEASURE_ITERATIONS", 1))
+                << std::endl;
     }
     std::cout << "RESULTS," << all_gen_time_ms << "," << all_exe_time_ms << ","
               << (all_exe_time_ms + all_gen_time_ms) << std::endl;

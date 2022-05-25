@@ -946,7 +946,7 @@ void ConcurrentVirtualMachine::InvokeWrapper(std::string func_name, TVMRetValue*
     auto* vm = GetVMFromModule(vm_mod);
 
     if (func.params.empty()) {
-      InvokeGlobal(func, {}, 0);
+      vm->InvokeGlobal(func, {}, 0);
     } else {
       auto it = vm->inputs_.find(func_name);
       ICHECK(it != vm->inputs_.end()) << "Input has not been set for function " << func_name;
@@ -1043,10 +1043,10 @@ void ConcurrentVirtualMachine::RunLoop() {
       }
     }
 
+    // std::cout << "[VM]  One stage done" << std::endl;
+
     // Run all tensor ops
     if (batched_execution_) {
-      // std::cout << "[VM] Batched execution " << shared_state_->lazy_executor_.nodes_.size()
-      // << std::endl;
       shared_state_->lazy_executor_.BatchedExecute(true, coarsened_execution_, !lazy_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
@@ -1074,6 +1074,8 @@ ObjectRef ConcurrentVirtualMachine::Invoke(const VMFunction& func,
                << " and device id " << shared_state_->devices_[i].device_id
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
+
+  std::cout << "[VM] Executing Function: " << func.name << std::endl;
 
   InvokeGlobal(func, args, 0);
   RunLoop();

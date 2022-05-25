@@ -35,6 +35,7 @@
 #include <tvm/tir/stmt.h>
 
 #include "../../printer/text_printer.h"
+#include "../../support/utils.h"
 #include "../op/vm/vm.h"
 #include "./expr_subst.h"
 #include "./pass_utils.h"
@@ -562,7 +563,7 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
     ICHECK_GE(call->args.size(), 2) << GetRef<Expr>(call);
     auto push_args = [&](const Expr& expr) {
       for (auto arg : expr.as<TupleNode>()->fields) {
-        ICHECK(arg.as<relay::VarNode>()) << arg;
+        ICHECK(arg.as<relay::VarNode>()) << GetRef<Expr>(call);
         args.push_back(GetTIRVar(Downcast<relay::Var>(arg)));
       }
     };
@@ -836,6 +837,7 @@ class Coarsener : public ExprMutator {
       if (op_call) {
         last_call_id = i;
         op_calls_in_group++;
+        std::cout << "[CG]   Incrementing " << op_calls_in_group << std::endl;
       }
       ICHECK_GE(start, 0);
 
@@ -895,8 +897,10 @@ class Coarsener : public ExprMutator {
       } else if (cleaned_value.as<FunctionNode>()) {
         end_group(i);
       } else if (auto vn = cleaned_value.as<CallNode>()) {
+        auto marked_scalar = IsMarkedScalarOp(vn);
+        std::cout << "[CG] Call  " << vn->op << " " << marked_scalar << std::endl;
         auto static_depth = GetStaticGraphDepth(vn);
-        if (vn->op == GetInvokeTVMOp() && static_depth >= 0) {
+        if (vn->op == GetInvokeTVMOp() && static_depth >= 0 && !marked_scalar) {
           if (in_group && !in_static_group) {
             end_group(i);
           }
@@ -904,8 +908,7 @@ class Coarsener : public ExprMutator {
           if (in_group && in_static_group) {
             static_group_depth = std::min(static_group_depth, static_depth);
           }
-        } else if (vn->op == GetInvokeTVMOp() && !IsMarkedScalarOp(vn)) {
-          // std::cout << "[CG] Marked scalar op " << value << std::endl;
+        } else if (vn->op == GetInvokeTVMOp() && !marked_scalar) {
           if (in_static_group) {
             end_group(i);
           }
@@ -1122,7 +1125,8 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
       Function func = GetRef<Function>(n);
 
-      bool print = false;  //(it.first->name_hint == "lstm_cell");
+      bool print = (support::StartsWith(it.first->name_hint, "lifted_name"));
+      std::cout << "[CG] Func " << it.first->name_hint << std::endl;
       Coarsener coarsener(mod, prim_funcs_access_modes, batched_execution, scattered_kernels);
       Function ret = coarsener.Coarsen(func, print);
 

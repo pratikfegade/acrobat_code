@@ -130,7 +130,6 @@ class GenericArena {
   static inline void Init() {
     if (singleton_ == nullptr) {
       singleton_ = new GenericArena<PageAllocator>();
-      std::cout << "[ARE] Initializing arena " << singleton_ << std::endl;
     }
   }
 

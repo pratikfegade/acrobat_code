@@ -246,6 +246,8 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
 template <typename ConcreteExecutorType>
 void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,
                                       const std::vector<LazyOpNode*>& func_nodes) {
+  // std::cout << "[LZ]   Executing " << func_idx << " " << func_nodes.size() << std::endl;
+
   const VMSharedState<ConcreteExecutorType>& vm_shared_state = *(executor.vm_shared_state_);
   int32_t batch_size = func_nodes.size();
   if (batch_size == 1) {
@@ -296,8 +298,9 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     setter(0, batch_size);
     int ctr = 1;
 
-    std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " << func_nodes.size()
-              << std::endl;
+    // std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " <<
+    // func_nodes.size()
+    // << std::endl;
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
@@ -348,10 +351,6 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 #endif
           }
           setter(ctr, arg);
-
-          std::cout << "[LZ]   Arg1 " << ctr << " " << GetDLTensorInfo(func_nodes[0]->args_[i])
-                    << std::endl;
-
           ctr += 1;
           break;
         }
@@ -377,8 +376,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           }
           setter(ctr, result);
 
-          std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
-                    << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+          // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
+          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
           scattered_ctr++;
           ctr += 1;
@@ -444,7 +443,7 @@ void EagerAllocationLazyExecutor::ExecuteOpNodeBatch(const Index func_idx,
   }
 #endif
   auto num_nodes = func_nodes.size();
-  std::cout << "[LZ]   Executing " << func_idx << " " << num_nodes << std::endl;
+  // std::cout << "[LZ]   Executing " << func_idx << " " << num_nodes << std::endl;
   if (num_nodes == 1) {
     InvokePackedFnUnrolled(func_idx, vm_shared_state_->packed_funcs_[func_idx],
                            func_nodes[0]->args_.data(), func_nodes[0]->args_.size());
@@ -552,13 +551,13 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       graph_depth = std::max(graph_depth, node_depth);
     }
 
-    std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
+    // std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
     int nodes_executed = 0;
     std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
     for (int j = 0; j <= graph_depth; ++j) {
       auto& depth_nodes = depth_to_node[j];
       std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-      std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
+      // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
       nodes_executed += depth_nodes.size();
       for (auto& node : depth_nodes) {
         func_to_node[node->func_idx_].push_back(node);
@@ -771,7 +770,7 @@ void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
 #endif
   for (size_t k = 0; k <= phase_; ++k) {
     auto& phase_nodes = nodes_[k];
-    std::cout << "[LZ] Phase " << k << " " << phase_nodes.size() << std::endl;
+    // std::cout << "[LZ] Phase " << k << " " << phase_nodes.size() << std::endl;
     for (size_t j = 0; j < phase_nodes.size(); ++j) {
       auto& depth_nodes = phase_nodes[j];
       std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;

@@ -1157,10 +1157,29 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
       std::vector<Var> current_hfuse_group_;
       while (current.as<LetNode>()) {
         auto let = current.as<LetNode>();
+        // std::cout << "[TPGN] Visiting let " << let->var->vid->name_hint << std::endl;
         PrimFuncBinding(let);
         auto this_rhs_callee = GetCalleeIfPresent(let->value);
-        if (this_rhs_callee.defined() &&
-            ((last_rhs_callee_ == this_rhs_callee) || !last_rhs_callee_.defined())) {
+        // std::cout << "[TPGN]  Callee " << this_rhs_callee << " " << last_rhs_callee_.defined()
+        // << std::endl;
+
+        bool matched = this_rhs_callee.defined();
+        // matched = matched && ((last_rhs_callee_ == this_rhs_callee) ||
+        // !last_rhs_callee_.defined());
+        if (this_rhs_callee.defined() && last_rhs_callee_.defined()) {
+          if (last_rhs_callee_ != this_rhs_callee) {
+            auto last_callee_og_fn_opt =
+                last_rhs_callee_->GetAttr<ObjectRef>("db.mpta.original_function");
+            auto this_callee_og_fn_opt =
+                this_rhs_callee->GetAttr<ObjectRef>("db.mpta.original_function");
+            if (!this_callee_og_fn_opt || !last_callee_og_fn_opt ||
+                last_callee_og_fn_opt.value().get() != this_callee_og_fn_opt.value().get()) {
+              matched = false;
+            }
+          }
+        }
+
+        if (matched) {
           current_hfuse_group_.push_back(let->var);
           last_rhs_callee_ = this_rhs_callee;
         } else {
@@ -1207,8 +1226,13 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
         auto current = GetRef<Expr>(op);
         SEScope value_se_scope = SEScope::FullyUnconstrained();
         for (size_t i = 0; i < group_vars.size(); ++i) {
+          auto od_props_current = GetOnDeviceProps(current);
+          if (od_props_current.body.defined()) {
+            current = od_props_current.body;
+          }
+
           auto let = current.as<LetNode>();
-          ICHECK(let) << group_vars[i];
+          ICHECK(let) << group_vars[i] << " " << current;
           ICHECK_EQ(let->var.get(), group_vars[i].get());
           group_lets[i] = let;
 
@@ -1261,12 +1285,12 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
   Phase1 phase1(module);
   phase1(RemoveOnDeviceCalls(func));
   // std::cout << "[TPGN] Found Groups" << std::endl;
-  for (auto group : phase1.hfuse_groups_) {
-    // std::cout << "[TPGN]  New Group" << std::endl;
-    for (auto var : group.vars) {
-      // std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
-    }
-  }
+  // for (auto group : phase1.hfuse_groups_) {
+  //   std::cout << "[TPGN]  New Group" << std::endl;
+  //   for (auto var : group.vars) {
+  //     std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+  //   }
+  // }
 
   Phase2 phase2(module, process_fn, module_name, compiler, host_se_scope, phase1.hfuse_groups_);
   func = Downcast<Function>(phase2(func));
@@ -1310,7 +1334,7 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
                                                           PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
         auto func_name = func1->GetAttr<String>(tvm::tir::attr::kDBFunctionName);
-        bool print = (func_name == "mvrnn");
+        bool print = false;  //(func_name == "mvrnn");
         auto func2 = Downcast<Function>(LiftLetsOutOfValues(func1));
         if (print) {
           std::cout << "[TEC] Lowering\n" << PrettyPrint(func2) << std::endl;
@@ -1555,8 +1579,6 @@ void UpdateFunctionMetadata(BaseFunc func,
 
 IRModule LowerTE(IRModule& module, const String& module_name, ProcessFn process_fn,
                  SEScope host_se_scope) {
-  // module = ModelParameterTaintAnalysis(module);
-  // module = InferTaskWeights(module);
   TECompiler compiler(module);
 
   // TODO(mbs): This is all unnecessarily convoluted. Better would be to accumulate the rewritten
@@ -1721,10 +1743,16 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
     return ret;
   };
 
-  return tvm::transform::Sequential(
-      {tvm::relay::transform::RelayToTIRTargetHook(), ModelParameterTaintAnalysisPass(true),
-       DeadCodeElimination(), RemoveUnusedFunctions({"main"}, true), InferTaskWeightsPass(),
-       tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}), InferType()});
+  Array<Pass> passes;
+  passes.push_back(tvm::relay::transform::RelayToTIRTargetHook());
+  passes.push_back(ModelParameterTaintAnalysisPass(true));
+  passes.push_back(DeadCodeElimination());
+  passes.push_back(RemoveUnusedFunctions({"main"}, true));
+  passes.push_back(InferTaskWeightsPass());
+  // passes.push_back(transform::PrintCurrentIR("MPTAnalysis", true, true));
+  passes.push_back(tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}));
+  passes.push_back(InferType());
+  return tvm::transform::Sequential(passes);
 }
 }  // namespace tec
 }  // namespace relay

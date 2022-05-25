@@ -320,6 +320,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
     inbuilt_ops_.insert({"greater_equal", ">="});
     inbuilt_ops_.insert({"less_equal", "<="});
     inbuilt_ops_.insert({"greater", ">"});
+    inbuilt_ops_.insert({"logical_and", "&&"});
+    inbuilt_ops_.insert({"logical_or", "||"});
   }
 
   int GenerateCPPForFunction(bool definition) {
@@ -547,14 +549,17 @@ class VMAOTFunctionCompiler : SourcePrinter {
       } else {
         stream_ << GetExecutorType() << "::Current()->LazyExecute(" << sync_str << ");\n";
       }
+      if (use_depth_tracking_executor()) {
+        stream_ << "depth = 0;\n";
+      }
     }
   }
 
   bool InMainFunction() { return vm_func_.name == "main"; }
 
   int VisitBytecode() {
-    std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
-    bool print = (vm_func_.name == "main");
+    // std::cout << "\n[BT]  Visiting code " << vm_func_.name << std::endl;
+    bool print = false;  // (vm_func_.name == "main");
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
@@ -649,7 +654,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           // std::cout << "[BT] MAIN RET" << std::endl;
         }
 
-        std::cout << "[BT]     " << instr << std::endl;
+        // std::cout << "[BT]     " << instr << std::endl;
 
         if (Instruction::UsesDst(instr) && !used_regs[instr.dst]) {
           continue;
@@ -683,7 +688,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::LoadConsti: {
-            std::cout << "[AOTC] Load Constant " << register_types_.at(instr.dst) << std::endl;
+            // std::cout << "[AOTC] Load Constant " << register_types_.at(instr.dst) << std::endl;
             auto dst_var = GetVarForReg(instr.dst);
             this->PrintIndent(stream_);
             stream_ << dst_var << " = " << instr.load_consti.val << ";\n";
@@ -702,14 +707,16 @@ class VMAOTFunctionCompiler : SourcePrinter {
               ICHECK_EQ(GetNestLevel(), 0)
                   << "Phase changes are only allowed in the outermost scope of the main function";
               if (concurrent_execution()) {
-                EmitTriggerEvaluation(false);
+                this->PrintIndent(stream_);
+                stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerPhaseBarrierWait(fiber_"
+                           "id);\n";
               } else {
                 this->PrintIndent(stream_);
                 stream_ << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
               }
-              this->PrintIndent(stream_);
               if (use_depth_tracking_executor()) {
-                stream_ << "depth == 0;\n";
+                this->PrintIndent(stream_);
+                stream_ << "depth = 0;\n";
               }
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
@@ -907,6 +914,9 @@ class VMAOTFunctionCompiler : SourcePrinter {
               if (i < instr.num_closure_args - 1) {
                 stream_ << ", ";
               }
+            }
+            if (concurrent_execution()) {
+              stream_ << ", fiber_id";
             }
             if (use_depth_tracking_executor()) {
               stream_ << ", depth";
@@ -1286,41 +1296,78 @@ class VMAOTFunctionCompiler : SourcePrinter {
       stream_ << "local_1, int& depth)";
     }
     if (definition) {
+      auto initializations =
+          "  auto current = local_1;\n"
+          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n"
+          "  nil_node->tag = LIST_NIL_TAG;\n"
+          "  auto new_list_head = nil_node;\n"
+          "  auto new_list_tail = nil_node;\n"
+          "  int map_depth_value = depth;\n";
+
+      auto non_concurrent_body =
+          "while (true) {\n"
+          "  if (current->tag == LIST_NIL_TAG) {\n"
+          "    break;\n"
+          "  }\n"
+          "  int tmp_depth = map_depth_value;\n"
+          "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
+          "  new_node->tag = LIST_CONS_TAG;\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
+          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, tmp_depth);\n"
+          "  depth = std::max(depth, tmp_depth);\n"
+          "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
+          "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
+          "  } else {\n"
+          "    new_list_head = new_node;\n"
+          "  }\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
+          "  new_list_tail = new_node;\n"
+          "  current = static_cast<Cons<A>*>(current.get())->field_1;\n"
+          "}\n";
+
+      auto concurrent_body =
+          "std::vector<int> depths;\n"
+          "while (true) {\n"
+          "  if (current->tag == LIST_NIL_TAG) {\n"
+          "    break;\n"
+          "  }\n"
+          "  int tmp_depth = map_depth_value;\n"
+          "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
+          "  new_node->tag = LIST_CONS_TAG;\n"
+          "  auto new_id = FiberRuntime::Current().NewFiberID();\n"
+          "  auto fn = [new_node, local_0, current, new_id, tmp_depth, &depths]() mutable {\n"
+          "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
+          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, new_id, tmp_depth);\n"
+          "    FiberRuntime::Current().WorkerEnd(new_id);\n"
+          "    depths.push_back(tmp_depth);\n"
+          "  };\n"
+          "\n"
+          "  FiberRuntime::Current().CreateFiber(fiber_id, fn);\n"
+          "\n"
+          "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
+          "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
+          "  } else {\n"
+          "    new_list_head = new_node;\n"
+          "  }\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
+          "  new_list_tail = new_node;\n"
+          "  current = static_cast<Cons<A>*>(current.get())->field_1;\n"
+          "}\n"
+          "FiberRuntime::Current().WorkerChildrenWait(fiber_id);\n"
+          "depth = max(depths);\n";
+
       stream_ << "{\n";
-      stream_ << "  auto current = local_1;\n";
-      stream_
-          << "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n";
-      stream_ << "  nil_node->tag = LIST_NIL_TAG;\n";
-      stream_ << "  auto new_list_head = nil_node;\n";
-      stream_ << "  auto new_list_tail = nil_node;\n";
-      stream_ << "  int map_depth_value = depth;\n";
-      stream_ << "  while (true) {\n";
-      stream_ << "    if (current->tag == LIST_NIL_TAG) {\n";
-      stream_ << "      break;\n";
-      stream_ << "    }\n";
-      stream_ << "    int tmp_depth = map_depth_value;\n";
-      stream_ << "    auto new_node = "
-                 "std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n";
-      stream_ << "    new_node->tag = LIST_CONS_TAG;\n";
-      stream_ << "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n";
+      stream_ << initializations;
       if (concurrent_execution()) {
-        stream_ << "        local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
-                   "tmp_depth);\n";
+        stream_ << "if (!FiberRuntime::Current().CanCreateNewFiber()) {\n";
+        stream_ << non_concurrent_body;
+        stream_ << "} else {\n";
+        stream_ << concurrent_body;
+        stream_ << "}\n";
       } else {
-        stream_ << "        local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n";
+        stream_ << non_concurrent_body;
       }
-      stream_ << "    depth = std::max(depth, tmp_depth);\n";
-      stream_ << "    if (new_list_tail->tag != LIST_NIL_TAG) {\n";
-      stream_ << "      static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n";
-      stream_ << "    } else {\n";
-      stream_ << "      new_list_head = new_node;\n";
-      stream_ << "    }\n";
-      stream_ << "    static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n";
-      stream_ << "    new_list_tail = new_node;\n";
-      stream_ << "    current = static_cast<Cons<A>*>(current.get())->field_1;\n";
-      stream_ << "  }\n";
-      stream_ << "";
-      stream_ << "  return new_list_head;\n";
+      stream_ << " return new_list_head;\n";
       stream_ << "}\n\n";
     } else {
       stream_ << ";";
@@ -1589,7 +1636,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->PrintIndent(os);
     os << "bool sync = tvm::runtime::vm::FiberRuntime::Current().PerformSync();\n";
     this->PrintIndent(os);
-    os << "DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->LazyExecute(sync);\n";
+    os << GetRuntimeType() << "::Current()->LazyExecute(sync);\n";
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
     this->EndScope();
@@ -1648,8 +1695,8 @@ inline std::string Bool2Str(bool a) { return a ? "true" : "false"; }
 void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "std::pair<float, float> measure_time(std::function<std::pair<float, float>()> "
         "runner, bool profiling) {\n";
-  os << "  int w_iters = 50;\n";
-  os << "  int a_iters = 100;\n";
+  os << "  int w_iters = dmlc::GetEnv(\"DB_WARM_UP_ITERATIONS\", 1);\n";
+  os << "  int a_iters = dmlc::GetEnv(\"DB_MEASURE_ITERATIONS\", 1);\n";
   os << "  for (int i = 0; i < w_iters; ++i) {\n";
   os << "    runner();\n";
   os << "  }\n";
@@ -1781,6 +1828,7 @@ void VMAOTCompiler::EmitMacros(std::ostream& os) {}
 void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <cstdint>\n";
   os << "#include <dlpack/dlpack.h>\n";
+  os << "#include <dmlc/parameter.h>\n";
   os << "#include <tvm/runtime/vm/vm_profiling.h>\n";
   os << "#include <tvm/runtime/vm/db_runtime.h>\n";
   os << "#include <tvm/runtime/vm/db_execution_utils.h>\n";

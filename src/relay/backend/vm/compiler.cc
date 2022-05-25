@@ -406,8 +406,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     auto it = expr_scalarification_taints_.find(func->body.get());
     if (it != expr_scalarification_taints_.end()) {
       ret_taints = it->second;
-      std::cout << "[VMFC] Function ret scalar taints: " << support::PrintVector(ret_taints)
-                << std::endl;
     }
     return {compiled_function,
             VMFunction(var->name_hint, params_, last_register_, instructions_, registers_num_,
@@ -524,8 +522,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     if (it != expr_scalarification_taints_.end()) {
       auto taints = it->second;
       reg_scalarification_taints_[reg] = taints;
-      std::cout << "[ITSLR] " << PrettyPrint(GetRef<Expr>(e)) << " " << reg << " "
-                << support::PrintVector(taints) << std::endl;
+      // std::cout << "[ITSLR] " << PrettyPrint(GetRef<Expr>(e)) << " " << reg << " "
+      // << support::PrintVector(taints) << std::endl;
     }
   }
 
@@ -750,8 +748,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       ICHECK(reg != var_register_map_.end())
           << "internal error: all variables should be in the register mapping";
 
-      std::cout << "[BTMN] Adding taint for " << global_var_node->name_hint << " " << output << " "
-                << expr_scalarification_taints_.count(output.get()) << std::endl;
+      // std::cout << "[BTMN] Adding taint for " << global_var_node->name_hint << " " << output << "
+      // "
+      // << expr_scalarification_taints_.count(output.get()) << std::endl;
       AddScalarTaint(reg->second, output.get());
       argument_registers.push_back(reg->second);
     }
@@ -1250,7 +1249,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
 
   auto expr_scalarification_taints = relay::transform::GetScalarificationTaints(context_.module);
 
-  std::cout << "[ITSLR] Taint sizes: " << expr_scalarification_taints.size() << std::endl;
+  // std::cout << "[ITSLR] Taint sizes: " << expr_scalarification_taints.size() << std::endl;
 
   bool batched_execution =
       PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
@@ -1529,7 +1528,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::InferType());
   // pass_seqs.push_back(transform::FoldReduceSumsIdentifierPass());
-  pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
   pass_seqs.push_back(transform::MarkScalarCalls());
 
   pass_seqs.push_back(transform::FuseOps());
@@ -1562,7 +1561,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
   pass_seqs.push_back(transform::LabelOps());
 
   // lower all functions annotated as "primitive" by FuseOps.
-  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LabelOps", false, true));
   pass_seqs.push_back(tec::LowerTEPass(/*module_name=*/"vm_mod",
                                        [this](const BaseFunc& func) {
                                          if (func->GetAttr<String>(attr::kCompiler).defined()) {
@@ -1570,7 +1569,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
                                          }
                                        },
                                        config_->host_se_scope));
-  pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("LowerTE", true, true));
 
   // Since lowered functions are bound in the IRModule, we can now eliminate any unused
   // let-bound functions.
@@ -1597,10 +1596,10 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, true));
+    pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, true));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
-    // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+    pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
     pass_seqs.push_back(transform::InferType());
   } else {
     // Compute prim func access modes for all prim funcs
@@ -1612,7 +1611,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

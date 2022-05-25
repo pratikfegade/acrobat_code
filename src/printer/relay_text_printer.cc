@@ -460,8 +460,15 @@ Doc RelayTextPrinter::PrintFunc(const Doc& prefix, const relay::Function& fn) {
     Doc key_doc;
     auto key = fn->GetAttr<String>("db.autosched_workload_keys");
     if (key) {
-      key_doc << "db.autosched_workload_keys=" << PrintAttributeValue(key.value());
+      key_doc << "workload_keys=" << PrintAttributeValue(key.value());
       params.push_back(key_doc);
+    }
+
+    Doc og_fn_doc;
+    auto og_fn = fn->GetAttr<Function>("db.mpta.original_function");
+    if (og_fn) {
+      og_fn_doc << "mpta_og_fn=" << og_fn.value().get();
+      params.push_back(og_fn_doc);
     }
   }
   if (VERBOSE_PRINT) {
@@ -544,9 +551,9 @@ Doc RelayTextPrinter::VisitExpr_(const CallNode* op) {
     args.push_back(Print(type_arg));
   }
 #endif
-  // for (const Doc& d : PrintCallAttrs(op->attrs, op->op)) {
-  // args.push_back(d);
-  // }
+  for (const Doc& d : PrintCallAttrs(op->attrs, op->op)) {
+    args.push_back(d);
+  }
 
   const auto* cons_node = op->op.as<ConstructorNode>();
   if (cons_node) {
