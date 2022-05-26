@@ -106,8 +106,9 @@ class FiberRuntime {
     WorkerWaitInternal(idx, kChildrenWaiting);
   }
 
-  void MainWaitForWorkers() {
+  bool MainWaitForWorkers() {
     // std::cout << "[M] Main waiting" << std::endl;
+    bool execute = false;
     for (int i = 0; i < num_fibers_; ++i) {
       if (alive_[i] && !phase_waiting_[i] && !children_waiting_[i]) {
         FiberState state;
@@ -129,9 +130,12 @@ class FiberRuntime {
           phase_waiting_num_++;
         } else if (state == kChildrenWaiting) {
           children_waiting_[i] = true;
+        } else {
+          execute = true;
         }
       }
     }
+    return execute;
   }
 
   void MainResumeWorkers() {

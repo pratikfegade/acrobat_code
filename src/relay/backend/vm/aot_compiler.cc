@@ -54,6 +54,21 @@ std::string ToUpperCase(std::string s) {
   return s;
 }
 
+std::string ReplaceAll(const std::string& str, const std::string& find,
+                       const std::string& replace) {
+  using namespace std;
+  string result;
+  size_t find_len = find.size();
+  size_t pos, from = 0;
+  while (string::npos != (pos = str.find(find, from))) {
+    result.append(str, from, pos - from);
+    result.append(replace);
+    from = pos + find_len;
+  }
+  result.append(str, from, string::npos);
+  return result;
+}
+
 std::string DTypeToStr(const DLDataType& dtype) {
   return "{" + std::to_string(dtype.code) + ", " + std::to_string(dtype.bits) + ", " +
          std::to_string(dtype.lanes) + "}";
@@ -641,13 +656,30 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
+    bool same_depth_for_all_calls = IsTupleMapFunction(vm_func_.name);
+    int children_wait_pos = -1;
+    if (same_depth_for_all_calls) {
+      for (int i = vm_func_.instructions.size() - 1; i >= 0; --i) {
+        auto& instr = vm_func_.instructions[i];
+        if (instr.op == Opcode::Invoke) {
+          children_wait_pos = i;
+          break;
+        }
+      }
+    }
+
+    if (vm_func_.name == "tuple_map_mvrnn") {
+      std::cout << "[AOTC] child wait pc " << children_wait_pos << std::endl;
+    }
+
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
-    bool same_depth_for_all_calls = IsTupleMapFunction(vm_func_.name);
     int max_static_depth = -1;
     std::vector<std::string> all_depth_vars;
+    int recursion_level = 0;
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
+      recursion_level++;
       for (int i = start_pc; i < end_pc; ++i) {
         auto& instr = vm_func_.instructions[i];
         if (print && instr.op == Opcode::Ret) {
@@ -738,6 +770,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
               if (fold_reduction_op.defined() && fold_reduction_op == GetAddOp() &&
                   (dst_type && int_shape.size() == dst_type->shape.size())) {
+                ICHECK(!same_depth_for_all_calls);
                 ICHECK_EQ(instr.num_args, 3);
                 auto dst_var = GetVarForReg(instr.dst);
                 auto list_var = GetVarForReg(instr.invoke_args_registers[2]);
@@ -755,35 +788,73 @@ class VMAOTFunctionCompiler : SourcePrinter {
               } else {
                 auto dst_var = GetVarForReg(instr.dst);
                 auto callee_name = exec_.functions[instr.func_index].name;
-                this->PrintIndent(stream_);
-                stream_ << dst_var << " = " << GetCppFunctionName(callee_name);
+                std::stringstream ss;
+                this->PrintIndent(ss);
+                ss << dst_var << " = " << GetCppFunctionName(callee_name);
                 auto it = invoke_type_vars_.find(i);
                 if (it != invoke_type_vars_.end() && it->second.size() > 0) {
                   auto types = it->second;
-                  stream_ << "<";
+                  ss << "<";
                   for (size_t j = 0; j < types.size(); ++j) {
                     // TODO(ppf): Scalarification
-                    RelayTypeToCppStr(stream_, types[j]);
+                    RelayTypeToCppStr(ss, types[j]);
                     if (j < types.size() - 1) {
-                      stream_ << ",";
+                      ss << ",";
                     }
                   }
-                  stream_ << ">";
+                  ss << ">";
                 }
-                stream_ << "(";
+                ss << "(";
+                std::stringstream args_ss;
                 for (int i = 0; i < instr.num_args; ++i) {
-                  stream_ << GetVarForReg(instr.invoke_args_registers[i]);
+                  args_ss << GetVarForReg(instr.invoke_args_registers[i]);
                   if (i < instr.num_args - 1) {
-                    stream_ << ",";
+                    args_ss << ",";
                   }
                 }
+                ss << args_ss.str();
                 if (concurrent_execution()) {
-                  stream_ << ", fiber_id";
+                  ss << ", __FIBER_ID__";
                 }
                 if (use_depth_tracking_executor()) {
-                  stream_ << ", " << depth_var;
+                  ss << ", " << depth_var;
                 }
-                stream_ << ");\n";
+                ss << ");\n";
+
+                if (same_depth_for_all_calls && concurrent_execution()) {
+                  this->PrintIndent(stream_);
+                  stream_ << "if (__create_fiber) {\n";
+                  this->BeginScope();
+                  this->PrintIndent(stream_);
+                  stream_ << "int new_id = FiberRuntime::Current().NewFiberID();\n";
+
+                  this->PrintIndent(stream_);
+                  stream_ << "auto fn = [&" << dst_var << ", " << args_ss.str() << ", "
+                          << "new_id, &" << depth_var << "]() mutable {\n";
+                  this->BeginScope();
+                  this->PrintIndent(stream_);
+                  stream_ << ReplaceAll(ss.str(), "__FIBER_ID__", "new_id");
+                  this->PrintIndent(stream_);
+                  stream_ << "FiberRuntime::Current().WorkerEnd(new_id);\n";
+                  this->EndScope();
+                  this->PrintIndent(stream_);
+                  stream_ << "};\n";
+
+                  this->PrintIndent(stream_);
+                  stream_ << "FiberRuntime::Current().CreateFiber(fiber_id, fn);\n";
+
+                  this->EndScope();
+                  this->PrintIndent(stream_);
+                  stream_ << "} else {\n";
+                  this->BeginScope();
+                  stream_ << ReplaceAll(ss.str(), "__FIBER_ID__", "fiber_id");
+                  this->EndScope();
+                  this->PrintIndent(stream_);
+                  stream_ << "}\n";
+                } else {
+                  this->PrintIndent(stream_);
+                  stream_ << ReplaceAll(ss.str(), "__FIBER_ID__", "fiber_id");
+                }
               }
             }
             break;
@@ -1271,12 +1342,35 @@ class VMAOTFunctionCompiler : SourcePrinter {
             LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
             return;
         }
+
+        if (vm_func_.name == "tuple_map_mvrnn") {
+          std::cout << "[AOTC]  PC " << i << " " << children_wait_pos << " " << children_wait_pos
+                    << " " << recursion_level << std::endl;
+        }
+
+        if (concurrent_execution() && same_depth_for_all_calls && i >= children_wait_pos &&
+            children_wait_pos >= 0 && recursion_level == 1) {
+          this->PrintIndent(stream_);
+          stream_ << "if (__create_fiber) {\n";
+          this->BeginScope();
+          this->PrintIndent(stream_);
+          stream_ << "FiberRuntime::Current().WorkerChildrenWait(fiber_id);\n";
+          this->EndScope();
+          this->PrintIndent(stream_);
+          stream_ << "}\n";
+          children_wait_pos = -1;
+        }
       }
+      recursion_level--;
     };
 
     if (same_depth_for_all_calls) {
       this->PrintIndent(stream_);
       stream_ << "int __orig_depth = depth;\n";
+      if (concurrent_execution()) {
+        this->PrintIndent(stream_);
+        stream_ << "bool __create_fiber = FiberRuntime::Current().CanCreateNewFiber();\n";
+      }
     }
     generate_code(0, vm_func_.instructions.size());
     return max_static_depth;
@@ -1466,21 +1560,6 @@ void VMAOTCompiler::DeclareADT(std::ostream& os, const TypeData& adt, bool inclu
   }
 }
 
-std::string replace_all(const std::string& str, const std::string& find,
-                        const std::string& replace) {
-  using namespace std;
-  string result;
-  size_t find_len = find.size();
-  size_t pos, from = 0;
-  while (string::npos != (pos = str.find(find, from))) {
-    result.append(str, from, pos - from);
-    result.append(replace);
-    from = pos + find_len;
-  }
-  result.append(str, from, string::npos);
-  return result;
-}
-
 void VMAOTCompiler::EmitUtilFunctions(
     std::ostream& os, const std::unordered_set<const TensorTypeNode*>& invoke_reduce_sum_types) {
   if (invoke_reduce_sum_types.size() > 0) {
@@ -1537,13 +1616,13 @@ void VMAOTCompiler::EmitUtilFunctions(
     auto device_index = 1;
 
     auto body = ss.str();
-    body = replace_all(body, "__TT__", GetTensorType());
-    body = replace_all(body, "__RT__", GetRuntimeType());
-    body = replace_all(body, "__REDUCE_SUM_FUNC_INDEX__", std::to_string(REDUCE_SUM_FUNC_INDEX));
-    body = replace_all(body, "__ND__", std::to_string(shape.size()));
-    body = replace_all(body, "__DV__", std::to_string(device_index));
-    body = replace_all(body, "__DT__", DTypeToStr(tt->dtype));
-    body = replace_all(body, "__SH__", support::PrintVector(shape, false));
+    body = ReplaceAll(body, "__TT__", GetTensorType());
+    body = ReplaceAll(body, "__RT__", GetRuntimeType());
+    body = ReplaceAll(body, "__REDUCE_SUM_FUNC_INDEX__", std::to_string(REDUCE_SUM_FUNC_INDEX));
+    body = ReplaceAll(body, "__ND__", std::to_string(shape.size()));
+    body = ReplaceAll(body, "__DV__", std::to_string(device_index));
+    body = ReplaceAll(body, "__DT__", DTypeToStr(tt->dtype));
+    body = ReplaceAll(body, "__SH__", support::PrintVector(shape, false));
     os << body;
   }
 }
@@ -1632,11 +1711,17 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     os << "while (tvm::runtime::vm::FiberRuntime::Current().ContinueExecution()) {\n";
     this->BeginScope();
     this->PrintIndent(os);
-    os << "tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
+    os << "bool execute = tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
+    this->PrintIndent(os);
+    os << "if (execute) {\n";
+    this->BeginScope();
     this->PrintIndent(os);
     os << "bool sync = tvm::runtime::vm::FiberRuntime::Current().PerformSync();\n";
     this->PrintIndent(os);
     os << GetRuntimeType() << "::Current()->LazyExecute(sync);\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
     this->EndScope();
