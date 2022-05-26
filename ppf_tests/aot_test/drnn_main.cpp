@@ -52,9 +52,6 @@ std::vector<TensorType> create_vector(int length) {
   return res;
 }
 
-using ExecutorType = DepthTrackingExecutor;
-// using ExecutorType = LazyExecutor<DLTensor*>;
-
 template <typename TensorType>
 std::pair<int, int> tree_stats(
     std::shared_ptr<Tree<std::shared_ptr<std::tuple<DLTensor*, DLTensor*>>>> tree_base) {
@@ -80,69 +77,8 @@ std::pair<int, int> tree_stats(
   return std::make_pair(nodes, depth);
 }
 
-template <class A, class B>
-std::shared_ptr<List<B>> pmap(std::function<B(A, int, int&)> local_0,
-                              std::shared_ptr<List<A>> local_1, int fiber_id, int& depth) {
-  auto current = local_1;
-  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());
-  nil_node->tag = LIST_NIL_TAG;
-  auto new_list_head = nil_node;
-  auto new_list_tail = nil_node;
-  int map_depth_value = depth;
-
-  if (!FiberRuntime::Current().CanCreateNewFiber()) {
-    while (true) {
-      if (current->tag == LIST_NIL_TAG) {
-        break;
-      }
-      int tmp_depth = map_depth_value;
-      auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());
-      new_node->tag = LIST_CONS_TAG;
-      static_cast<Cons<B>*>(new_node.get())->field_0 =
-          local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, tmp_depth);
-      depth = std::max(depth, tmp_depth);
-      if (new_list_tail->tag != LIST_NIL_TAG) {
-        static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;
-      } else {
-        new_list_head = new_node;
-      }
-      static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;
-      new_list_tail = new_node;
-      current = static_cast<Cons<A>*>(current.get())->field_1;
-    }
-  } else {
-    std::vector<int> depths;
-    while (true) {
-      if (current->tag == LIST_NIL_TAG) {
-        break;
-      }
-      int tmp_depth = map_depth_value;
-      auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());
-      new_node->tag = LIST_CONS_TAG;
-      auto new_id = FiberRuntime::Current().NewFiberID();
-      auto fn = [new_node, local_0, current, new_id, tmp_depth, &depths]() mutable {
-        static_cast<Cons<B>*>(new_node.get())->field_0 =
-            local_0(static_cast<Cons<A>*>(current.get())->field_0, new_id, tmp_depth);
-        FiberRuntime::Current().WorkerEnd(new_id);
-        depths.push_back(tmp_depth);
-      };
-
-      FiberRuntime::Current().CreateFiber(fiber_id, fn);
-
-      if (new_list_tail->tag != LIST_NIL_TAG) {
-        static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;
-      } else {
-        new_list_head = new_node;
-      }
-      static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;
-      new_list_tail = new_node;
-      current = static_cast<Cons<A>*>(current.get())->field_1;
-    }
-    FiberRuntime::Current().WorkerChildrenWait(fiber_id);
-    depth = max(depths);
-  }
-  return new_list_head;
-}
+using ExecutorType = DepthTrackingExecutor;
+// using ExecutorType = LazyExecutor<DLTensor*>;
 
 template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
