@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 from tree_utils import generate_complete_mvrnn_trees
 
-parser = get_cmd_parser().parse_args()
+args = get_cmd_parser().parse_args()
 
 batch_size=8
 hidden_sizes = {"small": 64, "large": 128}

@@ -74,21 +74,22 @@ std::shared_ptr<Tree<TensorType>> within_bracket(std::vector<std::string>::const
       auto new_list_head = nil_node;
       auto new_list_tail = nil_node;
 
-      std::cout << "[NC] " << children.size() << std::endl;
-      for (size_t i = 0; i < children.size(); ++i) {
-        auto new_node = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
-            std::make_shared<Cons<std::shared_ptr<Tree<TensorType>>>>());
-        new_node->tag = LIST_CONS_TAG;
-        static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_node.get())->field_0 =
-            children[i];
-        if (new_list_tail->tag != LIST_NIL_TAG) {
-          static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_list_tail.get())->field_1 =
-              new_node;
-        } else {
-          new_list_head = new_node;
+      if (children.size() == 2) {
+        for (size_t i = 0; i < children.size(); ++i) {
+          auto new_node = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
+              std::make_shared<Cons<std::shared_ptr<Tree<TensorType>>>>());
+          new_node->tag = LIST_CONS_TAG;
+          static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_node.get())->field_0 =
+              children[i];
+          if (new_list_tail->tag != LIST_NIL_TAG) {
+            static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_list_tail.get())->field_1 =
+                new_node;
+          } else {
+            new_list_head = new_node;
+          }
+          static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_node.get())->field_1 = nil_node;
+          new_list_tail = new_node;
         }
-        static_cast<Cons<std::shared_ptr<Tree<TensorType>>>*>(new_node.get())->field_1 = nil_node;
-        new_list_tail = new_node;
       }
 
       static_cast<Rose<TensorType>*>(ret.get())->field_1 = new_list_head;

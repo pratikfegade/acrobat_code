@@ -10,7 +10,15 @@
 #include <stdexcept>
 #include <vector>
 
-#include "mvrnn_src.hpp"
+#include "array_utils.hpp"
+
+#if MODEL_SIZE == 1
+#include "mvrnn_small_src.hpp"
+#elif MODEL_SIZE == 2
+#include "mvrnn_large_src.hpp"
+#else
+#error "Unsupported model size"
+#endif
 
 using namespace tvm;
 using namespace tvm::runtime;
@@ -20,26 +28,13 @@ DLDevice dev{kDLCPU, 0};
 DLDevice gpu_dev{kDLCUDA, 0};
 DLDataType dtype{kDLFloat, 32, 1};
 
+#if MODEL_SIZE == 1
 constexpr int hsize = 64;
-
-template <typename TensorType>
-TensorType GetRandomTensor(std::initializer_list<int64_t> shape, DLDevice device,
-                           DLDataType dtype) {}
-
-template <>
-NDArray GetRandomTensor<NDArray>(std::initializer_list<int64_t> shape, DLDevice device,
-                                 DLDataType dtype) {
-  return NDArray::Empty(shape, dtype, device);
-}
-
-template <>
-DLTensor* GetRandomTensor<DLTensor*>(std::initializer_list<int64_t> shape, DLDevice device,
-                                     DLDataType dtype) {
-  static std::vector<NDArray> arrays;
-  auto array = GetRandomTensor<NDArray>(shape, device, dtype);
-  arrays.push_back(array);
-  return const_cast<DLTensor*>(array.operator->());
-}
+#elif MODEL_SIZE == 2
+constexpr int hsize = 128;
+#else
+#error "Unsupported model size"
+#endif
 
 using TreePtr = std::shared_ptr<MVTree>;
 
@@ -67,9 +62,9 @@ TreePtr within_bracket(std::vector<std::string>::const_iterator& tokit) {
         auto leaf = std::static_pointer_cast<MVTree>(std::make_shared<LeafNode>());
         leaf->tag = MVTREE_LEAFNODE_TAG;
         static_cast<LeafNode*>(leaf.get())->field_0 =
-            GetRandomTensor<TensorType>({hsize, hsize}, gpu_dev, dtype);
+            GetFillFloat32Tensor<TensorType>({hsize, hsize}, gpu_dev);
         static_cast<LeafNode*>(leaf.get())->field_1 =
-            GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+            GetFillFloat32Tensor<TensorType>({1, hsize}, gpu_dev);
         return leaf;
       } else {
         auto inner = std::static_pointer_cast<MVTree>(std::make_shared<InnerNode>());
@@ -119,10 +114,10 @@ TreePtr complete_tree(int height) {
     auto leaf = std::static_pointer_cast<MVTree>(std::make_shared<LeafNode>());
     leaf->tag = MVTREE_LEAFNODE_TAG;
     static_cast<LeafNode*>(leaf.get())->field_0 =
-        GetRandomTensor<TensorType>({hsize, hsize}, gpu_dev, dtype);
+        GetFillFloat32Tensor<TensorType>({hsize, hsize}, gpu_dev);
 
     static_cast<LeafNode*>(leaf.get())->field_1 =
-        GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+        GetFillFloat32Tensor<TensorType>({1, hsize}, gpu_dev);
     return leaf;
   } else {
     auto inner = std::static_pointer_cast<MVTree>(std::make_shared<InnerNode>());
@@ -142,8 +137,13 @@ std::vector<TreePtr> complete_trees(int height, int number) {
   return ret;
 }
 
+#if EXECUTOR_TYPE == 1
+using ExecutorType = LazyExecutor<DLTensor*>;
+#elif EXECUTOR_TYPE == 2
 using ExecutorType = DepthTrackingExecutor;
-// using ExecutorType = LazyExecutor<DLTensor*>;
+#else
+#error "Unsupported executor"
+#endif
 
 template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
@@ -171,8 +171,14 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     } else {
       trees = parse_trees<TensorType>(lines, 0, batch_size);
     }
-    batched_main(trees);
+    auto res = batched_main(trees);
     DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
+
+    for (auto p : res) {
+      std::cout << GetTensorMean({hsize, hsize}, std::get<0>(*p)) << " "
+                << GetTensorMean({1, hsize}, std::get<1>(*p)) << std::endl;
+    }
+
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});

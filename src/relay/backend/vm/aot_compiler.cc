@@ -667,10 +667,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
       }
     }
 
-    if (vm_func_.name == "tuple_map_mvrnn") {
-      std::cout << "[AOTC] child wait pc " << children_wait_pos << std::endl;
-    }
-
     std::unordered_map<RegName, Index> storage_device_indices;
     int tmp_var_counter = 0;
 
@@ -1340,11 +1336,6 @@ class VMAOTFunctionCompiler : SourcePrinter {
           default:
             LOG(FATAL) << "Unknown instruction opcode: " << int(instr.op);
             return;
-        }
-
-        if (vm_func_.name == "tuple_map_mvrnn") {
-          std::cout << "[AOTC]  PC " << i << " " << children_wait_pos << " " << children_wait_pos
-                    << " " << recursion_level << std::endl;
         }
 
         if (concurrent_execution() && same_depth_for_all_calls && i >= children_wait_pos &&
