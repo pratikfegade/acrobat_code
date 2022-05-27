@@ -74,6 +74,7 @@ std::shared_ptr<Tree<TensorType>> within_bracket(std::vector<std::string>::const
       auto new_list_head = nil_node;
       auto new_list_tail = nil_node;
 
+      std::cout << "[NC] " << children.size() << std::endl;
       for (size_t i = 0; i < children.size(); ++i) {
         auto new_node = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
             std::make_shared<Cons<std::shared_ptr<Tree<TensorType>>>>());
@@ -196,7 +197,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     num_batches = std::min((int)(lines.size() / batch_size), num_batches);
   }
   bool profile = false;
-  bool debug = false;
+  bool debug = true;
 
   auto trees = complete_trees<TensorType>(theight, bsize);
   if (debug) {
@@ -207,7 +208,7 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
       trees = parse_trees<TensorType>(lines, 0, batch_size);
     }
     batched_main(trees);
-    DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
+    // DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});

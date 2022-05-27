@@ -15,23 +15,28 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 from tree_utils import generate_complete_mvrnn_trees
 
-mod = tvm.IRModule()
-mod._import(TVM_HOME + "/ppf_tests/mvrnn/mvrnn.rly")
+parser = get_cmd_parser()
+parser.add_argument('--hidden', dest='hidden', default=64, type=int)
+args = parser.parse_args()
 
-mvrnn_func = mod["mvrnn"]
-
-batch_size=1
-hidden_size=64
-tree_height=3
+batch_size=8
+hidden_size=args.hidden
+tree_height=6
 target = "cuda"
 device = tvm.runtime.device(target)
 
+mod = tvm.IRModule()
+model_name="mvrnn_" + str(hidden_size)
+mod._import(TVM_HOME + "/ppf_tests/mvrnn/" + model_name + ".rly")
+
+mvrnn_func = mod["mvrnn"]
+
 trees = generate_complete_mvrnn_trees(tree_height, batch_size, hidden_size, mod)
 
-vweight = get_random_tensor((64, 128))
-vbias = get_random_tensor((1, 64))
-mweight = get_random_tensor((64, 128))
-mbias = get_random_tensor((1, 64))
+vweight = get_random_tensor((hidden_size, 2*hidden_size))
+vbias = get_random_tensor((1, hidden_size))
+mweight = get_random_tensor((hidden_size, 2*hidden_size))
+mbias = get_random_tensor((1, hidden_size))
 
 weights_list = [vweight, vbias, mweight, mbias]
 weights_dict = {
@@ -42,9 +47,7 @@ weights_dict = {
 }
 
 batched_execution=True
-model_name="mvrnn"
 
-args = get_cmd_parser().parse_args()
 lazy_execution=args.lazy
 coarsened_execution=args.coarsened
 scattered_kernels=args.scattered
