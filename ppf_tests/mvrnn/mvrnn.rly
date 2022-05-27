@@ -69,16 +69,6 @@ def @mvrnn(
         %m_func(%ml, %mr, %mweight, %mbias),
         %v_func(%mvlr, %mvrl, %vweight, %vbias)
       )
-
-      // (
-      //   %m_func(%ml, %mr, %mweight, %mbias),
-      //   %v_func(
-      //     %dense_func(%vl, %mr),
-      //     %dense_func(%vr, %ml),
-      //     %vweight,
-      //     %vbias
-      //   )
-      // )
     },
     LeafNode(%m, %v) => {
       (%m, %v)

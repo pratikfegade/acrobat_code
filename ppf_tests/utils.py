@@ -7,10 +7,28 @@ TVM_HOME = os.environ["TVM_HOME"]
 import timeit
 import numpy as np
 import tvm
+import argparse
 import tvm.runtime as trt
 from tvm import relay
 from tvm import auto_scheduler
 import sys
+
+dynamic_batch_size_estimate=8
+
+def get_cmd_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--lazy', dest='lazy', default=False, action='store_true')
+    parser.add_argument('--coarsened', dest='coarsened', default=False, action='store_true')
+    parser.add_argument('--scattered', dest='scattered', default=False, action='store_true')
+    parser.add_argument('--concurrent', dest='concurrent', default=False, action='store_true')
+    parser.add_argument('--autosched', dest='autosched', default=False, action='store_true')
+    parser.add_argument('--depth-tracking', dest='depth_tracking', default=False, action='store_true')
+    parser.add_argument('--static-scheduling', dest='static_scheduling',
+                        default=False, action='store_true')
+    parser.add_argument('--aot-code', dest='aot_code', default=False, action='store_true')
+    parser.add_argument('--aot-out-dir', dest='aot_out_dir', nargs='?', default=TVM_HOME + "/ppf_tests/aot_test/")
+    parser.add_argument('--bs-estimate', dest='bs_estimate', default=8, type=int)
+    return parser
 
 def get_ansor_log_file(model_name, parameters, pass_context, target):
     target = target.split(' ')[0]

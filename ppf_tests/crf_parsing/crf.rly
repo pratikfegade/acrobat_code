@@ -1,92 +1,48 @@
 #[version = "0.0.5"]
 
-def @rnn(
-  %inputs: List[Tensor[(1, 256), float32]],
-  %state: Tensor[(1, 256), float32],
+def @sp_repr(
+  %max_seq_len: Tensor[(), int32SS],
+  %sp_reprs: Tensor[(16384, 256), float32],
 
-  %weight: Tensor[(256, 512), float32],
-  %bias: Tensor[(1, 256), float32]
-) -> List[Tensor[(1, 256), float32]] {
-  match?(%inputs) {
-    Nil => Nil,
-    Cons(%input, %tail) => {
-      let %func = fn(
-        %_input: Tensor[(1, 256), float32],
-        %_state: Tensor[(1, 256), float32],
-        %_weight: Tensor[(256, 512), float32],
-        %_bias: Tensor[(1, 256), float32],
-        Primitive = 1
-      ) {
-        sigmoid(
-          %_bias + nn.dense(concatenate((%_input, %_state), axis=1), %_weight, units=256)
-        )
-      };
-      let %new_state = %func(%input, %state, %weight, %bias);
-      Cons(%new_state, @rnn(%tail, %new_state, %weight, %bias))
-    }
+  %i: Tensor[(), int32SS],
+  %j: Tensor[(), int32SS],
+) {
+  take(%sp_reprs, %i * %max_seq_len + %j, axis=0, mode="fast")
+}
+
+def @delta(
+  %max_seq_len: Tensor[(), int32SS],
+  %sp_reprs: Tensor[(16384, 256), float32],
+  %inner_w: Tensor[(256, 256), float32],
+
+  %i: Tensor[(), int32SS],
+  %k: Tensor[(), int32SS],
+  %j: Tensor[(), int32SS],
+) {
+  let %repr_ik = @sp_repr(%max_seq_len, %sp_reprs, %i, %k);
+  let %repr_kp1j = @sp_repr(%max_seq_len, %sp_reprs, %k + 1, %j);
+  nn.dense(nn.dense(%repr_ik, %inner_w, units=256), %repr_kp1j, units=256)
+}
+
+def @inner_summands(
+  %i: Tensor[(), int32SS],
+  %j: Tensor[(), int32SS],
+  %k: Tensor[(), int32SS],
+) {
+  if (%k == %j) {
+    Nil
+  } else {
+    Cons(
+      @delta(),
+      @inner_summands(%i, %j, %k + 1)
+    )
   }
 }
 
-// def @inside_pass_delta(
-//   %i: Tensor[(), int32],
-//   %k: Tensor[(), int32],
-//   %j: Tensor[(), int32],
-// ) -> {
-//   let %repr1 = @span_repr_func(%i, %k);
-//   let %repr2 = @span_repr_func(%k + 1, %j);
-//   transpose(%repr1) * W * %repr2;
-// }
+def @alpha(
+  %i: Tensor[(), int32SS],
+  %j: Tensor[(), int32SS],
+) {
+  let %all_summands = @inner_summands(%i, %j, %i + 1)
 
-// def @inside_pass_alpha(
-//   %i: Tensor[(), int32],
-//   %k: Tensor[(), int32],
-//   %j: Tensor[(), int32],
-// ) {
-//   if (%k == %j) {
-//     zeros((1, 256), dtype="float32")
-//   } else {
-//     @inside_pass_delta(%i, %k, %j) *
-//     @inside_pass_alpha(%i, %i, %k - 1) *
-//     @inside_pass_alpha(%k, %k, %j)
-//   }
-// }
-
-def @get_linear_fn (
-    %_weight: Tensor[(256, 256), float32],
-    %_bias: Tensor[(1, 256), float32],
-  ) {
-    fn(
-      %_input: Tensor[(1, 256), float32],
-    ) {
-      sigmoid(
-        %_bias + nn.dense(%_input, %_weight, units=256)
-      )
-    }
-  }
-
-def @main(
-  %f_rnn_weight: Tensor[(256, 512), float32],
-  %f_rnn_bias: Tensor[(1, 256), float32],
-  %f_rnn_init: Tensor[(1, 256), float32],
-
-  %b_rnn_weight: Tensor[(256, 512), float32],
-  %b_rnn_bias: Tensor[(1, 256), float32],
-  %b_rnn_init: Tensor[(1, 256), float32],
-
-  %f_rnn_oweight: Tensor[(256, 256), float32],
-  %f_rnn_obias: Tensor[(1, 256), float32],
-
-  %b_rnn_oweight: Tensor[(256, 256), float32],
-  %b_rnn_obias: Tensor[(1, 256), float32],
-
-  %inputs: List[Tensor[(1, 256), float32]]
-) -> (List[Tensor[(1, 256), float32]], List[Tensor[(1, 256), float32]]) {
-  // let %rev_inputs = @rev(%inputs);
-  let %f_res = @rnn(%inputs, %f_rnn_init, %f_rnn_weight, %f_rnn_bias);
-  let %b_res = @rnn(%inputs, %b_rnn_init, %b_rnn_weight, %b_rnn_bias);
-
-  let %f_out = @map(@get_linear_fn(%f_rnn_oweight, %f_rnn_obias), %f_res);
-  let %b_out = @map(@get_linear_fn(%b_rnn_oweight, %b_rnn_obias), %b_res);
-
-  (%f_out, %b_out)
 }

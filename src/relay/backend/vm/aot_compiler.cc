@@ -554,15 +554,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
     stream_ << "\n";
   }
 
-  void EmitTriggerEvaluation(bool sync = true) {
+  void EmitTriggerEvaluation() {
     if (lazy_execution()) {
-      auto sync_str = sync ? "true" : "false";
       this->PrintIndent(stream_);
       if (concurrent_execution()) {
-        stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id, " << sync_str
+        stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id"
                 << ");\n";
       } else {
-        stream_ << GetExecutorType() << "::Current()->LazyExecute(" << sync_str << ");\n";
+        stream_ << GetExecutorType() << "::Current()->LazyExecute();\n";
       }
       if (use_depth_tracking_executor()) {
         stream_ << "depth = 0;\n";
@@ -1407,7 +1406,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
           "  new_node->tag = LIST_CONS_TAG;\n"
           "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
-          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, tmp_depth);\n"
+          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n"
           "  depth = std::max(depth, tmp_depth);\n"
           "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
           "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
@@ -1716,9 +1715,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     os << "if (execute) {\n";
     this->BeginScope();
     this->PrintIndent(os);
-    os << "bool sync = tvm::runtime::vm::FiberRuntime::Current().PerformSync();\n";
-    this->PrintIndent(os);
-    os << GetRuntimeType() << "::Current()->LazyExecute(sync);\n";
+    os << GetRuntimeType() << "::Current()->LazyExecute();\n";
     this->EndScope();
     this->PrintIndent(os);
     os << "}\n";

@@ -59,26 +59,49 @@ std::shared_ptr<List<TensorType>> create_list(int length) {
   }
 }
 
+void read_lines(const std::string& filename, int num_lines, std::vector<int>* p_vec) {
+  std::ifstream file(filename);
+  if (!file) {
+    throw std::runtime_error("Missing file");
+  }
+  std::string line;
+  int ctr = 0;
+  while (getline(file, line)) {
+    p_vec->push_back(stoi(line));
+    ctr++;
+  }
+  if (ctr < num_lines) {
+    throw std::runtime_error("Insufficient lines in the file");
+  }
+}
+
 using ExecutorType = DepthTrackingExecutor;
 // using ExecutorType = LazyExecutor<DLTensor*>;
 
 template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
-  int batch_size = atoi(argv[0]);
-  int sent_lo = atoi(argv[1]);
-  int sent_hi = atoi(argv[2]);
-  int num_batches = 1;
+  std::string dataset = argv[0];
+  int batch_size = atoi(argv[1]);
+  int num_batches = atoi(argv[2]);
+  std::vector<int> lengths;
+  if (dataset == "random") {
+    int sent_lo = atoi(argv[3]);
+    int sent_hi = atoi(argv[4]);
+    for (int i = 0; i < batch_size * num_batches; ++i) {
+      lengths.push_back(GetRandom(sent_lo, sent_hi));
+    }
+  } else {
+    read_lines(dataset, batch_size * num_batches, &lengths);
+  }
   bool profile = false;
   bool debug = false;
 
   std::vector<std::shared_ptr<List<TensorType>>> inits;
-  for (int i = 0; i < batch_size; ++i) {
-    // inits.push_back(create_list<TensorType>(GetRandom(sent_lo, sent_hi)));
-    inits.push_back(create_list<TensorType>(20));
-  }
-
   DeviceAPI::Get(gpu_dev)->StreamSync(gpu_dev, nullptr);
   if (debug) {
+    for (int i = 0; i < batch_size; ++i) {
+      inits.push_back(create_list<TensorType>(lengths[i]));
+    }
     batched_main(inits);
     DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
   } else {
@@ -89,6 +112,11 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     float all_gen_time_ms = 0.f;
     float all_exe_time_ms = 0.f;
     for (size_t j1 = 0; j1 < num_batches; ++j1) {
+      inits.clear();
+      for (int j2 = 0; j2 < batch_size; ++j2) {
+        inits.push_back(create_list<TensorType>(lengths[j1 * batch_size + j2]));
+      }
+
       auto runner = [&]() {
         DynBatchRuntime<ExecutorType, TensorType>::Current()->RecycleAllArenaMemory();
 

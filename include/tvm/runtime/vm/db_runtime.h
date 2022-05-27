@@ -215,9 +215,8 @@ class DynBatchRuntime : public runtime::ModuleNode {
 
   /*!
    * \brief Execute all lazily collected packed funcs
-   * \param sync Sync GPU execution.
    */
-  void LazyExecute(bool sync = true);
+  void LazyExecute();
 
   /*!
    * \brief Recycle arena allocated memory

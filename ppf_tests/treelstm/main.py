@@ -13,7 +13,7 @@ from tvm import auto_scheduler
 from treelstm import TreeLSTM
 from network import copy_var
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 from tree_utils import generate_complete_treelstm_trees
 
 def initialize_tlstm(input_size, memory_size):
@@ -35,18 +35,20 @@ hidden_size = 256
 batch_size = 8
 tree_height = 6
 
-lazy_execution=True
-coarsened_execution=True
 batched_execution=True
-scattered_kernels=True
-concurrent_execution=True
-use_autoscheduler=True
-use_depth_tracking=True
-perform_static_scheduling=False
-aot_output_directory=TVM_HOME + "/ppf_tests/aot_test"
 model_name="treelstm"
-generate_aot_code=True
-dynamic_batch_size_estimate=256
+
+args = get_cmd_parser().parse_args()
+lazy_execution=args.lazy
+coarsened_execution=args.coarsened
+scattered_kernels=args.scattered
+concurrent_execution=args.concurrent
+use_autoscheduler=args.autosched
+use_depth_tracking=args.depth_tracking
+perform_static_scheduling=args.static_scheduling
+aot_output_directory=args.aot_out_dir
+generate_aot_code=args.aot_code
+dynamic_batch_size_estimate=args.bs_estimate
 
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")

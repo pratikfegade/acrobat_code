@@ -6,4 +6,4 @@ LD_FLAGS=-ltvm_runtime -lboost_fiber -lboost_context
 	@${CXX} -o $@ ${CXX_FLAGS} $@_main.cpp $< ${LD_FLAGS}
 
 clean:
-	@rm -f aot_test treelstm *.o
+	@rm -f treelstm mvrnn birnn bertxit graph_gen drnn lstm_cell *.o

@@ -87,8 +87,7 @@ class AbstractExecutor {
 
   virtual void Execute() = 0;
 
-  virtual void BatchedExecute(bool sync, bool coarsened_execution,
-                              bool all_nodes_same_depth = false) = 0;
+  virtual void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false) = 0;
 
   virtual void ExecuteOpNodeBatch(const Index func_idx,
                                   const std::vector<OpNode<TensorType>*>& nodes) = 0;
@@ -144,7 +143,7 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
 
   void Execute();
 
-  void BatchedExecute(bool sync, bool coarsened_execution, bool all_nodes_same_depth = false);
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
 
   void ExecuteOpNodeBatch(const Index func_idx, const std::vector<OpNode<TensorType>*>& nodes);
 
@@ -176,11 +175,11 @@ template <>
 void LazyAllocationLazyExecutor::Execute();
 
 template <>
-void EagerAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
+void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                  bool all_nodes_same_depth);
 
 template <>
-void LazyAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
+void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                 bool all_nodes_same_depth);
 
 template <>
@@ -207,7 +206,7 @@ class DepthTrackingExecutor final : public AbstractExecutor<DepthTrackingExecuto
 
   void Execute();
 
-  void BatchedExecute(bool sync, bool coarsened_execution, bool all_nodes_same_depth = false);
+  void BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth = false);
 
   void ExecuteOpNodeBatch(const Index func_idx, const std::vector<LazyOpNode*>& nodes);
 

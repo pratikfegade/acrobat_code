@@ -720,21 +720,21 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
 }
 
 template <>
-void EagerAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
+void EagerAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                  bool all_nodes_same_depth) {
   BatchedExecuteImpl<NDArray, const Object*>(this, coarsened_execution, all_nodes_same_depth);
 
-  if (sync && accelerator_device_ == GPU_INDEX) {
+  if (accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
 }
 
 template <>
-void LazyAllocationLazyExecutor::BatchedExecute(bool sync, bool coarsened_execution,
+void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
                                                 bool all_nodes_same_depth) {
   BatchedExecuteImpl<DLTensor*, DLTensor*>(this, coarsened_execution, all_nodes_same_depth);
-  if (sync && accelerator_device_ == GPU_INDEX) {
+  if (accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }
@@ -761,8 +761,7 @@ void DepthTrackingExecutor::Execute() {
       << "Not implemented. Please use LazyExecutor<DLTensor*> class for this functionality.";
 }
 
-void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
-                                           bool all_nodes_same_depth) {
+void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_nodes_same_depth) {
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStartCall("scheduling");
@@ -773,7 +772,7 @@ void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
     // std::cout << "[LZ] Phase " << k << " " << phase_nodes.size() << std::endl;
     for (size_t j = 0; j < phase_nodes.size(); ++j) {
       auto& depth_nodes = phase_nodes[j];
-      std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
+      // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
       std::unordered_map<int, std::vector<LazyOpNode*>> func_to_node;
 
       for (auto& node : depth_nodes) {
@@ -791,7 +790,7 @@ void DepthTrackingExecutor::BatchedExecute(bool sync, bool coarsened_execution,
   }
   nodes_.clear();
   nodes_.resize(MAX_PROGRAM_PHASES);
-  if (sync && accelerator_device_ == GPU_INDEX) {
+  if (accelerator_device_ == GPU_INDEX) {
     auto& gpu_device = vm_shared_state_->devices_[GPU_INDEX];
     DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
   }

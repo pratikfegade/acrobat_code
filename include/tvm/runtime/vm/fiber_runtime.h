@@ -48,8 +48,7 @@ class FiberRuntime {
         children_waiting_(num_fibers, false),
         parents_(num_fibers, -1),
         alive_num_(num_fibers),
-        phase_waiting_num_(0),
-        sync_next_(false) {
+        phase_waiting_num_(0) {
     for (int i = 0; i < num_fibers; ++i) {
       start_channels_.push_back(new channel_t(2));
       stop_channels_.push_back(new channel_t(2));
@@ -84,8 +83,7 @@ class FiberRuntime {
     start_channels_[idx]->pop(dummy);
   }
 
-  void WorkerYield(int idx, bool sync_next = true) {
-    sync_next_ = sync_next_ || sync_next;
+  void WorkerYield(int idx) {
     // std::cout << "[" << idx << "] Worker yielding" << std::endl;
     WorkerWaitInternal(idx, kYield);
   }
@@ -163,7 +161,6 @@ class FiberRuntime {
         }
       }
     }
-    sync_next_ = false;
   }
 
   void AddFiber(int idx, fiber_t* fiber) { fibers_[idx] = fiber; }
@@ -174,8 +171,6 @@ class FiberRuntime {
   }
 
   bool IsAlive(int idx) { return alive_[idx]; }
-
-  bool PerformSync() { return sync_next_; }
 
   void MainEndFiberExecution() {
     // for (int i = 0; i < orig_num_fibers_; ++i) {
@@ -204,7 +199,6 @@ class FiberRuntime {
   std::vector<int> parents_;
   int alive_num_;
   int phase_waiting_num_;
-  bool sync_next_;
 
   static FiberRuntime* instance_;
 };

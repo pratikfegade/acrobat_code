@@ -12,7 +12,7 @@ from tvm import relay
 from tvm import auto_scheduler
 import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
-from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule
+from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
@@ -46,18 +46,21 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((1, hidden_size)))
     inputs.append(get_random_tensor((1, hidden_size)))
 
-lazy_execution=True
-coarsened_execution=True
 batched_execution=True
-scattered_kernels=True
-concurrent_execution=True
-use_autoscheduler=True
-use_depth_tracking=True
-perform_static_scheduling=False
-aot_output_directory=TVM_HOME + "/ppf_tests/aot_test/"
 model_name="drnn"
-generate_aot_code=True
-dynamic_batch_size_estimate=8
+
+args = get_cmd_parser().parse_args()
+lazy_execution=args.lazy
+coarsened_execution=args.coarsened
+scattered_kernels=args.scattered
+concurrent_execution=args.concurrent
+use_autoscheduler=args.autosched
+use_depth_tracking=args.depth_tracking
+perform_static_scheduling=args.static_scheduling
+aot_output_directory=args.aot_out_dir
+generate_aot_code=args.aot_code
+dynamic_batch_size_estimate=args.bs_estimate
+
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,
     coarsened_execution=coarsened_execution,
