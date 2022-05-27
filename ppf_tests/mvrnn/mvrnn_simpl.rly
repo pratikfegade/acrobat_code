@@ -1,0 +1,52 @@
+#[version = "0.0.5"]
+
+type MVTree {
+  InnerNode(MVTree, MVTree),
+  LeafNode(Tensor[(64, 64), float32], Tensor[(1, 64), float32]),
+}
+
+def @mvrnn(
+  %vweight: Tensor[(64, 128), float32],
+  %vbias: Tensor[(1, 64), float32],
+  %mweight: Tensor[(64, 128), float32],
+  %mbias: Tensor[(1, 64), float32],
+  %tree: MVTree
+) -> (Tensor[(64, 64), float32], Tensor[(1, 64), float32]) {
+
+  match? (%tree) {
+    InnerNode(%left, %right) => {
+      let %ll = @mvrnn(%vweight, %vbias, %mweight, %mbias, %left);
+      let %rr = @mvrnn(%vweight, %vbias, %mweight, %mbias, %right);
+      let %ml = %ll.0;
+      let %vl = %ll.1;
+      let %mr = %rr.0;
+      let %vr = %rr.1;
+
+      let %mvlr = nn.dense(%vl, %mr, units=64);
+      let %mvrl = nn.dense(%vr, %ml, units=64);
+
+      let %m_res = %mbias + nn.dense(concatenate((%ml, %mr), axis=1), %mweight, units=64);
+      let %v_res = tanh(%vbias + nn.dense(concatenate((%mvlr, %mvrl), axis=1), %vweight, units=64))
+      (%m_res, %v_res)
+    },
+    LeafNode(%m, %v) => {
+      (%m, %v)
+    }
+  }
+}
+
+def @main(
+  %vweight: Tensor[(64, 128), float32],
+  %vbias: Tensor[(1, 64), float32],
+
+  %mweight: Tensor[(64, 128), float32],
+  %mbias: Tensor[(1, 64), float32],
+
+  %cweight: Tensor[(64, 16), float32],
+  %cbias: Tensor[(1, 16), float32],
+
+  %tree: MVTree
+) -> Tensor[(), int32] {
+  let %res = @mvrnn(%vweight, %vbias, %mweight, %mbias, %tree);
+  argmax(softmax(%cbias + nn.dense(%res.1, %cweight, units=16)));
+}

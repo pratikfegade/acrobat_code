@@ -14,15 +14,20 @@ import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 
+args = get_cmd_parser().parse_args()
+
 mod = tvm.IRModule()
-mod._import(TVM_HOME + "/ppf_tests/bertxit/bertxit.rly")
+model_name="berxit_" + args.hidden
+mod._import(TVM_HOME + "/ppf_tests/berxit/" + model_name + ".rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 main_func = mod["main"]
 
-num_heads=8
+
+model_sizes = { "tiny": 8, "small": 12, "large": 16 }
+num_heads=model_sizes[args.hidden]
 head_size=64
 model_size=head_size*num_heads
-ff_size=2048
+ff_size=4*model_size
 seq_len=128
 num_classes=16
 batch_size=8
@@ -60,7 +65,6 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((seq_len, model_size)))
 
 batched_execution=True
-model_name="bertxit"
 
 args = get_cmd_parser().parse_args()
 lazy_execution=args.lazy

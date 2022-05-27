@@ -28,6 +28,7 @@ def get_cmd_parser():
     parser.add_argument('--aot-code', dest='aot_code', default=False, action='store_true')
     parser.add_argument('--aot-out-dir', dest='aot_out_dir', nargs='?', default=TVM_HOME + "/ppf_tests/aot_test/")
     parser.add_argument('--bs-estimate', dest='bs_estimate', default=8, type=int)
+    parser.add_argument('--hidden', dest='hidden', nargs='?', default="small")
     return parser
 
 def get_ansor_log_file(model_name, parameters, pass_context, target):

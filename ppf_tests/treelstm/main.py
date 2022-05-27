@@ -31,14 +31,16 @@ target = "cuda"
 if target.startswith("cuda"): device = tvm.runtime.device("cuda", 0)
 else: device = tvm.runtime.device("cpu")
 
-hidden_size = 256
+args = get_cmd_parser().parse_args()
+
+hidden_sizes = {"small": 256, "large": 512}
+hidden_size = hidden_sizes[args.hidden]
 batch_size = 8
 tree_height = 6
 
 batched_execution=True
-model_name="treelstm"
+model_name="treelstm_" + args.hidden
 
-args = get_cmd_parser().parse_args()
 lazy_execution=args.lazy
 coarsened_execution=args.coarsened
 scattered_kernels=args.scattered
@@ -50,28 +52,18 @@ aot_output_directory=args.aot_out_dir
 generate_aot_code=args.aot_code
 dynamic_batch_size_estimate=args.bs_estimate
 
-mod = tvm.IRModule()
-mod.import_from_std("prelude.rly")
-mod._import(TVM_HOME + "/ppf_tests/treelstm/treelstm.rly")
-
+tlstm, mod, prelude = initialize_tlstm(hidden_size, hidden_size)
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=batched_execution)(mod)
-main_func = mod["main"]
-
-weights_list = []
-weights_dict = {
-    main_func.params[0].name_hint: get_random_tensor((hidden_size, hidden_size)),
-    main_func.params[1].name_hint: get_random_tensor((hidden_size, hidden_size)),
-    main_func.params[2].name_hint: get_random_tensor((3*hidden_size, hidden_size)),
-    main_func.params[3].name_hint: get_random_tensor((1, 3*hidden_size)),
-    main_func.params[4].name_hint: get_random_tensor((1, 3*hidden_size)),
-    main_func.params[5].name_hint: get_random_tensor((3*hidden_size, hidden_size)),
-    main_func.params[6].name_hint: get_random_tensor((1, hidden_size)),
-    main_func.params[7].name_hint: get_random_tensor((1, hidden_size)),
-}
-for i in range(len(weights_dict)):
-    weights_list.append(weights_dict[main_func.params[i].name_hint])
+weight_vars = tlstm.all_weights()
 
 trees = generate_complete_treelstm_trees(tree_height, batch_size, (1, hidden_size), mod)
+
+weights_list = []
+weights_dict = {}
+for weight in weight_vars:
+    tensor = get_random_tensor(tuple([int(i) for i in weight.type_annotation.shape]))
+    weights_list.append(tensor)
+    weights_dict[weight.name_hint] = tensor
 
 pass_context, execution_options = relay.backend.vm.create_workflow_configs(
     lazy_execution=lazy_execution,

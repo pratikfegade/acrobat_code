@@ -15,18 +15,17 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 from tree_utils import generate_complete_mvrnn_trees
 
-parser = get_cmd_parser()
-parser.add_argument('--hidden', dest='hidden', default=64, type=int)
-args = parser.parse_args()
+parser = get_cmd_parser().parse_args()
 
 batch_size=8
-hidden_size=args.hidden
+hidden_sizes = {"small": 64, "large": 128}
+hidden_size=hidden_sizes[args.hidden]
 tree_height=6
 target = "cuda"
 device = tvm.runtime.device(target)
 
 mod = tvm.IRModule()
-model_name="mvrnn_" + str(hidden_size)
+model_name="mvrnn_" + args.hidden
 mod._import(TVM_HOME + "/ppf_tests/mvrnn/" + model_name + ".rly")
 
 mvrnn_func = mod["mvrnn"]

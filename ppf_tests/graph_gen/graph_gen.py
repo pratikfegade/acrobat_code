@@ -14,38 +14,38 @@ import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, get_cmd_parser
 
+args = get_cmd_parser().parse_args()
+
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
-mod._import(TVM_HOME + "/ppf_tests/graph_gen/graph_gen.rly")
+model_name="graph_gen_" + args.hidden
+mod._import(TVM_HOME + "/ppf_tests/graph_gen/" + model_name + ".rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 main_func = mod["main"]
 
 batch_size=8
-hidden_size=64
+hidden_sizes = { "small": 256, "large": 512 }
+hidden_size=hidden_sizes[args.hidden]
 target = "cuda"
 device = tvm.runtime.device(target)
 
 weights_list = []
 weights_dict = {
-    main_func.params[0].name_hint: get_random_tensor((256, 512)),
-    main_func.params[1].name_hint: get_random_tensor((256, 512)),
-    main_func.params[2].name_hint: get_random_tensor((256, 512)),
-    main_func.params[3].name_hint: get_random_tensor((1, 256)),
-    main_func.params[4].name_hint: get_random_tensor((1, 256)),
-    main_func.params[5].name_hint: get_random_tensor((1, 256)),
-    main_func.params[6].name_hint: get_random_tensor((256, 256)),
-    main_func.params[7].name_hint: get_random_tensor((1, 256)),
-    main_func.params[8].name_hint: get_random_tensor((256, 512)),
-    main_func.params[9].name_hint: get_random_tensor((1, 256)),
+    main_func.params[0].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[1].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[2].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[3].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[4].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[5].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[6].name_hint: get_random_tensor((hidden_size, hidden_size)),
+    main_func.params[7].name_hint: get_random_tensor((1, hidden_size)),
+    main_func.params[8].name_hint: get_random_tensor((hidden_size, 2*hidden_size)),
+    main_func.params[9].name_hint: get_random_tensor((1, hidden_size)),
 }
 for i in range(len(weights_dict)):
     weights_list.append(weights_dict[main_func.params[i].name_hint])
 
 batched_execution=True
-model_name="birnn"
-
-batched_execution=True
-model_name="graph_gen"
 
 args = get_cmd_parser().parse_args()
 lazy_execution=args.lazy

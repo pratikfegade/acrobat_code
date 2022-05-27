@@ -14,15 +14,19 @@ import sys
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 from utils import get_ansor_log_file, get_random_tensor, pgo_and_auto_schedule, get_cmd_parser
 
+args = get_cmd_parser().parse_args()
+
 mod = tvm.IRModule()
 mod.import_from_std("prelude.rly")
-mod._import(TVM_HOME + "/ppf_tests/drnn/drnn.rly")
+model_name="drnn_" + args.hidden
+mod._import(TVM_HOME + "/ppf_tests/drnn/" + model_name + ".rly")
 mod = tvm.relay.transform.RemoveUnusedFunctions(batched_execution=True)(mod)
 
 main_func = mod["main"]
 
-batch_size=4
-hidden_size=256
+batch_size=8
+hidden_sizes = {"small": 256, "large": 512}
+hidden_size=hidden_sizes[args.hidden]
 target = "cuda"
 device = tvm.runtime.device(target)
 
@@ -47,9 +51,7 @@ for i in range(batch_size):
     inputs.append(get_random_tensor((1, hidden_size)))
 
 batched_execution=True
-model_name="drnn"
 
-args = get_cmd_parser().parse_args()
 lazy_execution=args.lazy
 coarsened_execution=args.coarsened
 scattered_kernels=args.scattered
