@@ -40,6 +40,14 @@ def @get_classification_fn (
   }
 }
 
+def @get_argmax_fn () {
+  fn(
+    %_fbinputs: Tensor[(1, 16), float32]
+  ) {
+    argmax(%_fbinputs)
+  }
+}
+
 def @revl[A](%xs: List[A], %acc: List[A]) -> List[A] {
   match?(%xs) {
     Cons(%h, %t) => @revl(%t, Cons(%h, %acc)),
@@ -77,7 +85,7 @@ def @main(
   %cbias: Tensor[(1, 16), float32],
 
   %f_inputs: List[Tensor[(1, 256), float32]]
-) -> List[Tensor[(), int32]] {
+) {
   let %b_inputs = @revl(%f_inputs, Nil);
   let %fb_res = @tuple_map_rnn(
     %f_rnn_weight, %f_rnn_bias, %f_rnn_init,
@@ -89,6 +97,11 @@ def @main(
   let %b_res = @revl(%fb_res.1, Nil);
 
   let %_ = db.phase_change();
+
+  // let %combined = @zip(%f_res, %b_res);
+  // let %class_scores = @map(@get_classification_fn(%cweight, %cbias), %combined);
+  // let %classes = @map(@get_argmax_fn(), %class_scores);
+  // (@zip(%combined, %class_scores), %classes)
 
   let %combined = @zip(%f_res, %b_res);
   let %classes = @map(@get_classification_fn(%cweight, %cbias), %combined);

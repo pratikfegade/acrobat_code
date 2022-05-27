@@ -13,6 +13,8 @@ from tvm import relay
 from tvm import auto_scheduler
 import sys
 
+np.random.seed(0)
+
 dynamic_batch_size_estimate=8
 
 def get_cmd_parser():
@@ -44,8 +46,8 @@ def get_ansor_log_file(model_name, parameters, pass_context, target):
     return log_dir + file_name
 
 def get_random_tensor(shape):
-    # return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
-    return relay.const(np.full(tuple(shape), 0.1), dtype='float32').data
+    return relay.const(np.random.normal(size=tuple(shape)), dtype='float32').data
+    # return relay.const(np.full(tuple(shape), 0.01), dtype='float32').data
 
 
 def pgo_and_auto_schedule(mod, weights_dict, inputs, batch_size, log_file,

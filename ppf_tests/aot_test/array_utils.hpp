@@ -1,5 +1,6 @@
 #include <tvm/runtime/ndarray.h>
 
+#include <iomanip>
 #include <random>
 
 using namespace tvm;
@@ -15,7 +16,8 @@ int64_t GetTotalSize(const std::initializer_list<int64_t>& shape) {
 
 float* CreateRandomFloat32HostArray(int64_t total_size) {
   std::random_device rd;
-  std::mt19937 e2(rd());
+  // std::mt19937 e2(rd());
+  std::mt19937 e2(5);
   std::normal_distribution<> dist(0, 1);
 
   float* arr = static_cast<float*>(malloc(total_size * sizeof(float)));
@@ -75,7 +77,7 @@ DLTensor* GetRandomFloat32Tensor<DLTensor*>(std::initializer_list<int64_t> shape
 
 template <typename TensorType>
 TensorType GetFillFloat32Tensor(std::initializer_list<int64_t> shape, DLDevice device,
-                                float fill_value = 0.01) {}
+                                float fill_value = 0.05) {}
 
 template <>
 NDArray GetFillFloat32Tensor<NDArray>(std::initializer_list<int64_t> shape, DLDevice device,
@@ -97,7 +99,7 @@ DLTensor* GetFillFloat32Tensor<DLTensor*>(std::initializer_list<int64_t> shape, 
   return const_cast<DLTensor*>(array.operator->());
 }
 
-float GetTensorMean(std::initializer_list<int64_t> shape, DLTensor* tensor) {
+float GetTensorMean(std::initializer_list<int64_t> shape, DLTensor* tensor, bool print = false) {
   auto destination = NDArray::Empty(shape, {kDLFloat, 32, 1}, {kDLCPU, 0});
   destination.CopyFrom(tensor);
   auto arr = static_cast<float*>(destination.operator->()->data);
@@ -106,8 +108,28 @@ float GetTensorMean(std::initializer_list<int64_t> shape, DLTensor* tensor) {
   std::stringstream ss;
   for (int64_t i = 0; i < total_size; ++i) {
     sum += arr[i];
+    ss << std::fixed << std::setprecision(2) << arr[i] << " ";
+  }
+  if (print) {
+    std::cout << ss.str() << std::endl;
+  }
+  return sum / total_size;
+}
+
+float GetIntegerTensorMean(std::initializer_list<int64_t> shape, DLTensor* tensor,
+                           bool print = false) {
+  auto destination = NDArray::Empty(shape, {kDLInt, 32, 1}, {kDLCPU, 0});
+  destination.CopyFrom(tensor);
+  auto arr = static_cast<int32_t*>(destination.operator->()->data);
+  int64_t sum = 0;
+  auto total_size = GetTotalSize(shape);
+  std::stringstream ss;
+  for (int64_t i = 0; i < total_size; ++i) {
+    sum += arr[i];
     ss << arr[i] << " ";
   }
-  // std::cout << ss.str() << std::endl;
-  return sum / total_size;
+  if (print) {
+    std::cout << ss.str() << std::endl;
+  }
+  return sum;
 }
