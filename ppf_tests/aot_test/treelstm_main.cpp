@@ -10,7 +10,15 @@
 #include <stdexcept>
 #include <vector>
 
-#include "treelstm_src.hpp"
+#include "array_utils.hpp"
+
+#if MODEL_SIZE == 1
+#include "treelstm_small_src.hpp"
+#elif MODEL_SIZE == 2
+#include "treelstm_large_src.hpp"
+#else
+#error "Unsupported model size"
+#endif
 
 using namespace tvm;
 using namespace tvm::runtime;
@@ -20,28 +28,16 @@ DLDevice dev{kDLCPU, 0};
 DLDevice gpu_dev{kDLCUDA, 0};
 DLDataType dtype{kDLFloat, 32, 1};
 
+#if MODEL_SIZE == 1
 constexpr int hsize = 256;
+#elif MODEL_SIZE == 2
+constexpr int hsize = 512;
+#else
+#error "Unsupported model size"
+#endif
+
 constexpr int bsize = 8;
 constexpr int theight = 6;
-
-template <typename TensorType>
-TensorType GetRandomTensor(std::initializer_list<int64_t> shape, DLDevice device,
-                           DLDataType dtype) {}
-
-template <>
-NDArray GetRandomTensor<NDArray>(std::initializer_list<int64_t> shape, DLDevice device,
-                                 DLDataType dtype) {
-  return NDArray::Empty(shape, dtype, device);
-}
-
-template <>
-DLTensor* GetRandomTensor<DLTensor*>(std::initializer_list<int64_t> shape, DLDevice device,
-                                     DLDataType dtype) {
-  static std::vector<NDArray> arrays;
-  auto array = GetRandomTensor<NDArray>(shape, device, dtype);
-  arrays.push_back(array);
-  return const_cast<DLTensor*>(array.operator->());
-}
 
 std::vector<std::string> tokenize_sst_sexpr(const std::string& s) {
   std::regex tokker(" +|[()]|[^ ()]+");
@@ -66,7 +62,7 @@ std::shared_ptr<Tree<TensorType>> within_bracket(std::vector<std::string>::const
       auto ret = std::static_pointer_cast<Tree<TensorType>>(std::make_shared<Rose<TensorType>>());
       ret->tag = TREE_ROSE_TAG;
       static_cast<Rose<TensorType>*>(ret.get())->field_0 =
-          GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+          GetFillFloat32Tensor<TensorType>({1, hsize}, gpu_dev);
 
       auto nil_node = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
           std::make_shared<Nil<std::shared_ptr<Tree<TensorType>>>>());
@@ -98,7 +94,7 @@ std::shared_ptr<Tree<TensorType>> within_bracket(std::vector<std::string>::const
       auto ret = std::static_pointer_cast<Tree<TensorType>>(std::make_shared<Rose<TensorType>>());
       ret->tag = TREE_ROSE_TAG;
       static_cast<Rose<TensorType>*>(ret.get())->field_0 =
-          GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+          GetFillFloat32Tensor<TensorType>({1, hsize}, gpu_dev);
       auto nil = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
           std::make_shared<Nil<std::shared_ptr<Tree<TensorType>>>>());
       nil->tag = LIST_NIL_TAG;
@@ -142,7 +138,7 @@ std::shared_ptr<Tree<TensorType>> complete_tree(int height) {
   auto ret = std::static_pointer_cast<Tree<TensorType>>(std::make_shared<Rose<TensorType>>());
   ret->tag = TREE_ROSE_TAG;
   static_cast<Rose<TensorType>*>(ret.get())->field_0 =
-      GetRandomTensor<TensorType>({1, hsize}, gpu_dev, dtype);
+      GetFillFloat32Tensor<TensorType>({1, hsize}, gpu_dev);
   if (height == 1) {
     auto nil = std::static_pointer_cast<List<std::shared_ptr<Tree<TensorType>>>>(
         std::make_shared<Nil<std::shared_ptr<Tree<TensorType>>>>());
@@ -179,8 +175,13 @@ std::vector<std::shared_ptr<Tree<TensorType>>> complete_trees(int height, int nu
   return ret;
 }
 
+#if EXECUTOR_TYPE == 1
+using ExecutorType = LazyExecutor<DLTensor*>;
+#elif EXECUTOR_TYPE == 2
 using ExecutorType = DepthTrackingExecutor;
-// using ExecutorType = LazyExecutor<DLTensor*>;
+#else
+#error "Unsupported executor"
+#endif
 
 template <typename TensorType>
 void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
@@ -208,8 +209,13 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
     } else {
       trees = parse_trees<TensorType>(lines, 0, batch_size);
     }
-    batched_main(trees);
-    // DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
+    auto res = batched_main(trees);
+    DynBatchRuntime<ExecutorType, TensorType>::Current()->LazyExecute();
+
+    for (auto p : res) {
+      std::cout << GetTensorMean({1, hsize}, std::get<0>(*p)) << " "
+                << GetTensorMean({1, hsize}, std::get<1>(*p)) << std::endl;
+    }
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});

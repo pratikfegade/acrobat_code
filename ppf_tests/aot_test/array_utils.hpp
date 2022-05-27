@@ -75,7 +75,7 @@ DLTensor* GetRandomFloat32Tensor<DLTensor*>(std::initializer_list<int64_t> shape
 
 template <typename TensorType>
 TensorType GetFillFloat32Tensor(std::initializer_list<int64_t> shape, DLDevice device,
-                                float fill_value = 0.1) {}
+                                float fill_value = 0.01) {}
 
 template <>
 NDArray GetFillFloat32Tensor<NDArray>(std::initializer_list<int64_t> shape, DLDevice device,
@@ -101,10 +101,13 @@ float GetTensorMean(std::initializer_list<int64_t> shape, DLTensor* tensor) {
   auto destination = NDArray::Empty(shape, {kDLFloat, 32, 1}, {kDLCPU, 0});
   destination.CopyFrom(tensor);
   auto arr = static_cast<float*>(destination.operator->()->data);
-  float sum = 0;
+  double sum = 0;
   auto total_size = GetTotalSize(shape);
+  std::stringstream ss;
   for (int64_t i = 0; i < total_size; ++i) {
     sum += arr[i];
+    ss << arr[i] << " ";
   }
+  // std::cout << ss.str() << std::endl;
   return sum / total_size;
 }

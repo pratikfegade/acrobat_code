@@ -178,7 +178,6 @@ void invoke_model(std::vector<Device> devices, int argc, char* argv[]) {
       std::cout << GetTensorMean({hsize, hsize}, std::get<0>(*p)) << " "
                 << GetTensorMean({1, hsize}, std::get<1>(*p)) << std::endl;
     }
-
   } else {
     if (profile) {
       VMDBProfiler::Init({dev, gpu_dev});
