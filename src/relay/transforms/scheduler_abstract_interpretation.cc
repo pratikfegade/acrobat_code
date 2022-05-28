@@ -236,6 +236,17 @@ class TaintAnalysis : public BaseExprFunctor {
     }
   }
 
+  bool ContainsAFunctionType(const Type& type) {
+    class Visitor : public TypeVisitor {
+     public:
+      void VisitType_(const FuncTypeNode* op) override { has_function_ = true; }
+      bool has_function_{false};
+    };
+    Visitor v;
+    v(type);
+    return v.has_function_;
+  }
+
   TaintT MergeTaints(const TaintT& vals1, const TaintT& vals2) {
     return TaintT(std::max(vals1->value, vals2->value));
   }
@@ -272,6 +283,9 @@ class TaintAnalysis : public BaseExprFunctor {
 
   FullTaint Add(const Var& var, ContextT current_context, const FullTaint& to_add,
                 const std::string& reason) {
+    if (to_add->taint->value == MAX_DEPTH_VALUE) {
+      std::cout << "[SAI] Var " << var->vid->name_hint << " " << reason << std::endl;
+    }
     return Add<Var, VarStateMap>(var_states_, var, current_context, to_add);
   }
 
@@ -483,26 +497,35 @@ class TaintAnalysis : public BaseExprFunctor {
     for (auto kv : callees) {
       auto callee_fn = kv.first;
 
-      ICHECK_EQ(callee_fn->params.size(), op->args.size());
-      for (size_t i = 0; i < callee_fn->params.size(); ++i) {
-        auto arg = op->args[i];
-        auto param = callee_fn->params[i];
-        auto arg_full_taint = this->VisitExpr(arg, current_context);
-        auto param_full_taint = arg_full_taint;
-
-        Add(param, callee_context, param_full_taint, "function param");
-      }
-
-      FullTaint callee_full_taint;
-      if (IsMapFuncInModule() && callee_fn.get() == GetMapFuncNode()) {
-        callee_full_taint = VisitMapBody(op, callee_context);
-      } else if (on_stack_.count(std::make_pair(callee_context, callee_fn.get()))) {
-        callee_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
+      bool scheduler_depth_constant_annotated =
+          callee_fn->GetAttr<Integer>("DBSchedulerDepthConstant", Integer(0)).value()->value == 1;
+      if (scheduler_depth_constant_annotated && !ContainsAFunctionType(op->checked_type_)) {
+        Array<FullTaint> arg_taints;
+        ICHECK_EQ(callee_fn->params.size(), op->args.size());
+        for (size_t i = 0; i < callee_fn->params.size(); ++i) {
+          arg_taints.push_back(this->VisitExpr(op->args[i], current_context));
+        }
+        callee_taints.push_back(Merge(arg_taints));
       } else {
-        callee_full_taint = VisitBody(callee_fn, callee_context);
-        callee_full_taint = Add(callee_fn, callee_context, callee_full_taint);
+        ICHECK_EQ(callee_fn->params.size(), op->args.size());
+        for (size_t i = 0; i < callee_fn->params.size(); ++i) {
+          auto arg = op->args[i];
+          auto param = callee_fn->params[i];
+          auto full_taint = this->VisitExpr(arg, current_context);
+          Add(param, callee_context, full_taint, "function param");
+        }
+
+        FullTaint callee_full_taint;
+        if (IsMapFuncInModule() && callee_fn.get() == GetMapFuncNode()) {
+          callee_full_taint = VisitMapBody(op, callee_context);
+        } else if (on_stack_.count(std::make_pair(callee_context, callee_fn.get()))) {
+          callee_full_taint = GetOrCreateFunctionState(callee_fn, callee_context);
+        } else {
+          callee_full_taint = VisitBody(callee_fn, callee_context);
+          callee_full_taint = Add(callee_fn, callee_context, callee_full_taint);
+        }
+        callee_taints.push_back(callee_full_taint);
       }
-      callee_taints.push_back(callee_full_taint);
     }
 
     return Merge(callee_taints);
