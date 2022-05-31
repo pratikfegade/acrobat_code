@@ -59,6 +59,9 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   // Add the current global function as an entry to the call grpah.
   CallGraphEntry* cg_node = LookupGlobalVar(gv);
 
+  bool print = false;  //(gv->name_hint == "pop");
+  // std::cout << "[CG] Adding " << gv->name_hint << std::endl;
+
   // Only GlobalVar nodes need to be handled in a function. It indicates that
   // the global function of a callee is called by the function that is being
   // processed. An edge will be added from the current global function, cg_node,
@@ -68,42 +71,129 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
   // post-order visitor will visit each AST node of the current function to
   // figure out the dependencies between functions.
 
-  const Op invoke_tvm_op = Op::Get("vm.invoke_tvm_op");
-  ICHECK(invoke_tvm_op.defined());
+  // ICHECK(invoke_tvm_op.defined());
   auto batched_prim_funcs = module->batched_prim_funcs;
-  PostOrderVisit(func, [&](const Expr& expr) {
-    // TODO(mbs): Cleanup shapes functions.
-    if (const auto* call_node = expr.as<CallNode>()) {
+  // PostOrderVisit(func, [&](const Expr& expr) {
+  //   // TODO(mbs): Cleanup shapes functions.
+  //   if (const auto* call_node = expr.as<CallNode>()) {
+  //     if (print) {
+  //       std::cout << "[CG]  Visiting " << PrettyPrint(GetRef<Expr>(call_node)) << std::endl;
+  //     }
+  //     CallLoweredProps props = GetCallLoweredProps(call_node);
+  //     if (props.lowered_func.defined() && props.attrs.metadata.count("prim_shape_fn_var")) {
+  //       // We are implicitly calling the shape function *in addition to* the call target.
+  //       CallGraphEntry* callee_cg_node =
+  //           LookupGlobalVar(Downcast<GlobalVar>(props.attrs.metadata["prim_shape_fn_var"]));
+  //       if (print) {
+  //         std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+  //       }
+  //       cg_node->AddCalledGlobal(callee_cg_node);
+  //     }
+  //     if (call_node->op == invoke_tvm_op) {
+  //       auto callee = Downcast<GlobalVar>(call_node->args[0]);
+  //       CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
+  //       cg_node->AddCalledGlobal(callee_cg_node);
+  //       if (print) {
+  //         std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+  //       }
+  //       auto it = batched_prim_funcs.find(callee);
+  //       if (it != batched_prim_funcs.end()) {
+  //         auto batched_callee = (*it).second;
+  //         CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
+  //         cg_node->AddCalledGlobal(batched_callee_cg_node);
+  //         if (print) {
+  //           std::cout << "[CG]   Callee " << batched_callee_cg_node->GetNameHint() << std::endl;
+  //         }
+  //       }
+  //     }
+  //   } else if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
+  //     auto callee = GetRef<GlobalVar>(global_var_node);
+  //     CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
+  //     cg_node->AddCalledGlobal(callee_cg_node);
+  //     if (print) {
+  //       std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+  //     }
+  //     auto it = batched_prim_funcs.find(callee);
+  //     if (it != batched_prim_funcs.end()) {
+  //       auto batched_callee = (*it).second;
+  //       CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
+  //       cg_node->AddCalledGlobal(batched_callee_cg_node);
+  //       if (print) {
+  //         std::cout << "[CG]   Callee " << batched_callee_cg_node->GetNameHint() << std::endl;
+  //       }
+  //     }
+  //   }
+  // });
+
+  class Visitor : public ExprVisitor {
+   public:
+    Visitor(CallGraphEntry* cg_node, CallGraphNode* call_graph,
+            const Map<GlobalVar, GlobalVar>& batched_prim_funcs, bool print)
+        : cg_node_(cg_node),
+          call_graph_(call_graph),
+          batched_prim_funcs_(batched_prim_funcs),
+          print_(print) {}
+
+    void VisitExpr_(const CallNode* call_node) override {
+      ExprVisitor::VisitExpr_(call_node);
+      if (print_) {
+        std::cout << "[CG]  Visiting " << PrettyPrint(GetRef<Expr>(call_node)) << std::endl;
+      }
       CallLoweredProps props = GetCallLoweredProps(call_node);
       if (props.lowered_func.defined() && props.attrs.metadata.count("prim_shape_fn_var")) {
         // We are implicitly calling the shape function *in addition to* the call target.
-        CallGraphEntry* callee_cg_node =
-            LookupGlobalVar(Downcast<GlobalVar>(props.attrs.metadata["prim_shape_fn_var"]));
-        cg_node->AddCalledGlobal(callee_cg_node);
+        CallGraphEntry* callee_cg_node = call_graph_->LookupGlobalVar(
+            Downcast<GlobalVar>(props.attrs.metadata["prim_shape_fn_var"]));
+        if (print_) {
+          std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+        }
+        cg_node_->AddCalledGlobal(callee_cg_node);
       }
-      if (call_node->op == invoke_tvm_op) {
+      if (call_node->op == invoke_tvm_op_) {
         auto callee = Downcast<GlobalVar>(call_node->args[0]);
-        CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
-        cg_node->AddCalledGlobal(callee_cg_node);
-        auto it = batched_prim_funcs.find(callee);
-        if (it != batched_prim_funcs.end()) {
+        CallGraphEntry* callee_cg_node = call_graph_->LookupGlobalVar(callee);
+        cg_node_->AddCalledGlobal(callee_cg_node);
+        if (print_) {
+          std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+        }
+        auto it = batched_prim_funcs_.find(callee);
+        if (it != batched_prim_funcs_.end()) {
           auto batched_callee = (*it).second;
-          CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
-          cg_node->AddCalledGlobal(batched_callee_cg_node);
+          CallGraphEntry* batched_callee_cg_node = call_graph_->LookupGlobalVar(batched_callee);
+          cg_node_->AddCalledGlobal(batched_callee_cg_node);
+          if (print_) {
+            std::cout << "[CG]   Callee " << batched_callee_cg_node->GetNameHint() << std::endl;
+          }
         }
       }
-    } else if (const auto* global_var_node = expr.as<GlobalVarNode>()) {
+    }
+
+    void VisitExpr_(const GlobalVarNode* global_var_node) override {
+      ExprVisitor::VisitExpr_(global_var_node);
       auto callee = GetRef<GlobalVar>(global_var_node);
-      CallGraphEntry* callee_cg_node = LookupGlobalVar(callee);
-      cg_node->AddCalledGlobal(callee_cg_node);
-      auto it = batched_prim_funcs.find(callee);
-      if (it != batched_prim_funcs.end()) {
+      CallGraphEntry* callee_cg_node = call_graph_->LookupGlobalVar(callee);
+      cg_node_->AddCalledGlobal(callee_cg_node);
+      if (print_) {
+        std::cout << "[CG]   Callee " << callee_cg_node->GetNameHint() << std::endl;
+      }
+      auto it = batched_prim_funcs_.find(callee);
+      if (it != batched_prim_funcs_.end()) {
         auto batched_callee = (*it).second;
-        CallGraphEntry* batched_callee_cg_node = LookupGlobalVar(batched_callee);
-        cg_node->AddCalledGlobal(batched_callee_cg_node);
+        CallGraphEntry* batched_callee_cg_node = call_graph_->LookupGlobalVar(batched_callee);
+        cg_node_->AddCalledGlobal(batched_callee_cg_node);
+        if (print_) {
+          std::cout << "[CG]   Callee " << batched_callee_cg_node->GetNameHint() << std::endl;
+        }
       }
     }
-  });
+
+    CallGraphEntry* cg_node_;
+    CallGraphNode* call_graph_;
+    const Map<GlobalVar, GlobalVar>& batched_prim_funcs_;
+    bool print_;
+    const Op invoke_tvm_op_ = Op::Get("vm.invoke_tvm_op");
+  };
+  Visitor(cg_node, this, batched_prim_funcs, print)(func->body);
 }
 
 const CallGraphEntry* CallGraphNode::operator[](const GlobalVar& gv) const {
@@ -273,6 +363,18 @@ inline void CallGraphEntry::AddCalledGlobal(CallGraphEntry* cg_node) {
 void CallGraphEntry::RemoveCallTo(const GlobalVar& callee) {
   for (auto it = begin();; ++it) {
     ICHECK(it != end()) << "Cannot find global function " << callee->name_hint << " to remove!";
+    if (it->second->GetGlobalVar() == callee) {
+      // Only remove one occurrence of the call site.
+      it->second->DecRef();
+      *it = called_globals_.back();
+      called_globals_.pop_back();
+      return;
+    }
+  }
+}
+
+void CallGraphEntry::RemoveCallToIfPresent(const GlobalVar& callee) {
+  for (auto it = begin(); it != end(); ++it) {
     if (it->second->GetGlobalVar() == callee) {
       // Only remove one occurrence of the call site.
       it->second->DecRef();

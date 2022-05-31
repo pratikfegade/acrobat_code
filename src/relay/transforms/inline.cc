@@ -53,7 +53,13 @@ namespace relay {
 class Inliner : ExprMutator {
  public:
   explicit Inliner(CallGraphEntry* cur_node, CallGraphNode* call_graph)
-      : cur_node_(cur_node), call_graph_(call_graph) {}
+      : cur_node_(cur_node), call_graph_(call_graph) {
+    // std::cout << "[INL] Visiting " << cur_node->GetNameHint() << std::endl;
+    // for (auto pair : *cur_node) {
+    //   std::cout << "[INL]  Callee " << pair.second->GetGlobalVar().get() << " "
+    //             << pair.second->GetNameHint() << std::endl;
+    // }
+  }
 
   Expr VisitExpr_(const CallNode* call_node) final {
     // We can work with calls in both pre- and post-lowered form.
@@ -69,7 +75,8 @@ class Inliner : ExprMutator {
         for (auto arg : vanilla_call->args) {
           new_args.push_back(VisitExpr(arg));
         }
-        cur_node_->RemoveCallTo(gv);
+        // std::cout << "[INL] Removing call to " << gv.get() << " " << gv->name_hint << std::endl;
+        cur_node_->RemoveCallToIfPresent(gv);
         return MakeNewExpr(gv, new_args, GetRef<Call>(call_node));
       }
       // else: fallthrough

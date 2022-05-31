@@ -442,6 +442,14 @@ class CallGraphEntry {
   void RemoveCallTo(const GlobalVar& callee);
 
   /*!
+   * \brief Remove a call edge to the global function from the current
+   * function.
+   *
+   * \param callee The function that is being called.
+   */
+  void RemoveCallToIfPresent(const GlobalVar& callee);
+
+  /*!
    * \brief Remove all the edges that represent that calls to the global function
    * stored in a given CallGraphEntry.
    *

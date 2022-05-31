@@ -36,6 +36,7 @@
 
 #include "../../support/utils.h"
 #include "../analysis/call_graph.h"
+#include "../op/memory/memory.h"
 #include "../op/memory/on_device.h"
 #include "../transforms/expr_subst.h"
 #include "../transforms/function_pointer_analysis.h"
@@ -148,6 +149,77 @@ bool IsSuperSet(const std::unordered_set<T>& b, const std::unordered_set<T>& a) 
   return true;
 }
 
+class TransitiveTensorOpCalls : public ExprVisitor {
+ public:
+  TransitiveTensorOpCalls(const IRModule& mod) : call_graph_(GetPreciseCallGraph(mod)) {}
+
+  bool CanTransitivelyCallTensorOps(const Function& func) {
+    return CanTransitivelyCallTensorOps(func.get());
+  }
+
+  bool CanTransitivelyCallTensorOps(const FunctionNode* func) {
+    auto it = can_transitively_call_tensor_ops_cache_.find(func);
+    if (it != can_transitively_call_tensor_ops_cache_.end()) {
+      return it->second;
+    }
+    if (IncludesTensorOpCalls(func)) {
+      can_transitively_call_tensor_ops_cache_[func] = true;
+      return true;
+    }
+    auto iit = call_graph_.find(func);
+    if (iit != call_graph_.end()) {
+      for (auto callee : iit->second) {
+        if (CanTransitivelyCallTensorOps(callee)) {
+          can_transitively_call_tensor_ops_cache_[func] = true;
+          return true;
+        }
+      }
+    }
+    can_transitively_call_tensor_ops_cache_[func] = false;
+    return false;
+  }
+  PreciseCallGraph call_graph_;
+
+  bool IncludesTensorOpCalls(const FunctionNode* func) {
+    auto it = includes_tensor_op_calls_cache_.find(func);
+    if (it != includes_tensor_op_calls_cache_.end()) {
+      return it->second;
+    }
+    // std::cout << "[TTC] Visiting function " << GetFunctionName(func) << std::endl;
+    found_tensor_op_calls_ = false;
+    this->VisitExpr(func->body);
+    includes_tensor_op_calls_cache_[func] = found_tensor_op_calls_;
+    // std::cout << "[TTC]  Res " << found_tensor_op_calls_ << std::endl;
+    return found_tensor_op_calls_;
+  }
+
+  bool IsAuxiliaryOp(const Expr& op) {
+    return op == on_device_op_ || op == alloc_storage_op_ || op == alloc_tensor_op_;
+  }
+
+  void VisitExpr_(const CallNode* op) {
+    ExprVisitor::VisitExpr_(op);
+    if (op->op.as<OpNode>() && !IsAuxiliaryOp(op->op) && !IsMarkedScalarOp(op)) {
+      // std::cout << "[TTC]   Found op " << op->op << " " << op->op.as<OpNode>() << std::endl;
+      found_tensor_op_calls_ = true;
+    }
+  }
+
+  void VisitExpr_(const FunctionNode* op) {}
+
+  std::string GetFunctionName(const FunctionNode* fn) {
+    return fn->GetAttr<String>("db.function_name", String("")).value();
+  }
+
+  bool found_tensor_op_calls_{false};
+  const Op& invoke_tvm_op_ = GetInvokeTVMOp();
+  const Op& on_device_op_ = OnDeviceOp();
+  const Op& alloc_tensor_op_ = MemoryAllocTensorOp();
+  const Op& alloc_storage_op_ = MemoryAllocStorageOp();
+  std::unordered_map<const FunctionNode*, bool> includes_tensor_op_calls_cache_;
+  std::unordered_map<const FunctionNode*, bool> can_transitively_call_tensor_ops_cache_;
+};
+
 class TaintAnalysis : public BaseExprFunctor {
  public:
   TaintAnalysis(IRModule& mod) : mod_(mod) {}
@@ -183,6 +255,7 @@ class TaintAnalysis : public BaseExprFunctor {
       }
     }
 
+    TransitiveTensorOpCalls tensor_call_finder(mod_);
     std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> results_map;
     for (auto fn_node : all_functions) {
       auto fn = GetRef<Function>(fn_node);
@@ -216,7 +289,20 @@ class TaintAnalysis : public BaseExprFunctor {
           for (auto kv : param_states) {
             all_constants.push_back(kv.second->taint[j]);
           }
-          ConstantSet merged_constants = MapSet::Merge(all_constants);
+          ConstantSet merged_constants_w_scalars = MapSet::Merge(all_constants);
+          ConstantSet merged_constants;
+          // Heuristic: Do not split on scalar constants
+          for (auto kv : merged_constants_w_scalars) {
+            if (!kv.first->checked_type_.as<TensorTypeNode>()->db_scalar) {
+              MapSet::Insert(merged_constants, kv.first);
+            }
+          }
+
+          // std::cout << "[TSR]   Merged constants:" << std::endl;
+          for (auto kv : merged_constants) {
+            // std::cout << "[TSR]   " << kv.first->checked_type_ << " "
+            // << kv.first.as<ConstantNode>()->data.Shape() << std::endl;
+          }
           if (merged_constants.size() <= 1) {
             // std::cout << "[TSR]   Unique constants: " << merged_constants.size() << std::endl;
             continue;
@@ -269,6 +355,11 @@ class TaintAnalysis : public BaseExprFunctor {
       }
 
       if (!no_split) {
+        if (!tensor_call_finder.CanTransitivelyCallTensorOps(fn)) {
+          // std::cout << "[TSR]  Does not call tensor op " << GetFunctionName(fn) << std::endl;
+          continue;
+        }
+
         results_map[fn_node] = split_contexts;
         // std::cout << "[TSR] Splitting " << GetFunctionName(fn) << std::endl;
         for (auto ctx : split_contexts) {
@@ -854,9 +945,13 @@ class RepeatMutator : public AbstractDuplicator {
         if (base_func.as<FunctionNode>()) {
           auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
           new_global_functions_.Set(kv.first, func);
+          // std::cout << "[MPTA] New function1 " << kv.first->name_hint << " " << kv.first.get()
+          // << std::endl;
         }
       }
       for (auto kv : new_global_functions_) {
+        // std::cout << "[MPTA] New function2 " << kv.first->name_hint << " " << kv.first.get()
+        // << std::endl;
         mod_->Add(kv.first, kv.second, true);
       }
     }

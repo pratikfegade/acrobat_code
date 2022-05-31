@@ -283,9 +283,9 @@ class TaintAnalysis : public BaseExprFunctor {
 
   FullTaint Add(const Var& var, ContextT current_context, const FullTaint& to_add,
                 const std::string& reason) {
-    if (to_add->taint->value == MAX_DEPTH_VALUE) {
-      std::cout << "[SAI] Var " << var->vid->name_hint << " " << reason << std::endl;
-    }
+    // if (to_add->taint->value == MAX_DEPTH_VALUE) {
+    // std::cout << "[SAI] Var " << var->vid->name_hint << " " << reason << std::endl;
+    // }
     return Add<Var, VarStateMap>(var_states_, var, current_context, to_add);
   }
 

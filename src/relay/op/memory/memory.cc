@@ -99,6 +99,11 @@ const Op& MemoryAllocTensorOp() {
   return op;
 }
 
+const Op& MemoryAllocStorageOp() {
+  static const Op& op = Op::Get("memory.alloc_storage");
+  return op;
+}
+
 Expr AllocTensor(Expr storage, Expr offset, Expr shape, DataType dtype,
                  Array<IndexExpr> assert_shape) {
   auto attrs = make_object<AllocTensorAttrs>();

@@ -837,7 +837,7 @@ class Coarsener : public ExprMutator {
       if (op_call) {
         last_call_id = i;
         op_calls_in_group++;
-        std::cout << "[CG]   Incrementing " << op_calls_in_group << std::endl;
+        // std::cout << "[CG]   Incrementing " << op_calls_in_group << std::endl;
       }
       ICHECK_GE(start, 0);
 
@@ -898,7 +898,7 @@ class Coarsener : public ExprMutator {
         end_group(i);
       } else if (auto vn = cleaned_value.as<CallNode>()) {
         auto marked_scalar = IsMarkedScalarOp(vn);
-        std::cout << "[CG] Call  " << vn->op << " " << marked_scalar << std::endl;
+        // std::cout << "[CG] Call  " << vn->op << " " << marked_scalar << std::endl;
         auto static_depth = GetStaticGraphDepth(vn);
         if (vn->op == GetInvokeTVMOp() && static_depth >= 0 && !marked_scalar) {
           if (in_group && !in_static_group) {
@@ -1126,7 +1126,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       Function func = GetRef<Function>(n);
 
       bool print = (support::StartsWith(it.first->name_hint, "lifted_name"));
-      std::cout << "[CG] Func " << it.first->name_hint << std::endl;
+      // std::cout << "[CG] Func " << it.first->name_hint << std::endl;
       Coarsener coarsener(mod, prim_funcs_access_modes, batched_execution, scattered_kernels);
       Function ret = coarsener.Coarsen(func, print);
 
