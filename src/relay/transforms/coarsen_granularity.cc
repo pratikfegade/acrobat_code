@@ -811,6 +811,18 @@ class Coarsener : public ExprMutator {
     return -1;
   }
 
+  bool IsStorageType(const Type& type) {
+    if (auto tc = type.as<TypeCallNode>()) {
+      return IsStorageType(tc->func);
+    } else if (auto td = type.as<TypeDataNode>()) {
+      return td->header->name_hint == "Storage";
+    } else if (auto tv = type.as<GlobalTypeVarNode>()) {
+      return tv->name_hint == "Storage";
+    } else {
+      return false;
+    }
+  }
+
   Expr VisitExpr_(const LetNode* op) final {
     std::vector<std::pair<Var, Expr>> flattened;
     auto body = FlattenLets(GetRef<Expr>(op), &flattened);
@@ -891,7 +903,11 @@ class Coarsener : public ExprMutator {
       } else if (cleaned_value.as<TupleNode>()) {
         start_or_continue_group(i);
       } else if (cleaned_value.as<VarNode>()) {
-        start_or_continue_group(i);
+        if (IsStorageType(cleaned_value->checked_type_)) {
+          end_group(i);
+        } else {
+          start_or_continue_group(i);
+        }
       } else if (cleaned_value.as<GlobalVarNode>()) {
         end_group(i);
       } else if (cleaned_value.as<FunctionNode>()) {
@@ -966,6 +982,11 @@ class Coarsener : public ExprMutator {
         std::vector<Var> flattened_free_vars;
         std::vector<Expr> call_args_unsorted;
         Map<relay::Var, Array<Expr>> tuple_var_values;
+
+        std::cout << "[CG] New Group" << std::endl;
+        for (auto pair : bindings) {
+          std::cout << "[GROUP] " << pair.first->vid->name_hint << std::endl;
+        }
 
         auto free_vars_set = GetFreeVarsInGroup(bindings);
         for (auto var : free_vars_set) {

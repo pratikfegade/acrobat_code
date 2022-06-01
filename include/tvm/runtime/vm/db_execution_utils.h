@@ -71,9 +71,10 @@ inline T Scalarize(DLTensor* tensor) {
 
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
   static std::random_device rd;
-  /* static std::mt19937 gen(rd()); */
-  static std::mt19937 gen(4);
-  return std::uniform_int_distribution<>(lo, hi)(gen);
+  static std::mt19937 gen(rd());
+  // static std::mt19937 gen(4);
+  auto res = std::uniform_int_distribution<>(lo, hi)(gen);
+  return res;
 }
 
 }  // namespace vm

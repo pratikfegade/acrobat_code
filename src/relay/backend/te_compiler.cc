@@ -778,7 +778,7 @@ class AbstractLowerTensorExprMutator {
     if (IsScalarTensorType(func->ret_type)) {
       bool params_scalar = true;
       for (auto param : func->params) {
-        if (!IsScalarTensorType(func->ret_type)) {
+        if (!IsScalarTensorType(param->checked_type_)) {
           params_scalar = false;
           break;
         }
@@ -1018,8 +1018,9 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator,
         return DeviceCopy(new_args[0], device_copy_props.src_se_scope,
                           device_copy_props.dst_se_scope);
       } else if (db_random_uniform_props.low.defined()) {
-        ICHECK_EQ(new_args.size(), 2);
-        return MakeDBRandomUniform(new_args[0], new_args[1], db_random_uniform_props.out_shape,
+        ICHECK_EQ(new_args.size(), 3);
+        return MakeDBRandomUniform(new_args[0], new_args[1], new_args[2],
+                                   db_random_uniform_props.out_shape,
                                    db_random_uniform_props.out_dtype);
       } else if (function_node->body.as<CallNode>() &&
                  function_node->body.as<CallNode>()->op == GetDBPhaseChangeOp()) {

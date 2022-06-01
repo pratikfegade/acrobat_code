@@ -41,7 +41,8 @@ const Op& GetDBRandomUniformOp();
  * \brief Wraps \p expr in a "device_copy" CallNode indicating it should be evaluated and
  * stored at \p src_se_scope but then copied to \p dst_se_scope.
  */
-Expr MakeDBRandomUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_dtype);
+Expr MakeDBRandomUniform(Expr low, Expr high, Expr dummy, Array<Integer> out_shape,
+                         DataType out_dtype);
 
 /*! \brief Result of \p GetDBRandomPropsProps. */
 struct DBRandomUniformProps {

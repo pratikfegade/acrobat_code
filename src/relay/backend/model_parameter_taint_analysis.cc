@@ -945,13 +945,13 @@ class RepeatMutator : public AbstractDuplicator {
         if (base_func.as<FunctionNode>()) {
           auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
           new_global_functions_.Set(kv.first, func);
-          // std::cout << "[MPTA] New function1 " << kv.first->name_hint << " " << kv.first.get()
+          // std::cout << "[MPTA] Root duplication " << kv.first->name_hint << " " << kv.first.get()
           // << std::endl;
         }
       }
       for (auto kv : new_global_functions_) {
-        // std::cout << "[MPTA] New function2 " << kv.first->name_hint << " " << kv.first.get()
-        // << std::endl;
+        // std::cout << "[MPTA] Inserting into module: " << kv.first->name_hint << " "
+        // << kv.first.get() << std::endl;
         mod_->Add(kv.first, kv.second, true);
       }
     }
@@ -985,6 +985,8 @@ class RepeatMutator : public AbstractDuplicator {
     std::string new_name = gv->name_hint + "_dup" + std::to_string(ctr_++);
     GlobalVar new_gv = GlobalVar(new_name, gv->checked_type_);
     new_gv->checked_type_ = gv->checked_type_;
+    // std::cout << "[MPTA] Deep duplication " << new_gv->name_hint << " " << new_gv.get()
+    // << std::endl;
     new_global_functions_.Set(new_gv, DuplicateFunction(fn, new_name, gv, new_gv));
     return new_gv;
   }
@@ -1063,8 +1065,9 @@ class RepeatMutator : public AbstractDuplicator {
   std::unordered_map<const FunctionNode*, std::unordered_set<ContextT>> to_repeat_;
   IRModule mod_;
   std::unordered_map<const CallNode*, Function> to_repeat_call_nodes_;
-  int ctr_{0};
+  static int ctr_;
 };
+int RepeatMutator::ctr_{0};
 }  // namespace
 
 IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {

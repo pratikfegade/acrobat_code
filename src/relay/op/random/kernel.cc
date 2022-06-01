@@ -186,7 +186,7 @@ RELAY_REGISTER_OP("random.normal")
 bool DBUniformRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
                   const TypeReporter& reporter) {
   const UniformAttrs* param = attrs.as<UniformAttrs>();
-  ICHECK_EQ(types.size(), 3) << "Uniform should have two inputs and one output";
+  ICHECK_EQ(types.size(), 4) << "Uniform should have two inputs and one output";
 
   std::vector<IndexExpr> oshape;
   for (auto& x : param->out_shape) {
@@ -217,10 +217,12 @@ bool DBUniformRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
   reporter->Assign(types[1], TensorType({}, out_dtype, true));
   // generate returns the next key and an array of random values
   reporter->Assign(types[2], TensorType(oshape, out_dtype, true));
+  reporter->Assign(types[3], types[3]);
   return true;
 }
 
-Expr MakeDBRandomUniform(Expr low, Expr high, Array<Integer> out_shape, DataType out_dtype) {
+Expr MakeDBRandomUniform(Expr low, Expr high, Expr dummy, Array<Integer> out_shape,
+                         DataType out_dtype) {
   auto attrs = make_object<UniformAttrs>();
   attrs->out_shape = out_shape;
   attrs->out_dtype = out_dtype;
@@ -233,10 +235,11 @@ TVM_REGISTER_GLOBAL("relay.op.random._make.db_uniform").set_body_typed(MakeDBRan
 RELAY_REGISTER_OP("random.db_uniform")
     .describe(
         R"doc(Generate an array of random numbers under uniform distribution.)doc" TVM_ADD_FILELINE)
-    .set_num_inputs(2)
+    .set_num_inputs(3)
     .set_attrs_type<UniformAttrs>()
     .add_argument("low", "Tensor", "Lower bound of the distribution")
     .add_argument("high", "Tensor", "Higher bound of the distribution")
+    .add_argument("dummy_tensors", "Tuple", "dummy tensors for dependency reasons")
     .set_attr<TOpPattern>("TOpPattern", kOpaque)
     .set_attr<TOpIsStateful>("TOpIsStateful", true)
     .add_type_rel("DBUniform", DBUniformRel);
@@ -248,7 +251,7 @@ const Op& GetDBRandomUniformOp() {
 
 DBRandomUniformProps GetDBRandomUniformProps(const CallNode* call_node) {
   if (call_node->op == GetDBRandomUniformOp()) {
-    ICHECK_EQ(call_node->args.size(), 2) << "db_random_uniform expects two argument";
+    ICHECK_EQ(call_node->args.size(), 3) << "db_random_uniform expects two argument";
     ICHECK(call_node->attrs.defined()) << "db_random_uniform requires attributes";
     const auto* db_random_uniform_attrs = call_node->attrs.as<UniformAttrs>();
     ICHECK(db_random_uniform_attrs != nullptr) << "db_random_uniform requires UniformAttrs";

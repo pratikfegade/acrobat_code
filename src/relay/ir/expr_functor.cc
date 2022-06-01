@@ -165,6 +165,10 @@ Expr ExprMutator::VisitExpr_(const VarNode* var_node) {
   Type type_annotation = var_node->type_annotation;
   if (var_node->type_annotation.defined()) {
     type_annotation = this->VisitType(var_node->type_annotation);
+    if (auto vta = var_node->type_annotation.as<TensorTypeNode>()) {
+      auto ta = type_annotation.as<TensorTypeNode>();
+      // ICHECK_EQ(ta->db_scalar, vta->db_scalar) << var_node->vid->name_hint;
+    }
   }
   return WithFields(GetRef<Var>(var_node), std::move(var_node->vid), std::move(type_annotation));
 }

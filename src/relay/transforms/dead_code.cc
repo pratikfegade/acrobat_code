@@ -30,6 +30,7 @@
 #include <tvm/relay/transform.h>
 
 #include "../op/call/call.h"
+#include "../op/random/db_random.h"
 
 namespace tvm {
 namespace relay {
@@ -548,7 +549,6 @@ Pass DeadCodeElimination(bool inline_once, bool ignore_impurity) {
     for (const auto& kv : mod->functions) {
       if (const auto* function_node = kv.second.as<FunctionNode>()) {
         auto function = GetRef<Function>(function_node);
-
         VLOG(1) << "processing " << PrettyPrint(kv.first);
 
         VLOG(2) << "count usage";
