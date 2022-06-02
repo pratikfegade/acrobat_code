@@ -69,10 +69,31 @@ inline T Scalarize(DLTensor* tensor) {
   return res;
 }
 
+class RandomGenerator {
+ public:
+  inline void Reset() {
+    if (gen_) {
+      delete gen_;
+    }
+    gen_ = new std::mt19937(4);
+  }
+
+  inline int32_t GetRandom(int32_t lo, int32_t hi) {
+    return std::uniform_int_distribution<>(lo, hi)(*gen_);
+  }
+
+  inline static RandomGenerator& Current() { return *instance_; }
+
+  inline static void Init() { instance_ = new RandomGenerator(); }
+
+  std::mt19937* gen_;
+  static RandomGenerator* instance_;
+};
+
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
   static std::random_device rd;
-  static std::mt19937 gen(rd());
-  // static std::mt19937 gen(4);
+  // static std::mt19937 gen(rd());
+  static std::mt19937 gen(4);
   auto res = std::uniform_int_distribution<>(lo, hi)(gen);
   return res;
 }

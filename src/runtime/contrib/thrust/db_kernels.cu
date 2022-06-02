@@ -4,7 +4,7 @@
 #define CEIL(a, b) (((a) + (b)-1) / (b))
 #define FLOOR(a, b) ((a) / (b))
 #define REDUCE_SUM_THREAD_COUNT 256
-#define CONCAT_COPY_THREAD_COUNT 256
+#define CONCAT_COPY_THREAD_COUNT 1024
 
 __global__ void reduce_sum(float** input, float** output, int* input_indices, int batch_size,
                            int hidden_size) {

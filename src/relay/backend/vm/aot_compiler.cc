@@ -728,7 +728,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto dst_var = GetVarForReg(instr.dst);
               auto lo_var = GetVarForReg(instr.invoke_args_registers[0]);
               auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
-              stream_ << dst_var << " = GetRandom(" << lo_var << ", " << hi_var << ");\n";
+              stream_ << dst_var << " = tvm::runtime::vm::RandomGenerator::Current().GetRandom("
+                      << lo_var << ", " << hi_var << ");\n";
             } else if (instr.packed_index == DB_PHASE_CHANGE_INDEX) {
               ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
               ICHECK_EQ(GetNestLevel(), 0)
@@ -1853,6 +1854,7 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "  runtime->Init({devices}, {" << alloc_list.str() << "});\n";
 
   os << "  runtime->CacheConstants();\n";
+  os << "  tvm::runtime::vm::RandomGenerator::Init();\n";
   os << "  invoke_model<" << GetTensorType() << ">(devices, argc - 2, &(argv[2]));\n";
   os << "}\n\n";
 }

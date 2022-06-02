@@ -37,27 +37,6 @@ typedef boost::fibers::fiber::id fiber_id_t;
 
 #define MAX_FIBER_COUNT 128
 
-#define BOOST_CHANNEL_OP(op)                          \
-  {                                                   \
-    auto res = op;                                    \
-    switch (res) {                                    \
-      case boost::fibers::channel_op_status::success: \
-        break;                                        \
-      case boost::fibers::channel_op_status::empty:   \
-        std::cout << "[FIBER] EMPTY" << std::endl;    \
-        break;                                        \
-      case boost::fibers::channel_op_status::full:    \
-        std::cout << "[FIBER] FULL" << std::endl;     \
-        break;                                        \
-      case boost::fibers::channel_op_status::closed:  \
-        std::cout << "[FIBER] CLOSED" << std::endl;   \
-        break;                                        \
-      case boost::fibers::channel_op_status::timeout: \
-        std::cout << "[FIBER] TIMEOUT" << std::endl;  \
-        break;                                        \
-    }                                                 \
-  }
-
 class FiberRuntime {
  public:
   FiberRuntime(int num_fibers)
@@ -88,7 +67,7 @@ class FiberRuntime {
     children_waiting_.push_back(false);
     alive_num_++;
     num_fibers_++;
-    // std::cout << "[" << parent_id << "] New fiber created " << child_id << std::endl;
+    // // std::cout << "[" << parent_id << "] New fiber created " << child_id << std::endl;
     children_[parent_id].insert(child_id);
     parents_.push_back(parent_id);
     return child_fiber;
@@ -99,39 +78,39 @@ class FiberRuntime {
   int NewFiberID() { return num_fibers_; }
 
   inline void WorkerWaitInternal(int idx, FiberState state) {
-    BOOST_CHANNEL_OP(stop_channels_[idx]->push(state));
+    stop_channels_[idx]->push(state);
     FiberState dummy;
-    BOOST_CHANNEL_OP(start_channels_[idx]->pop(dummy));
+    start_channels_[idx]->pop(dummy);
   }
 
   void WorkerYield(int idx) {
-    std::cout << "[" << idx << "] Worker yielding" << std::endl;
+    // std::cout << "[" << idx << "] Worker yielding" << std::endl;
     WorkerWaitInternal(idx, kYield);
   }
 
   void WorkerEnd(int idx) {
-    std::cout << "[" << idx << "] Worker ending" << std::endl;
-    BOOST_CHANNEL_OP(stop_channels_[idx]->push(kEnd));
-    // std::cout << "[" << idx << "] Worker end sent" << std::endl;
+    // std::cout << "[" << idx << "] Worker ending" << std::endl;
+    stop_channels_[idx]->push(kEnd);
+    // // std::cout << "[" << idx << "] Worker end sent" << std::endl;
   }
 
   void WorkerPhaseBarrierWait(int idx) {
-    std::cout << "[" << idx << "] Worker phase waiting" << std::endl;
+    // std::cout << "[" << idx << "] Worker phase waiting" << std::endl;
     WorkerWaitInternal(idx, kPhaseWaiting);
   }
 
   void WorkerChildrenWait(int idx) {
-    std::cout << "[" << idx << "] Worker children waiting" << std::endl;
+    // std::cout << "[" << idx << "] Worker children waiting" << std::endl;
     WorkerWaitInternal(idx, kChildrenWaiting);
   }
 
   bool MainWaitForWorkers() {
-    std::cout << "[M] Main waiting" << std::endl;
+    // std::cout << "[M] Main waiting" << std::endl;
     bool execute = false;
     for (int i = 0; i < num_fibers_; ++i) {
       if (alive_[i] && !phase_waiting_[i] && !children_waiting_[i]) {
         FiberState state;
-        BOOST_CHANNEL_OP(stop_channels_[i]->pop(state));
+        stop_channels_[i]->pop(state);
         if (state == kEnd) {
           alive_[i] = false;
           alive_num_--;
@@ -141,7 +120,7 @@ class FiberRuntime {
           if (parent >= 0) {
             children_[parent].erase(i);
             parents_[i] = -1;
-            // std::cout << "[M] Worker ended " << i << ". Parent children " << parent << " "
+            // // std::cout << "[M] Worker ended " << i << ". Parent children " << parent << " "
             // << children_.at(parent).size() << std::endl;
           }
         } else if (state == kPhaseWaiting) {
@@ -158,13 +137,13 @@ class FiberRuntime {
   }
 
   void MainResumeWorkers() {
-    std::cout << "[M] Main resuming workers" << std::endl;
+    // std::cout << "[M] Main resuming workers" << std::endl;
     if (phase_waiting_num_ == alive_num_) {
       for (int i = 0; i < num_fibers_; ++i) {
         if (alive_[i]) {
           phase_waiting_[i] = false;
-          // std::cout << "[M]  Resume1 " << i << std::endl;
-          BOOST_CHANNEL_OP(start_channels_[i]->push(kResume));
+          // // std::cout << "[M]  Resume1 " << i << std::endl;
+          start_channels_[i]->push(kResume);
         }
       }
       phase_waiting_num_ = alive_num_;
@@ -172,12 +151,12 @@ class FiberRuntime {
       for (int i = 0; i < num_fibers_; ++i) {
         if (alive_[i] && !phase_waiting_[i]) {
           if (children_waiting_[i] && children_.at(i).empty()) {
-            // std::cout << "[M]  Resume2 " << i << std::endl;
-            BOOST_CHANNEL_OP(start_channels_[i]->push(kResume));
+            // // std::cout << "[M]  Resume2 " << i << std::endl;
+            start_channels_[i]->push(kResume);
             children_waiting_[i] = false;
           } else if (!children_waiting_[i]) {
-            // std::cout << "[M]  Resume3 " << i << std::endl;
-            BOOST_CHANNEL_OP(start_channels_[i]->push(kResume));
+            // // std::cout << "[M]  Resume3 " << i << std::endl;
+            start_channels_[i]->push(kResume);
           }
         }
       }
@@ -187,7 +166,7 @@ class FiberRuntime {
   void AddFiber(int idx, fiber_t* fiber) { fibers_[idx] = fiber; }
 
   bool ContinueExecution() {
-    std::cout << "Alive " << alive_num_ << std::endl;
+    // std::cout << "Alive " << alive_num_ << std::endl;
     return alive_num_ > 0;
   }
 

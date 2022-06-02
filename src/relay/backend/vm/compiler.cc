@@ -770,10 +770,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     CallLoweredProps call_lowered_props = GetCallLoweredProps(call_node);
     ICHECK(!call_lowered_props.lowered_func.defined());
 
-    auto emit_db_inbuilt_op = [&](int func_index, const CallNode* cn) {
+    auto emit_db_inbuilt_op = [&](int func_index, const CallNode* cn, int num_args) {
       std::vector<Index> argument_registers;
-      for (auto arg : cn->args) {
-        VisitExpr(arg);
+      for (int i = 0; i < num_args; ++i) {
+        VisitExpr(cn->args[i]);
         argument_registers.push_back(last_register_);
       }
       auto new_register = NewRegister();
@@ -798,14 +798,14 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       }
       return;
     } else if (db_random_uniform_props.low.defined()) {
-      ICHECK_EQ(call_node->args.size(), 2);
+      ICHECK_EQ(call_node->args.size(), 3);
       ICHECK_EQ(db_random_uniform_props.out_shape.size(), 0);
       ICHECK(db_random_uniform_props.out_dtype.is_int());
-      emit_db_inbuilt_op(DB_RANDOM_UNIFORM_INDEX, call_node);
+      emit_db_inbuilt_op(DB_RANDOM_UNIFORM_INDEX, call_node, 2);
       return;
     } else if (call_node->op == GetDBPhaseChangeOp()) {
       ICHECK_EQ(call_node->args.size(), 0);
-      emit_db_inbuilt_op(DB_PHASE_CHANGE_INDEX, call_node);
+      emit_db_inbuilt_op(DB_PHASE_CHANGE_INDEX, call_node, 0);
       return;
     }
 

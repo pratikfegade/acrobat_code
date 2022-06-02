@@ -660,6 +660,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         ICHECK_EQ(instr.num_args, 2);
         auto lo = LoadScalarInt(instr.invoke_args_registers[0]);
         auto hi = LoadScalarInt(instr.invoke_args_registers[1]);
+        ICHECK_GE(hi, lo);
         auto output = GetRandom(lo, hi);
 
         auto tensor =
@@ -1075,7 +1076,7 @@ ObjectRef ConcurrentVirtualMachine::Invoke(const VMFunction& func,
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
-  std::cout << "[VM] Executing Function: " << func.name << std::endl;
+  // std::cout << "[VM] Executing Function: " << func.name << std::endl;
 
   InvokeGlobal(func, args, 0);
   RunLoop();

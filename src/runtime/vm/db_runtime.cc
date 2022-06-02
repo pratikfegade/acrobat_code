@@ -250,7 +250,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::SetExecutionOptions(VMExecutionO
   this->concurrent_execution_ = options->concurrent_execution;
   this->batch_size_ = options->batch_size;
 
-  if (true) {
+  if (false) {
     if (options->coarsened_execution) {
       std::cout << "[VM] Executing coarsened" << std::endl;
     } else {
