@@ -288,7 +288,7 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   this->concurrent_execution_ = options->concurrent_execution;
   this->batch_size_ = options->batch_size;
 
-  if (false) {
+  if (true) {
     if (options->coarsened_execution) {
       std::cout << "[VM] Executing coarsened" << std::endl;
     } else {
@@ -371,7 +371,6 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
                << (i == shared_state_->exec_->host_device_index ? " (using as host device)" : "");
   }
 
-  std::cout << "HELLO " << batch_size_ << std::endl;
   for (int i = 0; i < batch_size_; ++i) {
     InvokeGlobal(func, args, i * (args.size() / batch_size_));
     RunLoop();
@@ -379,7 +378,6 @@ ObjectRef VirtualMachine::Invoke(const VMFunction& func, const std::vector<Objec
 
   if (lazy_execution_) {
     if (batched_execution_) {
-      std::cout << "YOLO" << std::endl;
       shared_state_->lazy_executor_.BatchedExecute(true, coarsened_execution_);
     } else {
       shared_state_->lazy_executor_.Execute();
@@ -592,6 +590,8 @@ void VirtualMachine::RunLoop() {
   ICHECK(this->shared_state_->exec_);
   ICHECK(this->code_);
   pc_ = 0;
+  shared_state_->lazy_executor_.ResetProgramPhase();
+  RandomGenerator::Init();
   Index frame_start = frames_.size();
   while (true) {
     if (RunOneIteration(frame_start)) {
@@ -661,7 +661,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         auto lo = LoadScalarInt(instr.invoke_args_registers[0]);
         auto hi = LoadScalarInt(instr.invoke_args_registers[1]);
         ICHECK_GE(hi, lo);
-        auto output = GetRandom(lo, hi);
+        auto output = RandomGenerator::Current().GetRandom(lo, hi);
 
         auto tensor =
             NDArray::Empty({}, {kDLInt, 32, 1}, GetDevice(shared_state_->exec_->host_device_index));
@@ -670,6 +670,9 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         WriteRegister(output_reg, tensor);
         pc_++;
       } else if (instr.func_index == DB_PHASE_CHANGE_INDEX) {
+        if (concurrent_execution_ || lazy_execution_) {
+          shared_state_->lazy_executor_.NextProgramPhase();
+        }
         pc_++;
       } else {
         std::vector<ObjectRef> args;
@@ -1027,6 +1030,7 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
 }
 
 void ConcurrentVirtualMachine::RunLoop() {
+  shared_state_->lazy_executor_.ResetProgramPhase();
   std::vector<bool> mask(vms_.size(), true);
   int alive = vms_.size();
   int frame_start = GetVMFromModule(vms_[0])->frames_.size();

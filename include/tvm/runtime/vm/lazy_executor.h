@@ -150,7 +150,9 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
   void SetPGO(bool value) { this->pgo_ = value; }
 
   /*! \brief list of nodes to execute */
-  std::vector<OpNode<TensorType>> nodes_;
+  std::vector<std::vector<OpNode<TensorType>>> nodes_;
+  /*! \brief node counter to assign node ids */
+  int node_ctr_{0};
   /*! \brief Whether to execute or to gather PGO stats */
   bool pgo_{false};
   /*! \brief Execution counts for PackedFuncs, for when pgo is turned on */

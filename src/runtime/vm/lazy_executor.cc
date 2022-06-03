@@ -97,9 +97,11 @@ void EagerAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Inde
   }
 
   if (!is_empty_output) {
-    // nodes_.emplace_back(nodes_.size(), func_idx, unrolled_input_size + unrolled_output_size,
-    // unrolled_output_size, args_copy);
-    nodes_.emplace_back(nodes_.size(), func_idx, args_copy);
+    if (nodes_.size() == 0) {
+      nodes_.resize(MAX_PROGRAM_PHASES);
+    }
+
+    nodes_[phase_].emplace_back(node_ctr_++, func_idx, args_copy);
   }
 }
 
@@ -113,28 +115,39 @@ void LazyAllocationLazyExecutor::AddPackedCall(const Index func_idx, const Index
 template <>
 void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, NDArray* args,
                                                         int num_args) {
-  nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
+  if (nodes_.size() == 0) {
+    nodes_.resize(MAX_PROGRAM_PHASES);
+  }
+  nodes_[phase_].emplace_back(node_ctr_++, func_idx, args, num_args);
 }
 
 template <>
 void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, DLTensor** args,
                                                        int num_args) {
-  nodes_.emplace_back(nodes_.size(), func_idx, args, num_args);
+  if (nodes_.size() == 0) {
+    nodes_.resize(MAX_PROGRAM_PHASES);
+  }
+  nodes_[phase_].emplace_back(node_ctr_++, func_idx, args, num_args);
 }
 
 template <>
 void EagerAllocationLazyExecutor::Execute() {
-  for (EagerOpNode& node : nodes_) {
-    InvokePackedFnUnrolled(node.func_idx_, vm_shared_state_->packed_funcs_[node.func_idx_],
-                           node.args_.data(), node.args_.size());
+  for (auto& phase_nodes : nodes_) {
+    for (EagerOpNode& node : phase_nodes) {
+      InvokePackedFnUnrolled(node.func_idx_, vm_shared_state_->packed_funcs_[node.func_idx_],
+                             node.args_.data(), node.args_.size());
+    }
   }
   nodes_.clear();
+  nodes_.resize(MAX_PROGRAM_PHASES);
 }
 
 template <>
 void LazyAllocationLazyExecutor::Execute() {
   // TODO
+  ICHECK(false);
   nodes_.clear();
+  nodes_.resize(MAX_PROGRAM_PHASES);
 }
 
 template <typename ConcreteExecutorType>
@@ -252,9 +265,9 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
   int32_t batch_size = func_nodes.size();
   if (batch_size == 1) {
     auto arity = executor.GetArity(func_idx);
-    std::vector<TVMValue> values(arity);
-    std::vector<int> codes(arity);
-    runtime::TVMArgsSetter setter(values.data(), codes.data());
+    TVMValue* values = Arena::Current()->allocate_<TVMValue>(arity);
+    int* codes = Arena::Current()->allocate_<int>(arity);
+    runtime::TVMArgsSetter setter(values, codes);
 
     // std::cout << "[LZ]  ExecutingUB " << func_idx << " " << arity << " " << func_nodes.size()
     // << std::endl;
@@ -277,8 +290,7 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     }
 #endif
     TVMRetValue rv;
-    vm_shared_state.packed_funcs_[func_idx].CallPacked(TVMArgs(values.data(), codes.data(), arity),
-                                                       &rv);
+    vm_shared_state.packed_funcs_[func_idx].CallPacked(TVMArgs(values, codes, arity), &rv);
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
       auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
@@ -292,9 +304,9 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 
     auto& arg_modes = vm_shared_state.batched_func_arg_mode_[batched_func_idx];
     auto arity = executor.GetArity(func_idx);
-    std::vector<TVMValue> values(arity + 1);
-    std::vector<int> codes(arity + 1);
-    runtime::TVMArgsSetter setter(values.data(), codes.data());
+    TVMValue* values = Arena::Current()->allocate_<TVMValue>(arity + 1);
+    int* codes = Arena::Current()->allocate_<int>(arity + 1);
+    runtime::TVMArgsSetter setter(values, codes);
     setter(0, batch_size);
     int ctr = 1;
 
@@ -421,8 +433,7 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     }
 #endif
     TVMRetValue rv;
-    vm_shared_state.packed_funcs_[batched_func_idx].CallPacked(
-        TVMArgs(values.data(), codes.data(), ctr), &rv);
+    vm_shared_state.packed_funcs_[batched_func_idx].CallPacked(TVMArgs(values, codes, ctr), &rv);
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
       auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
@@ -503,195 +514,194 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
     VMDBProfiler::ProfileHostStartCall("batched_execution");
   }
 #endif
+  int phase_nodes_done = 0;
   if (all_nodes_same_depth) {
-    std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-    for (auto& node : executor->nodes_) {
-      func_to_node[node.func_idx_].push_back(&node);
-    }
-    for (auto kv : func_to_node) {
-      executor->ExecuteOpNodeBatch(kv.first, kv.second);
-    }
-  } else if (true) {
-    std::unordered_map<TensorPtrType, int> output_tensor_to_node;
-    size_t num_nodes = executor->nodes_.size();
-    output_tensor_to_node.reserve(num_nodes * 2);
-    int graph_depth = -1;
-    std::vector<std::vector<OpNode<TensorType>*>> depth_to_node(num_nodes);
-    std::vector<int> node_to_depth(num_nodes, -1);
-
-    for (size_t i = 0; i < num_nodes; ++i) {
-      OpNode<TensorType>& node = executor->nodes_[i];
-      int max_depth = -1;
-      if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
-        for (size_t j = 0; j < node.args_.size() - 1; ++j) {
-          auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
-          if (it != output_tensor_to_node.end()) {
-            auto input_node_id = it->second;
-            max_depth = std::max(max_depth, node_to_depth[input_node_id]);
-          }
-        }
-        output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_.back())] = node.id_;
-      } else {
-        for (size_t j = executor->InputStart(node.func_idx_);
-             j < executor->InputEnd(node.func_idx_); ++j) {
-          auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
-          if (it != output_tensor_to_node.end()) {
-            auto input_node_id = it->second;
-            max_depth = std::max(max_depth, node_to_depth[input_node_id]);
-          }
-        }
-        for (size_t j = executor->OutputStart(node.func_idx_);
-             j < executor->InoutEnd(node.func_idx_); ++j) {
-          output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_[j])] = node.id_;
-        }
-      }
-      int node_depth = max_depth + 1;
-      node_to_depth[i] = node_depth;
-      depth_to_node[node_depth].push_back(&node);
-      graph_depth = std::max(graph_depth, node_depth);
-    }
-
-    // std::cout << "[LZ] Graph depth " << graph_depth << " " << num_nodes << std::endl;
-    int nodes_executed = 0;
-    std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
-    for (int j = 0; j <= graph_depth; ++j) {
-      auto& depth_nodes = depth_to_node[j];
+    for (auto& phase_nodes : executor->nodes_) {
       std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-      // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
-      nodes_executed += depth_nodes.size();
-      for (auto& node : depth_nodes) {
-        func_to_node[node->func_idx_].push_back(node);
+      for (auto& node : phase_nodes) {
+        func_to_node[node.func_idx_].push_back(&node);
       }
-
       for (auto kv : func_to_node) {
         executor->ExecuteOpNodeBatch(kv.first, kv.second);
       }
     }
-    ICHECK_EQ(nodes_executed, num_nodes);
-  } else {
-    // std::cout << "Agenda scheduling" << std::endl;
-    std::unordered_map<TensorPtrType, std::vector<OpNode<TensorType>*>> tensor_to_consumers;
-    auto num_packed_funs = executor->vm_shared_state_->packed_funcs_.size();
-    std::vector<int> func_idx_to_position(num_packed_funs);
-    std::vector<int> position_to_func_idx(num_packed_funs);
-    for (size_t i = 0; i < num_packed_funs; ++i) {
-      func_idx_to_position[i] = i;
-      position_to_func_idx[i] = i;
-    }
-    size_t num_nodes = executor->nodes_.size();
-    tensor_to_consumers.reserve(num_nodes * 2);
-    std::vector<uint16_t> node_to_inputs(num_nodes, 0);
-    std::vector<std::vector<OpNode<TensorType>*>> agenda(num_packed_funs);
-    int agenda_size = 0;
-    for (size_t j = 0; j < num_nodes; ++j) {
-      auto& node = executor->nodes_[j];
-      uint16_t num_inputs = 0;
-      std::vector<TensorPtrType> uncomputed_inputs;
-      std::vector<int> uncomputed_input_ids;
-      if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
-        for (size_t k = 0; k < node.args_.size() - 1; ++k) {
-          auto tensor = node.args_[k];
-          if (tensor->data == nullptr) {
-            num_inputs++;
-            uncomputed_inputs.push_back(GetPtr<TensorType, TensorPtrType>(tensor));
-            uncomputed_input_ids.push_back(k);
-          }
-          tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
-        }
-      } else {
-        for (size_t k = executor->InputStart(node.func_idx_);
-             k < executor->InputEnd(node.func_idx_); ++k) {
-          auto tensor = node.args_[k];
-          if (tensor->data == nullptr) {
-            num_inputs++;
-            uncomputed_inputs.push_back(GetPtr<TensorType, TensorPtrType>(tensor));
-            uncomputed_input_ids.push_back(k);
-          }
-          tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
-        }
-      }
-      // std::cout << " Node: " << j << " " << node.func_idx_ << " " << num_inputs << " "
-      // << support::PrintVector(uncomputed_inputs) << " "
-      // << support::PrintVector(uncomputed_input_ids) << std::endl;
-      if (num_inputs == 0) {
-        agenda[func_idx_to_position[node.func_idx_]].push_back(&node);
-        agenda_size++;
-      } else {
-        node_to_inputs[j] = num_inputs;
-      }
-    }
+  } else if (true) {
+    std::vector<int> node_to_depth(executor->node_ctr_, -1);
+    std::vector<int> node_to_phase(executor->node_ctr_, -1);
+    std::unordered_map<TensorPtrType, int> output_tensor_to_node;
+    output_tensor_to_node.reserve(executor->node_ctr_ * 2);
+    for (size_t phase_ctr = 0; phase_ctr < executor->nodes_.size(); ++phase_ctr) {
+      auto& phase_nodes = executor->nodes_[phase_ctr];
+      size_t phase_num_nodes = phase_nodes.size();
+      int graph_depth = -1;
+      std::vector<std::vector<OpNode<TensorType>*>> depth_to_node(phase_num_nodes);
 
-    // std::cout << " Map size: " << tensor_to_consumers.size() << std::endl;
-    for (size_t j = 0; j < num_nodes; ++j) {
-      auto& node = executor->nodes_[j];
-      std::vector<int> consumer_ids;
-      if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
-        auto tensor = node.args_.back();
-        if (tensor_to_consumers.count(GetPtr<TensorType, TensorPtrType>(tensor))) {
-          for (auto consumer : tensor_to_consumers.at(GetPtr<TensorType, TensorPtrType>(tensor))) {
-            consumer_ids.push_back(consumer->id_);
+      for (size_t i = 0; i < phase_num_nodes; ++i) {
+        OpNode<TensorType>& node = phase_nodes[i];
+        node_to_phase[node.id_] = phase_ctr;
+        int max_depth = -1;
+        if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
+          for (size_t j = 0; j < node.args_.size() - 1; ++j) {
+            auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
+            if (it != output_tensor_to_node.end()) {
+              auto input_node_id = it->second;
+              if (node_to_phase[input_node_id] == phase_ctr) {
+                max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+              }
+            }
+          }
+          output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_.back())] = node.id_;
+        } else {
+          for (size_t j = executor->InputStart(node.func_idx_);
+               j < executor->InputEnd(node.func_idx_); ++j) {
+            auto it = output_tensor_to_node.find(GetPtr<TensorType, TensorPtrType>(node.args_[j]));
+            if (it != output_tensor_to_node.end()) {
+              auto input_node_id = it->second;
+              if (node_to_phase[input_node_id] == phase_ctr) {
+                max_depth = std::max(max_depth, node_to_depth[input_node_id]);
+              }
+            }
+          }
+          for (size_t j = executor->OutputStart(node.func_idx_);
+               j < executor->InoutEnd(node.func_idx_); ++j) {
+            output_tensor_to_node[GetPtr<TensorType, TensorPtrType>(node.args_[j])] = node.id_;
           }
         }
-      } else {
-        for (size_t i = executor->OutputStart(node.func_idx_);
-             i < executor->InoutEnd(node.func_idx_); ++i) {
-          auto tensor = node.args_[i];
+        int node_depth = max_depth + 1;
+        node_to_depth[node.id_] = node_depth;
+        depth_to_node[node_depth].push_back(&node);
+        graph_depth = std::max(graph_depth, node_depth);
+      }
+
+      std::cout << "[LZ] Graph depth fpr phase " << graph_depth << " " << phase_num_nodes
+                << std::endl;
+      int nodes_executed = 0;
+      std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
+      for (int j = 0; j <= graph_depth; ++j) {
+        auto& depth_nodes = depth_to_node[j];
+        std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
+        std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
+        nodes_executed += depth_nodes.size();
+        for (auto& node : depth_nodes) {
+          func_to_node[node->func_idx_].push_back(node);
+        }
+
+        for (auto kv : func_to_node) {
+          executor->ExecuteOpNodeBatch(kv.first, kv.second);
+        }
+      }
+      ICHECK_EQ(nodes_executed, phase_num_nodes);
+    }
+  } else {
+    for (auto& phase_nodes : executor->nodes_) {
+      // std::cout << "Agenda scheduling" << std::endl;
+      std::unordered_map<TensorPtrType, std::vector<OpNode<TensorType>*>> tensor_to_consumers;
+      auto num_packed_funs = executor->vm_shared_state_->packed_funcs_.size();
+      std::vector<int> func_idx_to_position(num_packed_funs);
+      std::vector<int> position_to_func_idx(num_packed_funs);
+      for (size_t i = 0; i < num_packed_funs; ++i) {
+        func_idx_to_position[i] = i;
+        position_to_func_idx[i] = i;
+      }
+      size_t num_nodes = phase_nodes.size();
+      tensor_to_consumers.reserve(num_nodes * 2);
+      std::vector<uint16_t> node_to_inputs(num_nodes, 0);
+      std::vector<std::vector<OpNode<TensorType>*>> agenda(num_packed_funs);
+      int agenda_size = 0;
+      for (size_t j = 0; j < num_nodes; ++j) {
+        auto& node = phase_nodes[j];
+        uint16_t num_inputs = 0;
+        std::vector<TensorPtrType> uncomputed_inputs;
+        std::vector<int> uncomputed_input_ids;
+        if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
+          for (size_t k = 0; k < node.args_.size() - 1; ++k) {
+            auto tensor = node.args_[k];
+            if (tensor->data == nullptr) {
+              num_inputs++;
+              uncomputed_inputs.push_back(GetPtr<TensorType, TensorPtrType>(tensor));
+              uncomputed_input_ids.push_back(k);
+            }
+            tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
+          }
+        } else {
+          for (size_t k = executor->InputStart(node.func_idx_);
+               k < executor->InputEnd(node.func_idx_); ++k) {
+            auto tensor = node.args_[k];
+            if (tensor->data == nullptr) {
+              num_inputs++;
+              uncomputed_inputs.push_back(GetPtr<TensorType, TensorPtrType>(tensor));
+              uncomputed_input_ids.push_back(k);
+            }
+            tensor_to_consumers[GetPtr<TensorType, TensorPtrType>(tensor)].push_back(&node);
+          }
+        }
+        // std::cout << " Node: " << j << " " << node.func_idx_ << " " << num_inputs << " "
+        // << support::PrintVector(uncomputed_inputs) << " "
+        // << support::PrintVector(uncomputed_input_ids) << std::endl;
+        if (num_inputs == 0) {
+          agenda[func_idx_to_position[node.func_idx_]].push_back(&node);
+          agenda_size++;
+        } else {
+          node_to_inputs[j] = num_inputs;
+        }
+      }
+
+      // std::cout << " Map size: " << tensor_to_consumers.size() << std::endl;
+      for (size_t j = 0; j < num_nodes; ++j) {
+        auto& node = phase_nodes[j];
+        std::vector<int> consumer_ids;
+        if (node.func_idx_ == REDUCE_SUM_FUNC_INDEX) {
+          auto tensor = node.args_.back();
           if (tensor_to_consumers.count(GetPtr<TensorType, TensorPtrType>(tensor))) {
             for (auto consumer :
                  tensor_to_consumers.at(GetPtr<TensorType, TensorPtrType>(tensor))) {
               consumer_ids.push_back(consumer->id_);
             }
           }
-        }
-      }
-      // std::cout << " Edge: " << j << " " << support::PrintVector(consumer_ids) << std::endl;
-    }
-
-    while (agenda_size > 0) {
-      int func_pos = -1;
-      for (size_t i = 0; i < num_packed_funs; ++i) {
-        auto& func_nodes = agenda[i];
-        if (func_nodes.size() > 0) {
-          func_pos = i;
-          break;
-        }
-      }
-
-      if (func_pos == -1) {
-        break;
-      }
-      auto func_idx = position_to_func_idx[func_pos];
-
-      // Execute
-      // std::cout << "Func " << func_idx << std::endl;
-      // Make a copy here so we don't edit the vector we're iterating
-      // upon below.
-      std::vector<OpNode<TensorType>*> func_nodes(agenda[func_pos].begin(), agenda[func_pos].end());
-      executor->ExecuteOpNodeBatch(func_idx, func_nodes);
-      agenda_size -= func_nodes.size();
-      agenda[func_pos].clear();
-      // Reduce to evaluate input counts for out nodes
-      for (auto& node : func_nodes) {
-        // std::cout << " Node " << node->id_ << std::endl;
-        if (func_idx == REDUCE_SUM_FUNC_INDEX) {
-          auto tensor = node->args_.back();
-          // std::cout << "  Computed tensor " << GetPtr<TensorType, TensorPtrType>(tensor)
-          // << std::endl;
-          auto it = tensor_to_consumers.find(GetPtr<TensorType, TensorPtrType>(tensor));
-          if (it != tensor_to_consumers.end()) {
-            for (auto& out_node : it->second) {
-              if (node_to_inputs[out_node->id_] == 1) {
-                agenda[func_idx_to_position[out_node->func_idx_]].push_back(out_node);
-                // std::cout << "   Added to agenda " << out_node->id_ << std::endl;
-                agenda_size++;
-              } else {
-                --node_to_inputs[out_node->id_];
+        } else {
+          for (size_t i = executor->OutputStart(node.func_idx_);
+               i < executor->InoutEnd(node.func_idx_); ++i) {
+            auto tensor = node.args_[i];
+            if (tensor_to_consumers.count(GetPtr<TensorType, TensorPtrType>(tensor))) {
+              for (auto consumer :
+                   tensor_to_consumers.at(GetPtr<TensorType, TensorPtrType>(tensor))) {
+                consumer_ids.push_back(consumer->id_);
               }
             }
           }
-        } else {
-          for (size_t i = executor->OutputStart(func_idx); i < executor->InoutEnd(func_idx); ++i) {
-            auto tensor = node->args_[i];
+        }
+        // std::cout << " Edge: " << j << " " << support::PrintVector(consumer_ids) << std::endl;
+      }
+
+      while (agenda_size > 0) {
+        int func_pos = -1;
+        for (size_t i = 0; i < num_packed_funs; ++i) {
+          auto& func_nodes = agenda[i];
+          if (func_nodes.size() > 0) {
+            func_pos = i;
+            break;
+          }
+        }
+
+        if (func_pos == -1) {
+          break;
+        }
+        auto func_idx = position_to_func_idx[func_pos];
+
+        // Execute
+        // std::cout << "Func " << func_idx << std::endl;
+        // Make a copy here so we don't edit the vector we're iterating
+        // upon below.
+        std::vector<OpNode<TensorType>*> func_nodes(agenda[func_pos].begin(),
+                                                    agenda[func_pos].end());
+        executor->ExecuteOpNodeBatch(func_idx, func_nodes);
+        agenda_size -= func_nodes.size();
+        agenda[func_pos].clear();
+        // Reduce to evaluate input counts for out nodes
+        for (auto& node : func_nodes) {
+          // std::cout << " Node " << node->id_ << std::endl;
+          if (func_idx == REDUCE_SUM_FUNC_INDEX) {
+            auto tensor = node->args_.back();
             // std::cout << "  Computed tensor " << GetPtr<TensorType, TensorPtrType>(tensor)
             // << std::endl;
             auto it = tensor_to_consumers.find(GetPtr<TensorType, TensorPtrType>(tensor));
@@ -706,12 +716,33 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
                 }
               }
             }
+          } else {
+            for (size_t i = executor->OutputStart(func_idx); i < executor->InoutEnd(func_idx);
+                 ++i) {
+              auto tensor = node->args_[i];
+              // std::cout << "  Computed tensor " << GetPtr<TensorType, TensorPtrType>(tensor)
+              // << std::endl;
+              auto it = tensor_to_consumers.find(GetPtr<TensorType, TensorPtrType>(tensor));
+              if (it != tensor_to_consumers.end()) {
+                for (auto& out_node : it->second) {
+                  if (node_to_inputs[out_node->id_] == 1) {
+                    agenda[func_idx_to_position[out_node->func_idx_]].push_back(out_node);
+                    // std::cout << "   Added to agenda " << out_node->id_ << std::endl;
+                    agenda_size++;
+                  } else {
+                    --node_to_inputs[out_node->id_];
+                  }
+                }
+              }
+            }
           }
         }
       }
     }
   }
+
   executor->nodes_.clear();
+  executor->nodes_.resize(MAX_PROGRAM_PHASES);
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();

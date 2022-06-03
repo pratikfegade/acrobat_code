@@ -158,24 +158,36 @@ class TransitiveTensorOpCalls : public ExprVisitor {
   }
 
   bool CanTransitivelyCallTensorOps(const FunctionNode* func) {
+    on_stack_.clear();
+    CanTransitivelyCallTensorOpsInternal(func);
+  }
+
+  bool CanTransitivelyCallTensorOpsInternal(const FunctionNode* func) {
+    if (on_stack_.count(func)) {
+      return false;
+    }
+    on_stack_.insert(func);
     auto it = can_transitively_call_tensor_ops_cache_.find(func);
     if (it != can_transitively_call_tensor_ops_cache_.end()) {
       return it->second;
     }
     if (IncludesTensorOpCalls(func)) {
       can_transitively_call_tensor_ops_cache_[func] = true;
+      on_stack_.erase(func);
       return true;
     }
     auto iit = call_graph_.find(func);
     if (iit != call_graph_.end()) {
       for (auto callee : iit->second) {
-        if (CanTransitivelyCallTensorOps(callee)) {
+        if (CanTransitivelyCallTensorOpsInternal(callee)) {
           can_transitively_call_tensor_ops_cache_[func] = true;
+          on_stack_.erase(func);
           return true;
         }
       }
     }
     can_transitively_call_tensor_ops_cache_[func] = false;
+    on_stack_.erase(func);
     return false;
   }
   PreciseCallGraph call_graph_;
@@ -185,11 +197,9 @@ class TransitiveTensorOpCalls : public ExprVisitor {
     if (it != includes_tensor_op_calls_cache_.end()) {
       return it->second;
     }
-    // std::cout << "[TTC] Visiting function " << GetFunctionName(func) << std::endl;
     found_tensor_op_calls_ = false;
     this->VisitExpr(func->body);
     includes_tensor_op_calls_cache_[func] = found_tensor_op_calls_;
-    // std::cout << "[TTC]  Res " << found_tensor_op_calls_ << std::endl;
     return found_tensor_op_calls_;
   }
 
@@ -218,6 +228,7 @@ class TransitiveTensorOpCalls : public ExprVisitor {
   const Op& alloc_storage_op_ = MemoryAllocStorageOp();
   std::unordered_map<const FunctionNode*, bool> includes_tensor_op_calls_cache_;
   std::unordered_map<const FunctionNode*, bool> can_transitively_call_tensor_ops_cache_;
+  std::unordered_set<const FunctionNode*> on_stack_;
 };
 
 class TaintAnalysis : public BaseExprFunctor {
@@ -298,11 +309,11 @@ class TaintAnalysis : public BaseExprFunctor {
             }
           }
 
-          // std::cout << "[TSR]   Merged constants:" << std::endl;
-          for (auto kv : merged_constants) {
-            // std::cout << "[TSR]   " << kv.first->checked_type_ << " "
-            // << kv.first.as<ConstantNode>()->data.Shape() << std::endl;
-          }
+          // // std::cout << "[TSR]   Merged constants: " << merged_constants.size() << std::endl;
+          // for (auto kv : merged_constants) {
+          //   // std::cout << "[TSR]    " << kv.first->checked_type_ << " "
+          //             << kv.first.as<ConstantNode>()->data.Shape() << std::endl;
+          // }
           if (merged_constants.size() <= 1) {
             // std::cout << "[TSR]   Unique constants: " << merged_constants.size() << std::endl;
             continue;
@@ -1076,7 +1087,6 @@ IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
       auto to_repeat = TaintAnalysis(mod).PerformAnalysisPhase1();
       mod = RepeatMutator(to_repeat, mod).Repeat();
     }
-    // std::cout << "[After Repeating]\n" << mod << std::endl;
   }
   return TaintAnalysis(mod).PerformAnalysisPhase2();
 }

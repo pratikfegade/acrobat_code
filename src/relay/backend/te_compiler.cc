@@ -1746,9 +1746,7 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
 
   Array<Pass> passes;
   passes.push_back(tvm::relay::transform::RelayToTIRTargetHook());
-  // passes.push_back(transform::PrintCurrentIR("RelayToTIRTargetHook", true, true));
   passes.push_back(ModelParameterTaintAnalysisPass(true));
-  // passes.push_back(transform::PrintCurrentIR("MPTAnalysis", true, true));
   passes.push_back(DeadCodeElimination());
   passes.push_back(RemoveUnusedFunctions({"main"}, true));
   passes.push_back(InferTaskWeightsPass());
