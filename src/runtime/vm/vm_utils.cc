@@ -252,6 +252,9 @@ void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes) 
   from.shape = handle->shape;
   from.strides = nullptr;
   from.byte_offset = 0;
+  // std::cout << "[COPY] " << handle->data << " " << handle->ndim << " " << handle->shape[0]
+  //           << std::endl;
+  // std::cout << "[COPY]  " << from.data << " " << from.ndim << " " << from.shape[0] << std::endl;
   DeviceAPI::Get(handle->device)->CopyDataFromTo(&from, handle, nullptr);
 #ifdef DEBUG_CHECKS
   // Synchronize in case data become unavailable later.

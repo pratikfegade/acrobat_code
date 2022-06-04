@@ -288,7 +288,7 @@ void VirtualMachine::SetExecutionOptions(VMExecutionOptions options) {
   this->concurrent_execution_ = options->concurrent_execution;
   this->batch_size_ = options->batch_size;
 
-  if (true) {
+  if (false) {
     if (options->coarsened_execution) {
       std::cout << "[VM] Executing coarsened" << std::endl;
     } else {
@@ -484,7 +484,7 @@ void VirtualMachine::LoadExecutable(Executable* exec) {
       }
     }
 
-    bool print = true;
+    bool print = false;
     if (print) {
       if (batched_execution_) {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;
@@ -593,6 +593,9 @@ void VirtualMachine::RunLoop() {
   shared_state_->lazy_executor_.ResetProgramPhase();
   RandomGenerator::Init();
   Index frame_start = frames_.size();
+  if (!concurrent_execution_) {
+    RandomGenerator::Current().Reset();
+  }
   while (true) {
     if (RunOneIteration(frame_start)) {
       break;
@@ -603,7 +606,6 @@ void VirtualMachine::RunLoop() {
 bool VirtualMachine::RunOneIteration(int frame_start) {
   auto const& instr = code_[this->pc_];
   VLOG(2) << "Executing(" << pc_ << "): " << instr;
-  // std::cout << "Executing(" << pc_ << "): " << instr << std::endl;
 
   switch (instr.op) {
     case Opcode::Move: {
@@ -670,7 +672,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         WriteRegister(output_reg, tensor);
         pc_++;
       } else if (instr.func_index == DB_PHASE_CHANGE_INDEX) {
-        if (concurrent_execution_ || lazy_execution_) {
+        if (!concurrent_execution_ && lazy_execution_) {
           shared_state_->lazy_executor_.NextProgramPhase();
         }
         pc_++;
@@ -1007,7 +1009,6 @@ void ConcurrentVirtualMachine::InitSharedState(bool pgo) {
 
 DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMachine* vm,
                                                          int frame_start) {
-  // std::cout << "[CVM] Running a stage" << std::endl;
   while (true) {
     // std::cout << "[CVM]  Next Instr " << static_cast<int>(instr.op) << " " << vm->pc_ <<
     // std::endl;
@@ -1025,6 +1026,10 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
                 vm->code_[vm->pc_].func_index == DB_RANDOM_UNIFORM_INDEX) ||
                vm->code_[vm->pc_].op == Opcode::If) {
       return kStageEnd;
+    } else if (vm->code_[vm->pc_].op == Opcode::Invoke &&
+               vm->code_[vm->pc_].func_index == DB_PHASE_CHANGE_INDEX) {
+      std::cout << "[CVM]  Phase change" << std::endl;
+      return kProgramPhaseEnd;
     }
   }
 }
@@ -1035,6 +1040,10 @@ void ConcurrentVirtualMachine::RunLoop() {
   int alive = vms_.size();
   int frame_start = GetVMFromModule(vms_[0])->frames_.size();
 
+  RandomGenerator::Init();
+  RandomGenerator::Current().Reset();
+  std::cout << "[CVM] Concurrent loop" << std::endl;
+  int want_program_phase = 0;
   while (alive > 0) {
     // Run one control flow stage for all VMs
     for (size_t i = 0; i < vms_.size(); ++i) {
@@ -1044,8 +1053,15 @@ void ConcurrentVirtualMachine::RunLoop() {
         if (stage_state == kExecutionEnd) {
           alive--;
           mask[i] = false;
+        } else if (stage_state == kProgramPhaseEnd) {
+          want_program_phase++;
         }
       }
+    }
+
+    if (alive == want_program_phase) {
+      want_program_phase = 0;
+      shared_state_->lazy_executor_.NextProgramPhase();
     }
 
     // std::cout << "[VM]  One stage done" << std::endl;

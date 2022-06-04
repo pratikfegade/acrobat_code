@@ -573,14 +573,14 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
         graph_depth = std::max(graph_depth, node_depth);
       }
 
-      std::cout << "[LZ] Graph depth fpr phase " << graph_depth << " " << phase_num_nodes
-                << std::endl;
+      // std::cout << "[LZ] Graph depth fpr phase " << graph_depth << " " << phase_num_nodes
+      // << std::endl;
       int nodes_executed = 0;
       std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;
       for (int j = 0; j <= graph_depth; ++j) {
         auto& depth_nodes = depth_to_node[j];
         std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-        std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
+        // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
         nodes_executed += depth_nodes.size();
         for (auto& node : depth_nodes) {
           func_to_node[node->func_idx_].push_back(node);
@@ -773,6 +773,7 @@ void LazyAllocationLazyExecutor::BatchedExecute(bool coarsened_execution,
 
 void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx, const int depth,
                                                            DLTensor** args, int num_args) {
+  // std::cout << "[LZ] Node " << phase_ << " " << depth << " " << func_idx << std::endl;
   auto& phase_nodes = nodes_[phase_];
   auto size = phase_nodes.size();
   auto depthp1 = depth + 1;

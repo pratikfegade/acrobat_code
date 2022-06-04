@@ -190,7 +190,7 @@ def @filter[A](%f: fn(A) -> Tensor[(), bool], %xs: List[A]) -> List[A] {
 //   }
 // }
 
-def @zip[A, B](%xs: List[A], %ys: List[B]) -> List[(A, B)] {
+def @zip[A, B](%xs: List[A], %ys: List[B], DBSchedulerDepthConstant=1) -> List[(A, B)] {
   match (%xs) {
     Cons(%x, %x_rest) => {
       match (%ys) {

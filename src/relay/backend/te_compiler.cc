@@ -1180,6 +1180,7 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
           }
         }
 
+        // std::cout << "[TPGN]   Matched " << matched << std::endl;
         if (matched) {
           current_hfuse_group_.push_back(let->var);
           last_rhs_callee_ = this_rhs_callee;
@@ -1187,8 +1188,12 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
           if (current_hfuse_group_.size() > 1) {
             hfuse_groups_.push_back({current_hfuse_group_, last_rhs_callee_});
           }
-          last_rhs_callee_ = NullValue<BaseFunc>();
           current_hfuse_group_.clear();
+          // last_rhs_callee_ = NullValue<BaseFunc>();
+          if (this_rhs_callee.defined()) {
+            current_hfuse_group_.push_back(let->var);
+          }
+          last_rhs_callee_ = this_rhs_callee;
         }
         ExprVisitor::VisitExpr(let->value);
         current = let->body;
@@ -1228,8 +1233,9 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
         SEScope value_se_scope = SEScope::FullyUnconstrained();
         for (size_t i = 0; i < group_vars.size(); ++i) {
           auto od_props_current = GetOnDeviceProps(current);
-          if (od_props_current.body.defined()) {
+          while (od_props_current.body.defined()) {
             current = od_props_current.body;
+            od_props_current = GetOnDeviceProps(current);
           }
 
           auto let = current.as<LetNode>();
@@ -1286,12 +1292,12 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
   Phase1 phase1(module);
   phase1(RemoveOnDeviceCalls(func));
   // std::cout << "[TPGN] Found Groups" << std::endl;
-  // for (auto group : phase1.hfuse_groups_) {
-  //   std::cout << "[TPGN]  New Group" << std::endl;
-  //   for (auto var : group.vars) {
-  //     std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
-  //   }
-  // }
+  for (auto group : phase1.hfuse_groups_) {
+    std::cout << "[TPGN]  New Group" << std::endl;
+    for (auto var : group.vars) {
+      std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+    }
+  }
 
   Phase2 phase2(module, process_fn, module_name, compiler, host_se_scope, phase1.hfuse_groups_);
   func = Downcast<Function>(phase2(func));
@@ -1750,6 +1756,7 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
   passes.push_back(DeadCodeElimination());
   passes.push_back(RemoveUnusedFunctions({"main"}, true));
   passes.push_back(InferTaskWeightsPass());
+  // passes.push_back(transform::PrintCurrentIR("OLA", true, true));
   passes.push_back(tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}));
   passes.push_back(InferType());
   return tvm::transform::Sequential(passes);

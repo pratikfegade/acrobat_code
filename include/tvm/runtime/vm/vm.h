@@ -145,7 +145,8 @@ struct VMFrame {
 enum DBVMExecutionState {
   kRunning = 0,
   kStageEnd = 1,
-  kExecutionEnd = 2,
+  kProgramPhaseEnd = 2,
+  kExecutionEnd = 3,
 };
 
 class ConcurrentVirtualMachine;

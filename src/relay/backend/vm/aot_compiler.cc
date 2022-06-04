@@ -943,29 +943,30 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 }
               }
 
-              if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
-                for (int j = 0; j < instr.arity; ++j) {
-                  if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
-                    bool is_scalarized = !generate_inbuilt_scalar_op;
-                    auto scalar_taint = GetScalarizeTaints(instr.packed_args[j]);
-                    if (scalar_taint.size() > 0) {
-                      is_scalarized = is_scalarized && AnyScalarField(scalar_taint);
-                    }
+              // if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
+              //   // std::cout << "[AOTC]   Scalarizing " << instr << std::endl;
+              //   for (int j = 0; j < instr.arity; ++j) {
+              //     if (IsScalarTensorType(register_types_.at(instr.packed_args[j]))) {
+              //       bool is_scalarized = !generate_inbuilt_scalar_op;
+              //       auto scalar_taint = GetScalarizeTaints(instr.packed_args[j]);
+              //       if (scalar_taint.size() > 0) {
+              //         is_scalarized = is_scalarized && AnyScalarField(scalar_taint);
+              //       }
 
-                    if (!is_scalarized) {
-                      continue;
-                    }
+              //       if (!is_scalarized) {
+              //         continue;
+              //       }
 
-                    auto dtype =
-                        register_types_.at(instr.packed_args[j]).as<TensorTypeNode>()->dtype;
-                    EmitTriggerEvaluation();
-                    this->PrintIndent(stream_);
-                    stream_ << GetVarForReg(instr.packed_args[j]) << " = Scalarize<"
-                            << DTypeToTypeStr(dtype) << ">("
-                            << GetVarForReg(instr.packed_args[j], true) << ");\n";
-                  }
-                }
-              }
+              //       auto dtype =
+              //           register_types_.at(instr.packed_args[j]).as<TensorTypeNode>()->dtype;
+              //       EmitTriggerEvaluation();
+              //       this->PrintIndent(stream_);
+              //       stream_ << GetVarForReg(instr.packed_args[j]) << " = Scalarize<"
+              //               << DTypeToTypeStr(dtype) << ">("
+              //               << GetVarForReg(instr.packed_args[j], true) << ");\n";
+              //     }
+              //   }
+              // }
             }
 
             break;
@@ -1702,12 +1703,41 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     os << "while (tvm::runtime::vm::FiberRuntime::Current().ContinueExecution()) {\n";
     this->BeginScope();
     this->PrintIndent(os);
-    os << "bool execute = tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
+    os << "auto task = tvm::runtime::vm::FiberRuntime::Current().MainWaitForWorkers();\n";
     this->PrintIndent(os);
-    os << "if (execute) {\n";
+    os << "switch (task) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "case kExecute:\n";
     this->BeginScope();
     this->PrintIndent(os);
     os << GetRuntimeType() << "::Current()->LazyExecute();\n";
+    this->PrintIndent(os);
+    os << "break;\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "case kIncrementPhase:\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
+    this->PrintIndent(os);
+    os << "break;\n";
+    this->EndScope();
+    os << "case kIncrementPhaseAndExecute:\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << GetRuntimeType() << "::Current()->LazyExecute();\n";
+    this->PrintIndent(os);
+    os << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
+    this->PrintIndent(os);
+    os << "break;\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "case kDoNothing:\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "break;\n";
+    this->EndScope();
     this->EndScope();
     this->PrintIndent(os);
     os << "}\n";
@@ -1716,8 +1746,6 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->EndScope();
     this->PrintIndent(os);
     os << "}\n";
-    this->PrintIndent(os);
-    os << "tvm::runtime::vm::FiberRuntime::Current().MainEndFiberExecution();\n";
   }
 
   this->PrintIndent(os);

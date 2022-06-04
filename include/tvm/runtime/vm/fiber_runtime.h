@@ -37,6 +37,13 @@ typedef boost::fibers::fiber::id fiber_id_t;
 
 #define MAX_FIBER_COUNT 128
 
+enum FiberMainFiberTask {
+  kDoNothing = 0,
+  kExecute = 1,
+  kIncrementPhase = 2,
+  kIncrementPhaseAndExecute = 3,
+};
+
 class FiberRuntime {
  public:
   FiberRuntime(int num_fibers)
@@ -104,7 +111,7 @@ class FiberRuntime {
     WorkerWaitInternal(idx, kChildrenWaiting);
   }
 
-  bool MainWaitForWorkers() {
+  FiberMainFiberTask MainWaitForWorkers() {
     // std::cout << "[M] Main waiting" << std::endl;
     bool execute = false;
     for (int i = 0; i < num_fibers_; ++i) {
@@ -133,7 +140,19 @@ class FiberRuntime {
         }
       }
     }
-    return execute;
+    if (execute) {
+      if (alive_num_ == phase_waiting_num_ && alive_num_ > 0) {
+        return kIncrementPhaseAndExecute;
+      } else {
+        return kExecute;
+      }
+    } else {
+      if (alive_num_ == phase_waiting_num_ && alive_num_ > 0) {
+        return kIncrementPhase;
+      } else {
+        return kDoNothing;
+      }
+    }
   }
 
   void MainResumeWorkers() {
