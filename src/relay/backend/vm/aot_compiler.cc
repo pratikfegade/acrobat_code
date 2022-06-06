@@ -580,7 +580,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
       if (lazy_execution() && instr.op == Opcode::AllocStorage) {
         continue;
       }
-      if (instr.op == Opcode::Invoke && (instr.packed_index == DB_PHASE_CHANGE_INDEX ||
+      if (instr.op == Opcode::Invoke && (instr.packed_index == DB_SET_PHASE_INDEX ||
                                          instr.packed_index == DB_RANDOM_UNIFORM_INDEX)) {
         used_regs[instr.dst] = true;
       }
@@ -673,6 +673,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     int max_static_depth = -1;
     std::vector<std::string> all_depth_vars;
     int recursion_level = 0;
+    bool first_phase_change = true;
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       recursion_level++;
       for (int i = start_pc; i < end_pc; ++i) {
@@ -730,22 +731,24 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
               stream_ << dst_var << " = tvm::runtime::vm::RandomGenerator::Current().GetRandom("
                       << lo_var << ", " << hi_var << ");\n";
-            } else if (instr.packed_index == DB_PHASE_CHANGE_INDEX) {
+            } else if (instr.packed_index == DB_SET_PHASE_INDEX) {
               ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
               ICHECK_EQ(GetNestLevel(), 0)
                   << "Phase changes are only allowed in the outermost scope of the main function";
-              if (concurrent_execution()) {
+              auto phase_var = GetVarForReg(instr.invoke_args_registers[0]);
+              if (concurrent_execution() && !first_phase_change) {
                 this->PrintIndent(stream_);
                 stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerPhaseBarrierWait(fiber_"
                            "id);\n";
-              } else {
-                this->PrintIndent(stream_);
-                stream_ << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
               }
-              if (use_depth_tracking_executor()) {
+              this->PrintIndent(stream_);
+              stream_ << GetRuntimeType() << "::Current()->SetProgramPhase(" << phase_var << ");\n";
+
+              if (use_depth_tracking_executor() && !first_phase_change) {
                 this->PrintIndent(stream_);
                 stream_ << "depth = 0;\n";
               }
+              first_phase_change = false;
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
               auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();

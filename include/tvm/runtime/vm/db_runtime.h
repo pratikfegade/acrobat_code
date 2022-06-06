@@ -206,6 +206,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void ResetProgramPhase();
 
   /*!
+   * \brief Set the program phase to a value.
+   */
+  void SetProgramPhase(int phase);
+
+  /*!
    * \brief Initialize the virtual machine for a set of (physical) devices.
    * \param physical_devices The set of TVM devices.
    * \param alloc_types The allocator types for each device.

@@ -27,29 +27,31 @@ namespace tvm {
 namespace relay {
 
 ////////////////////////////// Dynamic batching
-bool DBPhaseChangeRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
-                      const TypeReporter& reporter) {
-  reporter->Assign(types[0], VoidType());
+bool DBSetPhaseRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
+                   const TypeReporter& reporter) {
+  reporter->Assign(types[0], TensorType({}, DataType::Int(32), true));
+  reporter->Assign(types[1], VoidType());
   return true;
 }
 
-Expr MakeDBPhaseChange() {
-  static const Op& op = Op::Get("db.phase_change");
-  return Call(op, {}, Attrs(), {});
+Expr MakeDBSetPhase(const Expr& phase) {
+  static const Op& op = Op::Get("db.set_phase");
+  return Call(op, {phase}, Attrs(), {});
 }
 
-TVM_REGISTER_GLOBAL("relay.op.db._make.phase_change").set_body_typed(MakeDBPhaseChange);
+TVM_REGISTER_GLOBAL("relay.op.db._make.set_phase").set_body_typed(MakeDBSetPhase);
 
-RELAY_REGISTER_OP("db.phase_change")
+RELAY_REGISTER_OP("db.set_phase")
     .describe(
         R"doc(Inform compiler/runtime of a program phase change for dynamic batching.)doc" TVM_ADD_FILELINE)
-    .set_num_inputs(0)
+    .set_num_inputs(1)
+    .add_argument("phase", "Tensor", "Program phase number to set")
     .set_attr<TOpPattern>("TOpPattern", kOpaque)
     .set_attr<TOpIsStateful>("TOpIsStateful", true)
-    .add_type_rel("DBPhaseChange", DBPhaseChangeRel);
+    .add_type_rel("DBPhaseChange", DBSetPhaseRel);
 
-const Op& GetDBPhaseChangeOp() {
-  static auto op = Op::Get("db.phase_change");
+const Op& GetDBSetPhaseOp() {
+  static auto op = Op::Get("db.set_phase");
   return op;
 }
 

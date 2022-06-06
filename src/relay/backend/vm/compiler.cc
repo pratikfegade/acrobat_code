@@ -803,9 +803,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       ICHECK(db_random_uniform_props.out_dtype.is_int());
       emit_db_inbuilt_op(DB_RANDOM_UNIFORM_INDEX, call_node, 2);
       return;
-    } else if (call_node->op == GetDBPhaseChangeOp()) {
-      ICHECK_EQ(call_node->args.size(), 0);
-      emit_db_inbuilt_op(DB_PHASE_CHANGE_INDEX, call_node, 0);
+    } else if (call_node->op == GetDBSetPhaseOp()) {
+      ICHECK_EQ(call_node->args.size(), 1);
+      emit_db_inbuilt_op(DB_SET_PHASE_INDEX, call_node, 1);
       return;
     }
 

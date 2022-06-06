@@ -68,7 +68,8 @@ IRModule NameFunctions(IRModule& mod) {
 
   StructuralHash hasher;
   for (auto kv : funcs) {
-    ordered_funcs[hasher(kv.second)] = kv;
+    auto hash = hasher(kv.second) + hasher(kv.first);
+    ordered_funcs[hash] = kv;
   }
 
   FunctionNamer function_namer;
@@ -78,7 +79,6 @@ IRModule NameFunctions(IRModule& mod) {
     if (base_func.as<FunctionNode>()) {
       auto func = Downcast<Function>(base_func);
       func = WithAttr(func, tir::attr::kDBFunctionName, String(global_var->name_hint));
-      // std::cout << "[NF] FUNCTION: " << global_var->name_hint << std::endl;
       func = Downcast<Function>(function_namer.NameFunctions(func, global_var->name_hint));
       new_funcs.Set(global_var, func);
     }

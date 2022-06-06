@@ -1023,9 +1023,9 @@ class LowerTensorExprMutator : public DeviceAwareExprMutator,
                                    db_random_uniform_props.out_shape,
                                    db_random_uniform_props.out_dtype);
       } else if (function_node->body.as<CallNode>() &&
-                 function_node->body.as<CallNode>()->op == GetDBPhaseChangeOp()) {
-        ICHECK_EQ(new_args.size(), 0);
-        return MakeDBPhaseChange();
+                 function_node->body.as<CallNode>()->op == GetDBSetPhaseOp()) {
+        ICHECK_EQ(new_args.size(), 1);
+        return MakeDBSetPhase(new_args[0]);
       }
     }
 
@@ -1756,7 +1756,6 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
   passes.push_back(DeadCodeElimination());
   passes.push_back(RemoveUnusedFunctions({"main"}, true));
   passes.push_back(InferTaskWeightsPass());
-  // passes.push_back(transform::PrintCurrentIR("OLA", true, true));
   passes.push_back(tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}));
   passes.push_back(InferType());
   return tvm::transform::Sequential(passes);

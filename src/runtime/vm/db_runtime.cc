@@ -217,6 +217,11 @@ void DynBatchRuntime<ExecutorType, TensorType>::NextProgramPhase() {
 }
 
 template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::SetProgramPhase(int phase) {
+  shared_state_.lazy_executor_.SetProgramPhase(phase);
+}
+
+template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
   shared_state_.lazy_executor_.ResetProgramPhase();
 }
@@ -384,7 +389,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
       }
     }
 
-    bool print = true;
+    bool print = false;
     if (print) {
       if (batched_execution_) {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;

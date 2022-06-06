@@ -124,6 +124,7 @@ void EagerAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, ND
 template <>
 void LazyAllocationLazyExecutor::AddPackedCallUnrolled(const Index func_idx, DLTensor** args,
                                                        int num_args) {
+  // std::cout << "[LZ] Node " << phase_ << " " << func_idx << std::endl;
   if (nodes_.size() == 0) {
     nodes_.resize(MAX_PROGRAM_PHASES);
   }
@@ -573,7 +574,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
         graph_depth = std::max(graph_depth, node_depth);
       }
 
-      // std::cout << "[LZ] Graph depth fpr phase " << graph_depth << " " << phase_num_nodes
+      // std::cout << "[LZ] Graph depth for phase " << graph_depth << " " << phase_num_nodes
       // << std::endl;
       int nodes_executed = 0;
       std::vector<std::unordered_map<int, std::vector<OpNode<TensorType>*>>> func_to_node_vecs;

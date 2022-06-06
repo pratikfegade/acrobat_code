@@ -103,10 +103,9 @@ class AbstractExecutor {
 
   inline size_t GetArity(const Index idx) const { return vm_shared_state_->args_end[idx]; }
 
-  inline void NextProgramPhase() {
-    std::cout << "[LAZY] NP" << std::endl;
-    phase_++;
-  }
+  inline void NextProgramPhase() { phase_++; }
+
+  inline void SetProgramPhase(int phase) { phase_ = phase; }
 
   inline void ResetProgramPhase() { phase_ = 0; }
 

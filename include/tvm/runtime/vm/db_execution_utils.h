@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -79,6 +80,9 @@ class RandomGenerator {
   }
 
   inline int32_t GetRandom(int32_t lo, int32_t hi) {
+    if (lo == hi) {
+      return lo;
+    }
     return std::uniform_int_distribution<>(lo, hi)(*gen_);
   }
 

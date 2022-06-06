@@ -35,10 +35,10 @@ namespace tvm {
 namespace relay {
 
 /*! \brief Returns the "phase change" operator. */
-const Op& GetDBPhaseChangeOp();
+const Op& GetDBSetPhaseOp();
 
 /*! \brief Create a call to the phase change op. */
-Expr MakeDBPhaseChange();
+Expr MakeDBSetPhase(const Expr& phase);
 
 }  // namespace relay
 }  // namespace tvm

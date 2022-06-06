@@ -671,7 +671,7 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         auto output_reg = instr.dst;
         WriteRegister(output_reg, tensor);
         pc_++;
-      } else if (instr.func_index == DB_PHASE_CHANGE_INDEX) {
+      } else if (instr.func_index == DB_SET_PHASE_INDEX) {
         if (!concurrent_execution_ && lazy_execution_) {
           shared_state_->lazy_executor_.NextProgramPhase();
         }
@@ -1027,7 +1027,7 @@ DBVMExecutionState ConcurrentVirtualMachine::RunOneStage(size_t vm_id, VirtualMa
                vm->code_[vm->pc_].op == Opcode::If) {
       return kStageEnd;
     } else if (vm->code_[vm->pc_].op == Opcode::Invoke &&
-               vm->code_[vm->pc_].func_index == DB_PHASE_CHANGE_INDEX) {
+               vm->code_[vm->pc_].func_index == DB_SET_PHASE_INDEX) {
       std::cout << "[CVM]  Phase change" << std::endl;
       return kProgramPhaseEnd;
     }

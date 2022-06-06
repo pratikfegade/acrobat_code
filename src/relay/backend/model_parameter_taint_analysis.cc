@@ -954,10 +954,10 @@ class RepeatMutator : public AbstractDuplicator {
       for (auto kv : mod_->functions) {
         auto base_func = kv.second;
         if (base_func.as<FunctionNode>()) {
-          auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
-          new_global_functions_.Set(kv.first, func);
           // std::cout << "[MPTA] Root duplication " << kv.first->name_hint << " " << kv.first.get()
           // << std::endl;
+          auto func = Downcast<Function>(this->Mutate(Downcast<Function>(base_func)));
+          new_global_functions_.Set(kv.first, func);
         }
       }
       for (auto kv : new_global_functions_) {
@@ -1008,8 +1008,9 @@ class RepeatMutator : public AbstractDuplicator {
     class DuplicateExprSubstituter : public ExprMutator {
      public:
       explicit DuplicateExprSubstituter(
-          std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> subst_map, int& ctr)
-          : subst_map_(subst_map), ctr_(ctr) {}
+          std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> subst_map, int& ctr,
+          bool print)
+          : subst_map_(subst_map), ctr_(ctr), print_(print) {}
 
       Expr VisitExpr(const Expr& expr) final {
         auto it = subst_map_.find(expr);
@@ -1020,10 +1021,12 @@ class RepeatMutator : public AbstractDuplicator {
       }
 
       Expr VisitExpr_(const FunctionNode* op) final {
-        // std::cout << "[PANSL] Duplicate visiting " << GetRef<Expr>(op) << std::endl;
-
         auto visited = ExprMutator::VisitExpr_(op);
-        // std::cout << "[PANSL]  visited " << visited << std::endl;
+        if (print_) {
+          std::cout << "[PANSL] Duplicate visiting " << visited << " " << visited.get()
+                    << std::endl;
+        }
+
         auto fn = visited.as<FunctionNode>();
 
         ICHECK(fn);
@@ -1037,19 +1040,27 @@ class RepeatMutator : public AbstractDuplicator {
         }
         new_func = WithAttr(new_func, "db.mpta.original_function", visited);
         new_func->checked_type_ = op->checked_type();
+        if (print_) {
+          std::cout << "[PANSL]   Duplicate visited " << new_func << " " << new_func.get()
+                    << std::endl;
+        }
         return new_func;
       }
 
      private:
       tvm::Map<Expr, Expr> subst_map_;
       int& ctr_;
+      bool print_;
     };
 
     if (new_name.size() == 0) {
       auto old_name = fn->GetAttr<String>("db.function_name").value();
       new_name = old_name + "_dup" + std::to_string(ctr_++);
     }
-    // std::cout << "[PANSL] Duplicating " << new_name << std::endl;
+    bool print = false;  // (support::StartsWith(new_name, "rnn_cell"));
+    if (print) {
+      std::cout << "[PANSL] Duplicating " << new_name << std::endl;
+    }
     Array<Var> new_params;
     std::unordered_map<Expr, Expr, ObjectPtrHash, ObjectPtrEqual> rmap;
     if (old_gv.defined()) {
@@ -1062,7 +1073,7 @@ class RepeatMutator : public AbstractDuplicator {
       rmap[param] = new_param;
     }
 
-    auto new_body = DuplicateExprSubstituter(std::move(rmap), ctr_).Mutate(fn->body);
+    auto new_body = DuplicateExprSubstituter(std::move(rmap), ctr_, print).Mutate(fn->body);
     auto new_func =
         WithAttr(Function(new_params, new_body, fn->ret_type, fn->type_params, fn->attrs, fn->span),
                  tir::attr::kDBFunctionName, String(new_name));
@@ -1078,6 +1089,7 @@ class RepeatMutator : public AbstractDuplicator {
   std::unordered_map<const CallNode*, Function> to_repeat_call_nodes_;
   static int ctr_;
 };
+
 int RepeatMutator::ctr_{0};
 }  // namespace
 

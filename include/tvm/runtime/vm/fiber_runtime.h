@@ -165,7 +165,7 @@ class FiberRuntime {
           start_channels_[i]->push(kResume);
         }
       }
-      phase_waiting_num_ = alive_num_;
+      phase_waiting_num_ = 0;
     } else {
       for (int i = 0; i < num_fibers_; ++i) {
         if (alive_[i] && !phase_waiting_[i]) {
