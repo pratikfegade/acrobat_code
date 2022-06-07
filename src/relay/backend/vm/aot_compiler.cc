@@ -1401,8 +1401,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "  int tmp_depth = map_depth_value;\n"
           "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
           "  new_node->tag = LIST_CONS_TAG;\n"
-          "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
-          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n" +
+          (concurrent_execution()
+               ? "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
+                 "tmp_depth);\n"
+               : "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n") +
+          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n" +
           "  depth = std::max(depth, tmp_depth);\n"
           "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
           "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
