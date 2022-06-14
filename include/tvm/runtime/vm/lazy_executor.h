@@ -103,11 +103,18 @@ class AbstractExecutor {
 
   inline size_t GetArity(const Index idx) const { return vm_shared_state_->args_end[idx]; }
 
-  inline void NextProgramPhase() { phase_++; }
+  inline void NextProgramPhase() { /*phase_++; */
+  }
 
-  inline void SetProgramPhase(int phase) { phase_ = phase; }
+  inline void SetProgramPhase(int phase) {
+    // std::cout << "[LZH] PHASE " << phase << std::endl;
+    phase_ = phase;
+  }
 
-  inline void ResetProgramPhase() { phase_ = 0; }
+  inline void ResetProgramPhase() { /* phase_ = 0;*/
+  }
+
+  virtual void ResetExecutor() { phase_ = 0; }
 
   /*! \brief Pointer to the shared state of the VM this executor is
       associated with */
@@ -151,10 +158,18 @@ class LazyExecutor final : public AbstractExecutor<LazyExecutor<TensorType>, Ten
 
   void SetPGO(bool value) { this->pgo_ = value; }
 
+  void ResetExecutor() {
+    AbstractExecutor<LazyExecutor<TensorType>, TensorType>::ResetExecutor();
+    node_ctr_ = 0;
+    nodes_executed_ctr_ = 0;
+  }
+
   /*! \brief list of nodes to execute */
   std::vector<std::vector<OpNode<TensorType>>> nodes_;
   /*! \brief node counter to assign node ids */
   int node_ctr_{0};
+  /*! \brief node counter to keep track of all executed node */
+  int nodes_executed_ctr_{0};
   /*! \brief Whether to execute or to gather PGO stats */
   bool pgo_{false};
   /*! \brief Execution counts for PackedFuncs, for when pgo is turned on */

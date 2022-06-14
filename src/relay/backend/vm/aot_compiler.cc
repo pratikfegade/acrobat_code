@@ -1717,8 +1717,28 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     this->PrintIndent(os);
     os << "case kExecute:\n";
     this->BeginScope();
+
+    this->PrintIndent(os);
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStopCall();\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
     this->PrintIndent(os);
     os << GetRuntimeType() << "::Current()->LazyExecute();\n";
+
+    this->PrintIndent(os);
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStartCall(\"graph_construction\");\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
     this->PrintIndent(os);
     os << "break;\n";
     this->EndScope();
@@ -1726,16 +1746,32 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     os << "case kIncrementPhase:\n";
     this->BeginScope();
     this->PrintIndent(os);
-    os << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
-    this->PrintIndent(os);
     os << "break;\n";
     this->EndScope();
     os << "case kIncrementPhaseAndExecute:\n";
     this->BeginScope();
+
+    this->PrintIndent(os);
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStopCall();\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
     this->PrintIndent(os);
     os << GetRuntimeType() << "::Current()->LazyExecute();\n";
+
     this->PrintIndent(os);
-    os << GetRuntimeType() << "::Current()->NextProgramPhase();\n";
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStartCall(\"graph_construction\");\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
     this->PrintIndent(os);
     os << "break;\n";
     this->EndScope();

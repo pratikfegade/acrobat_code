@@ -28,6 +28,7 @@
 #include <tvm/runtime/memory.h>
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/vm/arena.h>
+#include <tvm/runtime/vm/db_execution_utils.h>
 #include <tvm/runtime/vm/db_runtime.h>
 
 #include <algorithm>
@@ -224,6 +225,13 @@ void DynBatchRuntime<ExecutorType, TensorType>::SetProgramPhase(int phase) {
 template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
   shared_state_.lazy_executor_.ResetProgramPhase();
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::ResetExecutionState() {
+  shared_state_.lazy_executor_.ResetExecutor();
+  RecycleAllArenaMemory();
+  RandomGenerator::Current().Reset();
 }
 
 template <typename ExecutorType, typename TensorType>

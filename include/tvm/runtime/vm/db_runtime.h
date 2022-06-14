@@ -229,6 +229,11 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void RecycleAllArenaMemory();
 
   /*!
+   * \brief Reset all execution state
+   */
+  void ResetExecutionState();
+
+  /*!
    * \brief Get the current instance of the runtime.
    */
   static inline DynBatchRuntime<ExecutorType, TensorType>* Current() { return current_; }
