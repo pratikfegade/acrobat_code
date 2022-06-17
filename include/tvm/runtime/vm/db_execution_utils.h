@@ -29,6 +29,7 @@
 #include <stddef.h>
 #include <tvm/runtime/c_runtime_api.h>
 #include <tvm/runtime/ndarray.h>
+#include <tvm/runtime/vm/dynamic_batching.h>
 
 #include <iostream>
 #include <memory>
@@ -83,6 +84,9 @@ class RandomGenerator {
     if (lo == hi) {
       return lo;
     }
+#ifdef DEBUG_CHECKS
+    ICHECK(gen_);
+#endif
     return std::uniform_int_distribution<>(lo, hi)(*gen_);
   }
 

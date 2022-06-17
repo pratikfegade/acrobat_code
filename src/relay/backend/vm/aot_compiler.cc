@@ -740,24 +740,28 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
               stream_ << dst_var << " = tvm::runtime::vm::RandomGenerator::Current().GetRandom("
                       << lo_var << ", " << hi_var << ");\n";
-            } else if (instr.packed_index == DB_SET_PHASE_INDEX && ConsiderPhases()) {
-              ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
-              ICHECK_EQ(GetNestLevel(), 0)
-                  << "Phase changes are only allowed in the outermost scope of the main function";
-              auto phase_var = GetVarForReg(instr.invoke_args_registers[0]);
-              if (ConcurrentExecution() && !first_phase_change) {
+            } else if (instr.packed_index == DB_SET_PHASE_INDEX) {
+              if (ConsiderPhases()) {
+                ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
+                ICHECK_EQ(GetNestLevel(), 0)
+                    << "Phase changes are only allowed in the outermost scope of the main function";
+                auto phase_var = GetVarForReg(instr.invoke_args_registers[0]);
+                if (ConcurrentExecution() && !first_phase_change) {
+                  this->PrintIndent(stream_);
+                  stream_
+                      << "tvm::runtime::vm::FiberRuntime::Current().WorkerPhaseBarrierWait(fiber_"
+                         "id);\n";
+                }
                 this->PrintIndent(stream_);
-                stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerPhaseBarrierWait(fiber_"
-                           "id);\n";
-              }
-              this->PrintIndent(stream_);
-              stream_ << GetRuntimeType() << "::Current()->SetProgramPhase(" << phase_var << ");\n";
+                stream_ << GetRuntimeType() << "::Current()->SetProgramPhase(" << phase_var
+                        << ");\n";
 
-              if (UseDepthTrackingExecutor() && !first_phase_change) {
-                this->PrintIndent(stream_);
-                stream_ << "depth = 0;\n";
+                if (UseDepthTrackingExecutor() && !first_phase_change) {
+                  this->PrintIndent(stream_);
+                  stream_ << "depth = 0;\n";
+                }
+                first_phase_change = false;
               }
-              first_phase_change = false;
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
               auto dst_type = register_types_.at(instr.dst).as<TensorTypeNode>();
