@@ -112,14 +112,14 @@ std::string DTypeToTypeStr(const DataType& dtype) {
   return "";
 }
 
-bool lazy_execution() {
+bool LazyExecution() {
   static bool lazy_execution_ = tvm::transform::PassContext::Current()
                                     ->GetConfig<Bool>("relay.db_lazy_execution", Bool(false))
                                     .value();
   return lazy_execution_;
 }
 
-bool concurrent_execution() {
+bool ConcurrentExecution() {
   static bool concurrent_execution_ =
       tvm::transform::PassContext::Current()
           ->GetConfig<Bool>("relay.db_concurrent_execution", Bool(false))
@@ -127,7 +127,15 @@ bool concurrent_execution() {
   return concurrent_execution_;
 }
 
-bool use_depth_tracking_executor() {
+bool ConsiderPhases() {
+  static bool consider_phases_ =
+      tvm::transform::PassContext::Current()
+          ->GetConfig<Bool>("relay.db_consider_program_phase", Bool(false))
+          .value();
+  return consider_phases_;
+}
+
+bool UseDepthTrackingExecutor() {
   static bool use_depth_tracking_executor_ =
       tvm::transform::PassContext::Current()
           ->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false))
@@ -136,7 +144,7 @@ bool use_depth_tracking_executor() {
 }
 
 inline std::string GetTensorType() {
-  if (lazy_execution()) {
+  if (LazyExecution()) {
     return "DLTensor*";
   } else {
     return "NDArray";
@@ -184,10 +192,10 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
         os << ",";
       }
     }
-    if (concurrent_execution()) {
+    if (ConcurrentExecution()) {
       os << ", int";
     }
-    if (use_depth_tracking_executor()) {
+    if (UseDepthTrackingExecutor()) {
       os << ", int&";
     }
     os << ")>";
@@ -262,14 +270,14 @@ std::string GetDepthTrackingMapFunctionName() { return "pmap"; }
 std::string GetCppFunctionName(const std::string& name) {
   if (name == "main") {
     return GetModelMainFunctionName();
-  } else if (use_depth_tracking_executor() && name == "map") {
+  } else if (UseDepthTrackingExecutor() && name == "map") {
     return GetDepthTrackingMapFunctionName();
   }
   return name;
 }
 
 std::string GetExecutorType() {
-  if (use_depth_tracking_executor()) {
+  if (UseDepthTrackingExecutor()) {
     return "DepthTrackingExecutor";
   } else {
     return "LazyExecutor<" + GetTensorType() + ">";
@@ -334,6 +342,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     inbuilt_ops_.insert({"not_equal", "!="});
     inbuilt_ops_.insert({"greater_equal", ">="});
     inbuilt_ops_.insert({"less_equal", "<="});
+    inbuilt_ops_.insert({"less", "<"});
     inbuilt_ops_.insert({"greater", ">"});
     inbuilt_ops_.insert({"logical_and", "&&"});
     inbuilt_ops_.insert({"logical_or", "||"});
@@ -341,7 +350,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
   int GenerateCPPForFunction(bool definition) {
     int max_static_depth = -1;
-    if (use_depth_tracking_executor() && vm_func_.name == "map") {
+    if (UseDepthTrackingExecutor() && vm_func_.name == "map") {
       EmitPMapCPP(definition);
     } else {
       // std::cout << "[FUN] Visiting " << vm_func_.name << std::endl;
@@ -455,7 +464,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     for (size_t i = 0; i < function_type->arg_types.size(); ++i) {
       auto arg_type = function_type->arg_types[i];
       RelayTypeToCppStr(stream_, arg_type, false, "", GetScalarizeTaints(i));
-      if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
+      if (arg_type.as<TensorTypeNode>() && !LazyExecution()) {
         stream_ << "&";
       }
       stream_ << " " << GetVarForReg(i);
@@ -463,10 +472,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
         stream_ << ", ";
       }
     }
-    if (concurrent_execution()) {
+    if (ConcurrentExecution()) {
       stream_ << ", int fiber_id";
     }
-    if (use_depth_tracking_executor()) {
+    if (UseDepthTrackingExecutor()) {
       stream_ << ", int& depth";
     }
     stream_ << ")";
@@ -485,7 +494,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   bool IsTupleMapFunction(const std::string& name) {
-    return use_depth_tracking_executor() && support::StartsWith(name, "tuple_map_");
+    return UseDepthTrackingExecutor() && support::StartsWith(name, "tuple_map_");
   }
 
   bool AnyScalarField(const std::vector<bool>& vec) {
@@ -517,7 +526,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         type2vars[tensor_type].push_back(tensor_var);
         type2vars[scalar_type].push_back(scalar_var);
       } else {
-        if (lazy_execution() && IsStorageType(reg_type)) {
+        if (LazyExecution() && IsStorageType(reg_type)) {
           continue;
         }
 
@@ -555,15 +564,15 @@ class VMAOTFunctionCompiler : SourcePrinter {
   }
 
   void EmitTriggerEvaluation() {
-    if (lazy_execution()) {
+    if (LazyExecution()) {
       this->PrintIndent(stream_);
-      if (concurrent_execution()) {
+      if (ConcurrentExecution()) {
         stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerYield(fiber_id"
                 << ");\n";
       } else {
         stream_ << GetExecutorType() << "::Current()->LazyExecute();\n";
       }
-      if (use_depth_tracking_executor()) {
+      if (UseDepthTrackingExecutor()) {
         stream_ << "depth = 0;\n";
       }
     }
@@ -577,7 +586,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::vector<bool> used_regs(vm_func_.register_file_size, false);
     for (size_t i = 0; i < vm_func_.instructions.size(); ++i) {
       auto& instr = vm_func_.instructions[i];
-      if (lazy_execution() && instr.op == Opcode::AllocStorage) {
+      if (LazyExecution() && instr.op == Opcode::AllocStorage) {
         continue;
       }
       if (instr.op == Opcode::Invoke && (instr.packed_index == DB_SET_PHASE_INDEX ||
@@ -612,7 +621,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
     this->GenerateLocalDecls(used_regs, scalar_outs_of_tensor_ops);
 
-    if (InMainFunction() && !concurrent_execution()) {
+    if (InMainFunction() && !ConcurrentExecution()) {
       this->PrintIndent(stream_);
       stream_ << GetRuntimeType() << "::Current()->ResetProgramPhase();\n";
     }
@@ -731,12 +740,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto hi_var = GetVarForReg(instr.invoke_args_registers[1]);
               stream_ << dst_var << " = tvm::runtime::vm::RandomGenerator::Current().GetRandom("
                       << lo_var << ", " << hi_var << ");\n";
-            } else if (instr.packed_index == DB_SET_PHASE_INDEX) {
+            } else if (instr.packed_index == DB_SET_PHASE_INDEX && ConsiderPhases()) {
               ICHECK(InMainFunction()) << "Phase changes are only allowed in the main function";
               ICHECK_EQ(GetNestLevel(), 0)
                   << "Phase changes are only allowed in the outermost scope of the main function";
               auto phase_var = GetVarForReg(instr.invoke_args_registers[0]);
-              if (concurrent_execution() && !first_phase_change) {
+              if (ConcurrentExecution() && !first_phase_change) {
                 this->PrintIndent(stream_);
                 stream_ << "tvm::runtime::vm::FiberRuntime::Current().WorkerPhaseBarrierWait(fiber_"
                            "id);\n";
@@ -744,7 +753,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
               this->PrintIndent(stream_);
               stream_ << GetRuntimeType() << "::Current()->SetProgramPhase(" << phase_var << ");\n";
 
-              if (use_depth_tracking_executor() && !first_phase_change) {
+              if (UseDepthTrackingExecutor() && !first_phase_change) {
                 this->PrintIndent(stream_);
                 stream_ << "depth = 0;\n";
               }
@@ -763,7 +772,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 depth_var = "__depth" + std::to_string(tmp_var_counter++);
                 stream_ << "int " << depth_var << " = __orig_depth;\n";
                 all_depth_vars.push_back(depth_var);
-              } else if (use_depth_tracking_executor()) {
+              } else if (UseDepthTrackingExecutor()) {
                 depth_var = "depth";
               }
 
@@ -778,7 +787,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 this->PrintIndent(stream_);
                 stream_ << dst_var << " = invoke_reduce_sum(append(" << list_var << ", " << init_var
                         << ")";
-                if (use_depth_tracking_executor()) {
+                if (UseDepthTrackingExecutor()) {
                   stream_ << ", " << depth_var;
                 }
                 stream_ << ");\n";
@@ -812,15 +821,15 @@ class VMAOTFunctionCompiler : SourcePrinter {
                   }
                 }
                 ss << args_ss.str();
-                if (concurrent_execution()) {
+                if (ConcurrentExecution()) {
                   ss << ", __FIBER_ID__";
                 }
-                if (use_depth_tracking_executor()) {
+                if (UseDepthTrackingExecutor()) {
                   ss << ", " << depth_var;
                 }
                 ss << ");\n";
 
-                if (same_depth_for_all_calls && concurrent_execution()) {
+                if (same_depth_for_all_calls && ConcurrentExecution()) {
                   this->PrintIndent(stream_);
                   stream_ << "if (__create_fiber) {\n";
                   this->BeginScope();
@@ -922,7 +931,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
               stream_ << "};\n";
               this->PrintIndent(stream_);
-              if (use_depth_tracking_executor()) {
+              if (UseDepthTrackingExecutor()) {
                 std::string depth_str = ", ";
                 auto depth = GetCallGraphDepth(i);
                 if (depth >= 0) {
@@ -937,7 +946,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
                         << flattened_args.size() << ");\n";
               } else {
-                if (lazy_execution()) {
+                if (LazyExecution()) {
                   stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
                           << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
                 } else {
@@ -986,10 +995,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 stream_ << ", ";
               }
             }
-            if (concurrent_execution()) {
+            if (ConcurrentExecution()) {
               stream_ << ", fiber_id";
             }
-            if (use_depth_tracking_executor()) {
+            if (UseDepthTrackingExecutor()) {
               stream_ << ", depth";
             }
             stream_ << ");\n";
@@ -1120,7 +1129,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             }
             shape_arr << "}";
 
-            if (lazy_execution()) {
+            if (LazyExecution()) {
               auto it = storage_device_indices.find(instr.alloc_tensor.storage);
               ICHECK(it != storage_device_indices.end());
               auto device_index = it->second;
@@ -1146,7 +1155,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::AllocTensorReg: {
-            ICHECK(!lazy_execution());
+            ICHECK(!LazyExecution());
             if (scalar_outs_of_scalar_ops.count(instr.dst)) {
               break;
             }
@@ -1244,10 +1253,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 stream_ << ", ";
               }
             }
-            if (concurrent_execution()) {
+            if (ConcurrentExecution()) {
               stream_ << ", int fiber_id";
             }
-            if (use_depth_tracking_executor()) {
+            if (UseDepthTrackingExecutor()) {
               stream_ << ", int& depth";
             }
             stream_ << ") {\n";
@@ -1267,10 +1276,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 stream_ << ", ";
               }
             }
-            if (concurrent_execution()) {
+            if (ConcurrentExecution()) {
               stream_ << ", fiber_id";
             }
-            if (use_depth_tracking_executor()) {
+            if (UseDepthTrackingExecutor()) {
               stream_ << ", depth";
             }
             stream_ << ");\n";
@@ -1280,7 +1289,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             break;
           }
           case Opcode::AllocStorage: {
-            if (lazy_execution()) {
+            if (LazyExecution()) {
               storage_device_indices[instr.dst] = instr.alloc_storage.device_index;
             } else {
               auto dst_var = GetVarForReg(instr.dst);
@@ -1343,7 +1352,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
             return;
         }
 
-        if (concurrent_execution() && same_depth_for_all_calls && i >= children_wait_pos &&
+        if (ConcurrentExecution() && same_depth_for_all_calls && i >= children_wait_pos &&
             children_wait_pos >= 0 && recursion_level == 1) {
           this->PrintIndent(stream_);
           stream_ << "if (__create_fiber) {\n";
@@ -1362,7 +1371,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     if (same_depth_for_all_calls) {
       this->PrintIndent(stream_);
       stream_ << "int __orig_depth = depth;\n";
-      if (concurrent_execution()) {
+      if (ConcurrentExecution()) {
         this->PrintIndent(stream_);
         stream_ << "bool __create_fiber = FiberRuntime::Current().CanCreateNewFiber();\n";
       }
@@ -1373,13 +1382,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
   void EmitPMapCPP(bool definition) {
     stream_ << "template <class A, class B>\n";
-    if (concurrent_execution()) {
+    if (ConcurrentExecution()) {
       stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int, int&)> local_0, ";
     } else {
       stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, ";
     }
     stream_ << "std::shared_ptr<List<A>> ";
-    if (concurrent_execution()) {
+    if (ConcurrentExecution()) {
       stream_ << "local_1, int fiber_id, int& depth)";
     } else {
       stream_ << "local_1, int& depth)";
@@ -1402,11 +1411,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
           "  new_node->tag = LIST_CONS_TAG;\n"
           "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n" +
-          (concurrent_execution()
-               ? "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
-                 "tmp_depth);\n"
-               : "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n") +
-          "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n" +
+          std::string((
+              ConcurrentExecution()
+                  ? "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
+                    "tmp_depth);\n"
+                  : "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n")) +
           "  depth = std::max(depth, tmp_depth);\n"
           "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
           "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
@@ -1451,7 +1460,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
 
       stream_ << "{\n";
       stream_ << initializations;
-      if (concurrent_execution()) {
+      if (ConcurrentExecution()) {
         stream_ << "if (!FiberRuntime::Current().CanCreateNewFiber()) {\n";
         stream_ << non_concurrent_body;
         stream_ << "} else {\n";
@@ -1576,7 +1585,7 @@ void VMAOTCompiler::EmitUtilFunctions(
 
   for (auto tt : invoke_reduce_sum_types) {
     std::stringstream ss;
-    bool use_depth = use_depth_tracking_executor();
+    bool use_depth = UseDepthTrackingExecutor();
     if (use_depth) {
       ss << "__TT__ invoke_reduce_sum(std::shared_ptr<List<__TT__>> list, int& depth) {\n";
     } else {
@@ -1638,7 +1647,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   this->PrintIndent(os);
   os << "auto batch_size = " << GetVarForReg(0) << ".size();\n";
 
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Init(batch_size);\n";
   }
@@ -1651,7 +1660,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   this->PrintIndent(os);
   os << "for (size_t b = 0; b < batch_size; ++b) {\n";
 
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     this->BeginScope();
     this->PrintIndent(os);
     os << "auto run_func = [b, &res, ";
@@ -1669,7 +1678,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
 
   this->BeginScope();
   this->PrintIndent(os);
-  if (use_depth_tracking_executor()) {
+  if (UseDepthTrackingExecutor()) {
     os << "int depth = " << start_depth << ";\n";
   }
   this->PrintIndent(os);
@@ -1681,15 +1690,15 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
       os << ", ";
     }
   }
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     os << ", b";
   }
-  if (use_depth_tracking_executor()) {
+  if (UseDepthTrackingExecutor()) {
     os << ", depth";
   }
   os << ");\n";
 
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().WorkerEnd(b);\n";
     this->EndScope();
@@ -1705,7 +1714,7 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   this->PrintIndent(os);
   os << "}\n";
 
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     this->PrintIndent(os);
     os << "while (tvm::runtime::vm::FiberRuntime::Current().ContinueExecution()) {\n";
     this->BeginScope();
@@ -1824,7 +1833,7 @@ void VMAOTCompiler::EmitBatchedMainFunctionHeader(std::ostream& os) {
     os << "std::vector<";
     // TODO(ppf): Scalarification
     RelayTypeToCppStr(os, arg_type);
-    if (arg_type.as<TensorTypeNode>() && !lazy_execution()) {
+    if (arg_type.as<TensorTypeNode>() && !LazyExecution()) {
       os << "&";
     }
     os << "> " << GetVarForReg(i);
@@ -1979,7 +1988,7 @@ void VMAOTCompiler::EmitHeaderIncludes(std::ostream& os) {
   os << "#include <tvm/runtime/vm/db_runtime.h>\n";
   os << "#include <tvm/runtime/vm/db_execution_utils.h>\n";
   os << "#include <tvm/runtime/vm/arena.h>\n";
-  if (concurrent_execution()) {
+  if (ConcurrentExecution()) {
     os << "#include <tvm/runtime/vm/fiber_runtime.h>\n";
   }
   os << "#include <stdexcept>\n";

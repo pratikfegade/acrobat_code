@@ -40,6 +40,13 @@
 #include <stdexcept>
 #include <vector>
 
+//////////////////////////////////////////////////
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+#include "../cuda/cuda_common.h"
+//////////////////////////////////////////////////
+
 #include "../../support/utils.h"
 #include "../contrib/thrust/db_kernels.h"
 #include "../file_utils.h"
@@ -260,7 +267,7 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
 template <typename ConcreteExecutorType>
 void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,
                                       const std::vector<LazyOpNode*>& func_nodes) {
-  std::cout << "[LZ]   Executing " << func_idx << " " << func_nodes.size() << std::endl;
+  // std::cout << "[LZ]   Executing " << func_idx << " " << func_nodes.size() << std::endl;
 
   const VMSharedState<ConcreteExecutorType>& vm_shared_state = *(executor.vm_shared_state_);
   int32_t batch_size = func_nodes.size();
@@ -423,8 +430,10 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         device_scattered_ptrs_dltensor->shape = shape_data;
         device_scattered_ptrs_dltensor->byte_offset = 0;
       }
-      ArrayCopyFromBytesAsync(device_scattered_ptrs_dltensor, host_scattered_ptrs,
-                              nbytes_scattered_ptrs);
+      cudaMemcpyAsync(device_scattered_ptrs_dltensor->data, host_scattered_ptrs,
+                      nbytes_scattered_ptrs, cudaMemcpyHostToDevice);
+      // ArrayCopyFromBytesAsync(device_scattered_ptrs_dltensor, host_scattered_ptrs,
+      // nbytes_scattered_ptrs);
     }
 
 #ifdef DB_PROFILING
@@ -538,7 +547,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       if (phase_num_nodes == 0) {
         continue;
       }
-      std::cout << "[LZH] PHASE NODES " << phase_ctr << " " << phase_num_nodes << std::endl;
+      // std::cout << "[LZH] PHASE NODES " << phase_ctr << " " << phase_num_nodes << std::endl;
 
       int graph_depth = -1;
       std::vector<std::vector<OpNode<TensorType>*>> depth_to_node(phase_num_nodes);
@@ -585,7 +594,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       for (int j = 0; j <= graph_depth; ++j) {
         auto& depth_nodes = depth_to_node[j];
         std::unordered_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
-        std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
+        // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
         nodes_executed += depth_nodes.size();
         for (auto& node : depth_nodes) {
           func_to_node[node->func_idx_].push_back(node);

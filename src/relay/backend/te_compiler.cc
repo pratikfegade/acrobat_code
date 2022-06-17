@@ -287,8 +287,8 @@ class TECompilerImpl : public TECompilerNode {
             << key->target->ToDebugString();
 
     // std::cout << "[PANSL] lowering "
-    //           << key->source_func->GetAttr<String>(tir::attr::kDBFunctionName) << " "
-    //           << key->source_func.get() << std::endl;
+    // << key->source_func->GetAttr<Integer>("DynamicBatchSizeEstimate") << " "
+    // << key->source_func.get() << std::endl;
 
     bool batched_execution =
         PassContext::Current()->GetConfig<Bool>("relay.db_batched_execution", Bool(false)).value();
@@ -403,7 +403,7 @@ class TECompilerImpl : public TECompilerNode {
         // Create scatter_buffer_map when applicable
         Map<te::Tensor, tir::Buffer> scatter_buffers;
         if (batched && scattered_kernels) {
-          bool print = (key->static_batch_size->value > 1);
+          bool print = false;  //(key->static_batch_size->value > 1);
           if (print) {
             std::cout << "[KB] Lowering " << cached_func->batched_arg_mode << std::endl;
           }
@@ -1756,7 +1756,9 @@ Pass LowerTEPass(const String& module_name, ProcessFn process_fn, SEScope host_s
   passes.push_back(DeadCodeElimination());
   passes.push_back(RemoveUnusedFunctions({"main"}, true));
   passes.push_back(InferTaskWeightsPass());
+  // passes.push_back(transform::PrintCurrentIR("Before LowerTE", true, true));
   passes.push_back(tvm::transform::CreateModulePass(pass_func, 0, "LowerTE", {"InferType"}));
+  // passes.push_back(transform::PrintCurrentIR("LowerTE", true, true));
   passes.push_back(InferType());
   return tvm::transform::Sequential(passes);
 }

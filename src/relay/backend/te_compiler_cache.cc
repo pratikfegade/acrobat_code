@@ -413,6 +413,14 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
               transform::PassContext::Current()
                   ->GetConfig<Integer>("relay.db_dynamic_batch_size_estimate", Integer(64))
                   .value();
+          auto opt_dynamic_batch_size_estimate =
+              relay_func->GetAttr<Integer>("DynamicBatchSizeEstimate");
+          if (opt_dynamic_batch_size_estimate) {
+            dynamic_batch_size_estimate = opt_dynamic_batch_size_estimate.value()->value;
+          }
+          // std::cout << "[SHPWTR] lowering "
+          // << relay_func->GetAttr<Integer>("DynamicBatchSizeEstimate") << " "
+          // << relay_func.get() << std::endl;
           Map<tir::Var, Integer> vmap{{batch_size_var, dynamic_batch_size_estimate}};
           const auto* fauto_schedule =
               runtime::Registry::Get("auto_scheduler.relay_integration.auto_schedule_topi_compute");

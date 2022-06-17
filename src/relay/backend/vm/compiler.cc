@@ -76,6 +76,7 @@ TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_aot_output_directory", String);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_autoscheduler_pass", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_use_depth_tracking", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_perform_static_scheduling", Bool);
+TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_consider_program_phase", Bool);
 TVM_REGISTER_PASS_CONFIG_OPTION("relay.db_model_name", String);
 
 namespace relay {

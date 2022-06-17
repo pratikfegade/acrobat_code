@@ -23,6 +23,7 @@
  */
 
 #include <dmlc/memory_io.h>
+#include <sys/mman.h>
 #include <tvm/runtime/container/adt.h>
 #include <tvm/runtime/logging.h>
 #include <tvm/runtime/memory.h>
@@ -464,6 +465,11 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
     shared_state_.devices_.push_back(*itr);
     shared_state_.allocators_.push_back(MemoryManager::GetOrCreateAllocator(*itr, alloc_types[i]));
   }
+
+  // if (mlockall(MCL_CURRENT | MCL_FUTURE) < 0) {
+  //   perror("mlockall");
+  //   exit(-1);
+  // }
 }
 
 template <typename ExecutorType, typename TensorType>

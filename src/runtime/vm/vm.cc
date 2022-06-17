@@ -673,7 +673,8 @@ bool VirtualMachine::RunOneIteration(int frame_start) {
         pc_++;
       } else if (instr.func_index == DB_SET_PHASE_INDEX) {
         if (!concurrent_execution_ && lazy_execution_) {
-          shared_state_->lazy_executor_.NextProgramPhase();
+          shared_state_->lazy_executor_.SetProgramPhase(
+              LoadScalarInt(instr.invoke_args_registers[0]));
         }
         pc_++;
       } else {
