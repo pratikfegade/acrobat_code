@@ -38,6 +38,18 @@
 
 #include "../file_utils.h"
 
+//////////////////////////////////////////////////
+#include <cuda.h>
+#include <cuda_runtime.h>
+
+#define CUDA_CALL_HEADER(func)                                \
+  {                                                           \
+    cudaError_t e = (func);                                   \
+    ICHECK(e == cudaSuccess || e == cudaErrorCudartUnloading) \
+        << "CUDA: " << cudaGetErrorString(e);                 \
+  }
+//////////////////////////////////////////////////
+
 using namespace tvm::runtime;
 
 namespace tvm {
@@ -111,7 +123,11 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
  * \param data The source on the host .
  * \param nbytes The number of bytes to be copied.
  */
-void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes);
+// void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes);
+inline void ArrayCopyFromBytesAsync(void* dst, const void* src, size_t nbytes) {
+  // CUDA_CALL_HEADER(cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice));
+  cudaMemcpyAsync(dst, src, nbytes, cudaMemcpyHostToDevice);
+}
 
 /* Invoking packed functions */
 

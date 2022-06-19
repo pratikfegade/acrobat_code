@@ -164,8 +164,8 @@ class DynBatchRuntime : public runtime::ModuleNode {
   NDArray AllocTensorReg(const Storage& storage, int64_t offset, const NDArray shape_tensor,
                          DLDataType dtype);
 
-  DLTensor* AllocArrayWrapper(int64_t* shape_data, int64_t ndim, DLDataType dtype,
-                              int64_t device_index);
+  inline DLTensor* AllocArrayWrapper(int64_t* shape_data, int64_t ndim, DLDataType dtype,
+                                     int64_t device_index);
 
   /*!
    * \brief Copy a tensor between devices.

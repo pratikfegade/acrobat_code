@@ -20,8 +20,9 @@
 #ifndef TVM_RUNTIME_VM_FIBER_RUNTIME_H_
 #define TVM_RUNTIME_VM_FIBER_RUNTIME_H_
 
+#include <tvm/runtime/vm/parallel_hashmap/phmap.h>
+
 #include <boost/fiber/all.hpp>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace tvm {
@@ -35,7 +36,7 @@ typedef boost::fibers::fiber fiber_t;
 typedef boost::fibers::barrier barrier_t;
 typedef boost::fibers::fiber::id fiber_id_t;
 
-#define MAX_FIBER_COUNT 128
+#define MAX_FIBER_COUNT 256
 
 enum FiberMainFiberTask {
   kDoNothing = 0,
@@ -214,7 +215,7 @@ class FiberRuntime {
   std::vector<bool> alive_;
   std::vector<bool> phase_waiting_;
   std::vector<bool> children_waiting_;
-  std::unordered_map<int, std::unordered_set<int>> children_;
+  phmap::flat_hash_map<int, phmap::flat_hash_set<int>> children_;
   std::vector<int> parents_;
   int alive_num_;
   int phase_waiting_num_;

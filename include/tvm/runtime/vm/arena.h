@@ -33,6 +33,7 @@
 #endif
 
 #include <stddef.h>
+#include <sys/mman.h>
 
 #include <iostream>
 #include <memory>
@@ -210,6 +211,7 @@ class SimplePageAllocator {
   ArenaPageHeader* allocate(size_t min_size) {
     size_t npages = ((min_size + kPageSize - 1) / kPageSize);
     ArenaPageHeader* header = reinterpret_cast<ArenaPageHeader*>(new Page[npages]);
+    mlock(static_cast<void*>(header), npages * sizeof(Page));
     header->size = npages * kPageSize;
     header->offset = sizeof(ArenaPageHeader);
     return header;

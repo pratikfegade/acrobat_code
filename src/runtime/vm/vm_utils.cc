@@ -237,30 +237,31 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
   return result;
 }
 
-void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes) {
-#ifdef DEBUG_CHECKS
-  size_t arr_size = GetDataSize(*handle);
-  ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " << nbytes;
-  ICHECK(IsContiguous(*handle)) << "ArrayCopyFromBytes only support contiguous array for now";
-#endif
+// void ArrayCopyFromBytesAsync(DLTensor* handle, const void* data, size_t nbytes) {
+// #ifdef DEBUG_CHECKS
+//   size_t arr_size = GetDataSize(*handle);
+//   ICHECK_EQ(arr_size, nbytes) << "ArrayCopyFromBytes: size mismatch " << arr_size << " " <<
+//   nbytes; ICHECK(IsContiguous(*handle)) << "ArrayCopyFromBytes only support contiguous array for
+//   now";
+// #endif
 
-  DLTensor from;
-  from.data = const_cast<void*>(data);
-  from.device = Device{kDLCPU, 0};
-  from.ndim = handle->ndim;
-  from.dtype = handle->dtype;
-  from.shape = handle->shape;
-  from.strides = nullptr;
-  from.byte_offset = 0;
-  // std::cout << "[COPY] " << handle->data << " " << handle->ndim << " " << handle->shape[0]
-  //           << std::endl;
-  // std::cout << "[COPY]  " << from.data << " " << from.ndim << " " << from.shape[0] << std::endl;
-  DeviceAPI::Get(handle->device)->CopyDataFromTo(&from, handle, nullptr);
-#ifdef DEBUG_CHECKS
-  // Synchronize in case data become unavailable later.
-  DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
-#endif
-}
+//   DLTensor from;
+//   from.data = const_cast<void*>(data);
+//   from.device = Device{kDLCPU, 0};
+//   from.ndim = handle->ndim;
+//   from.dtype = handle->dtype;
+//   from.shape = handle->shape;
+//   from.strides = nullptr;
+//   from.byte_offset = 0;
+//   // std::cout << "[COPY] " << handle->data << " " << handle->ndim << " " << handle->shape[0]
+//   //           << std::endl;
+//   // std::cout << "[COPY]  " << from.data << " " << from.ndim << " " << from.shape[0] <<
+//   std::endl; DeviceAPI::Get(handle->device)->CopyDataFromTo(&from, handle, nullptr);
+// #ifdef DEBUG_CHECKS
+//   // Synchronize in case data become unavailable later.
+//   DeviceAPI::Get(handle->device)->StreamSync(handle->device, nullptr);
+// #endif
+// }
 
 DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                                 Allocator* allocator) {
@@ -284,7 +285,7 @@ DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, in
   if (accelerator_device.device_type == kDLCUDA) {
     void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
-    ArrayCopyFromBytesAsync(result, raw_data, size * sizeof(void*));
+    ArrayCopyFromBytesAsync(result->data, raw_data, size * sizeof(void*));
   } else {
     void** raw_data = static_cast<void**>(result->data);
     FillInPointers(raw_data, size, nodes, arg_num, allocator);
@@ -365,22 +366,23 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
       input_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
 
-    DLTensor* input_ptrs_device = Arena::Current()->allocate_<DLTensor>();
-    {
-      int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-      shape_data[0] = size;
-      auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-      input_ptrs_device->device = accelerator_device;
-      input_ptrs_device->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
-      input_ptrs_device->strides = nullptr;
-      input_ptrs_device->ndim = 1;
-      input_ptrs_device->dtype = dtype;
-      input_ptrs_device->shape = shape_data;
-      input_ptrs_device->byte_offset = 0;
-    }
+    // DLTensor* input_ptrs_device = Arena::Current()->allocate_<DLTensor>();
+    // {
+    //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
+    //   shape_data[0] = size;
+    //   auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+    //   input_ptrs_device->device = accelerator_device;
+    //   input_ptrs_device->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
+    //   input_ptrs_device->strides = nullptr;
+    //   input_ptrs_device->ndim = 1;
+    //   input_ptrs_device->dtype = dtype;
+    //   input_ptrs_device->shape = shape_data;
+    //   input_ptrs_device->byte_offset = 0;
+    // }
 
+    void* input_ptrs_device = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
     ArrayCopyFromBytesAsync(input_ptrs_device, input_raw_ptrs, sizeof(void*) * size);
-    contrib::db_concat_copy_wrapper(static_cast<float**>(input_ptrs_device->data),
+    contrib::db_concat_copy_wrapper(static_cast<float**>(input_ptrs_device),
                                     static_cast<float*>(result->data), size, ub_flat_size);
   }
 

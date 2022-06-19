@@ -321,6 +321,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
       const std::unordered_map<Index, std::array<Index, 4>>& if_offsets,
       const std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
           all_reg_scalarification_taints,
+      std::unordered_map<std::string, std::string>* p_shape_variables,
       std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types, std::ostream& stream)
       : exec_(exec),
         mod_(mod),
@@ -334,6 +335,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
         if_offsets_(if_offsets),
         reg_scalarification_taints_(all_reg_scalarification_taints.at(vm_func.name)),
         all_reg_scalarification_taints_(all_reg_scalarification_taints),
+        p_shape_variables_(p_shape_variables),
         p_invoke_reduce_sum_types_(p_invoke_reduce_sum_types),
         stream_(stream) {
     inbuilt_ops_.insert({"subtract", "-"});
@@ -683,6 +685,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     std::vector<std::string> all_depth_vars;
     int recursion_level = 0;
     bool first_phase_change = true;
+
     std::function<void(int, int)> generate_code = [&](int start_pc, int end_pc) {
       recursion_level++;
       for (int i = start_pc; i < end_pc; ++i) {
@@ -1138,18 +1141,26 @@ class VMAOTFunctionCompiler : SourcePrinter {
               ICHECK(it != storage_device_indices.end());
               auto device_index = it->second;
 
-              auto tmp_var = "shape_data" + std::to_string(tmp_var_counter++);
-
+              auto shape_var = "shape_data" + std::to_string(tmp_var_counter++);
               this->PrintIndent(stream_);
-              stream_ << "auto " << tmp_var << " = Arena::Current()->allocate_<int64_t>("
+              stream_ << "auto " << shape_var << " = Arena::Current()->allocate_<int64_t>("
                       << instr.alloc_tensor.ndim << ");\n";
               this->PrintIndent(stream_);
-              stream_ << tmp_var << " = new(" << tmp_var << ") int64_t[" << instr.alloc_tensor.ndim
-                      << "]" << shape_arr.str() << ";\n";
+              stream_ << shape_var << " = new(" << shape_var << ") int64_t["
+                      << instr.alloc_tensor.ndim << "]" << shape_arr.str() << ";\n";
+
+              // std::string shape_var;
+              // auto iit = p_shape_variables_->find(shape_arr.str());
+              // if (iit != p_shape_variables_->end()) {
+              //   shape_var = iit->second;
+              // } else {
+              //   shape_var = "shape_data" + std::to_string(p_shape_variables_->size());
+              //   (*p_shape_variables_)[shape_arr.str()] = shape_var;
+              // }
 
               this->PrintIndent(stream_);
               stream_ << dst_var << " = " << GetRuntimeType() << "::Current()"
-                      << "->AllocArrayWrapper(" << tmp_var << ", " << instr.alloc_tensor.ndim
+                      << "->AllocArrayWrapper(" << shape_var << ", " << instr.alloc_tensor.ndim
                       << ", " << dtype_str << ", " << device_index << ");\n";
             } else {
               this->PrintIndent(stream_);
@@ -1493,6 +1504,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
   const std::unordered_map<size_t, std::vector<bool>> reg_scalarification_taints_;
   const std::unordered_map<std::string, std::unordered_map<size_t, std::vector<bool>>>
       all_reg_scalarification_taints_;
+  std::unordered_map<std::string, std::string>* p_shape_variables_;
   std::unordered_map<std::string, std::string> inbuilt_ops_;
   std::unordered_set<const TensorTypeNode*>* p_invoke_reduce_sum_types_;
   std::ostream& stream_;
@@ -1950,6 +1962,16 @@ void VMAOTCompiler::EmitHarnessFunctionHeaders(std::ostream& os) {
         "bool profiling = false);\n";
 }
 
+void EmitShapeVars(std::ostream& os,
+                   const std::unordered_map<std::string, std::string>& shape_vars) {
+  for (auto kv : shape_vars) {
+    auto shape_str = kv.first;
+    auto var_str = kv.second;
+    os << "static int64_t " << var_str << "[] = " << shape_str << ";\n";
+  }
+  os << "\n";
+}
+
 void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
   std::stringstream cpp_model_stream_;
   std::stringstream cpp_utils_stream_;
@@ -1958,6 +1980,7 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
 
   std::unordered_set<const TensorTypeNode*> invoke_reduce_sum_types;
   int max_static_depth = -1;
+  std::unordered_map<std::string, std::string> shape_variables;
   for (auto vm_func : exec_.functions) {
     Function relay_func = GetCompiledRelayFunction(compiled_functions_, mod_, vm_func.name);
     ICHECK(register_types_.count(vm_func.name)) << vm_func.name;
@@ -1969,12 +1992,14 @@ void VMAOTCompiler::GenerateCppFile(std::string header_file_name) {
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
         compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
-        reg_scalarification_taints_, &invoke_reduce_sum_types, cpp_model_stream_);
+        reg_scalarification_taints_, &shape_variables, &invoke_reduce_sum_types, cpp_model_stream_);
     max_static_depth = std::max(max_static_depth, function_compiler.GenerateCPPForFunction(true));
     cpp_stream_ << "\n";
   }
 
   EmitUtilFunctions(cpp_utils_stream_, invoke_reduce_sum_types);
+
+  EmitShapeVars(cpp_utils_stream_, shape_variables);
 
   EmitBatchedMainFunction(cpp_model_stream_, max_static_depth + 1);
   EmitHarnessFunctions(cpp_model_stream_);
@@ -2043,7 +2068,7 @@ void VMAOTCompiler::GenerateHeaderFile(std::string header_file_name) {
     VMAOTFunctionCompiler function_compiler(
         exec_, mod_, vm_func, relay_func, function_register_types, function_invoke_type_vars,
         compiled_functions_, function_get_field_tags, function_call_attrs, function_if_offsets,
-        reg_scalarification_taints_, nullptr, hpp_stream_);
+        reg_scalarification_taints_, nullptr, nullptr, hpp_stream_);
     function_compiler.GenerateCPPForFunction(false);
   }
 
