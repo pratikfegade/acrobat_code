@@ -207,8 +207,8 @@ class FiberRuntime {
 
   inline static FiberRuntime& Current() { return *instance_; }
 
-  int orig_num_fibers_;
   int num_fibers_;
+  int orig_num_fibers_;
   std::vector<fiber_t*> fibers_;
   std::vector<channel_t*> start_channels_;
   std::vector<channel_t*> stop_channels_;

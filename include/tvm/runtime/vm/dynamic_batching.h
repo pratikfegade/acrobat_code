@@ -76,7 +76,7 @@ inline bool IsBatchedName(std::string name) {
 #define DB_RANDOM_UNIFORM_INDEX ((1 << 16) + 1)
 #define DB_SET_PHASE_INDEX ((1 << 16) + 2)
 
-#define DEBUG_CHECKS
+// #define DEBUG_CHECKS
 // #define DB_PROFILING
 
 }  // namespace vm

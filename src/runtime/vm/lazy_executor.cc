@@ -624,6 +624,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
       auto num_packed_funs = executor->vm_shared_state_->packed_funcs_.size();
       std::vector<int> func_idx_to_position(num_packed_funs);
       std::vector<int> position_to_func_idx(num_packed_funs);
+
       for (size_t i = 0; i < num_packed_funs; ++i) {
         func_idx_to_position[i] = i;
         position_to_func_idx[i] = i;

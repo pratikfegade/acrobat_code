@@ -77,7 +77,12 @@ class RandomGenerator {
     if (gen_) {
       delete gen_;
     }
+
+#if defined(DEBUG_CHECKS) || defined(DB_PROFILING)
     gen_ = new std::mt19937(4);
+#else
+    gen_ = new std::mt19937(rd_());
+#endif
   }
 
   inline int32_t GetRandom(int32_t lo, int32_t hi) {
@@ -96,12 +101,19 @@ class RandomGenerator {
 
   std::mt19937* gen_;
   static RandomGenerator* instance_;
+#if defined(DEBUG_CHECKS) || defined(DB_PROFILING)
+#else
+  static std::random_device rd_;
+#endif
 };
 
 inline int32_t GetRandom(int32_t lo, int32_t hi) {
-  static std::random_device rd;
-  // static std::mt19937 gen(rd());
+#if defined(DEBUG_CHECKS) || defined(DB_PROFILING)
   static std::mt19937 gen(4);
+#else
+  static std::random_device rd;
+  static std::mt19937 gen(rd());
+#endif
   auto res = std::uniform_int_distribution<>(lo, hi)(gen);
   return res;
 }

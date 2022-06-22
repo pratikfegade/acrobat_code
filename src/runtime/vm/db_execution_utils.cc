@@ -25,6 +25,11 @@ namespace vm {
 
 tvm::runtime::vm::RandomGenerator* tvm::runtime::vm::RandomGenerator::instance_{nullptr};
 
+#if defined(DEBUG_CHECKS) || defined(DB_PROFILING)
+#else
+std::random_device tvm::runtime::vm::RandomGenerator::rd_;
+#endif
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm
