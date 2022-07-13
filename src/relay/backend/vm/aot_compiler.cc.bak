@@ -173,12 +173,12 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
         type_name = replacement;
       }
       if (!no_shared_ptr) {
-        // os << "std::shared_ptr<";
+        os << "std::shared_ptr<";
       }
       os << type_name;
       if (!no_shared_ptr) {
-        // os << ">";
-        os << "*";
+        os << ">";
+        // os << "*";
       }
     }
   } else if (auto ft = type.as<FuncTypeNode>()) {
@@ -203,7 +203,7 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     os << tv->name_hint;
   } else if (auto tt = type.as<TupleTypeNode>()) {
     if (!no_shared_ptr) {
-      // os << "std::shared_ptr<";
+      os << "std::shared_ptr<";
     }
     os << "std::tuple<";
     for (size_t i = 0; i < tt->fields.size(); ++i) {
@@ -220,15 +220,15 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
     }
     os << ">";
     if (!no_shared_ptr) {
-      // os << ">";
-      os << "*";
+      os << ">";
+      // os << "*";
     }
   } else if (auto tc = type.as<TypeCallNode>()) {
     auto type_func_gv = tc->func.as<GlobalTypeVarNode>();
     ICHECK(type_func_gv) << type;
 
     if (type_func_gv->name_hint != "Storage" && !no_shared_ptr) {
-      // os << "std::shared_ptr<";
+      os << "std::shared_ptr<";
     }
     if (replacement.size() > 0) {
       os << replacement;
@@ -246,8 +246,8 @@ void RelayTypeToCppStr(std::ostream& os, const Type& type, bool no_shared_ptr = 
       os << ">";
     }
     if (type_func_gv->name_hint != "Storage" && !no_shared_ptr) {
-      // os << ">";
-      os << "*";
+      os << ">";
+      // os << "*";
     }
   } else {
     std::cout << "DEFAULT " << type << std::endl;
@@ -1030,9 +1030,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
               stream_ << dst_var << " = static_cast<";
               RelayTypeToCppStr(stream_, register_types_.at(instr.object), {true},
                                 constructor_name);
-              // stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
-              // << ";\n";
-              stream_ << "*>(" << object_var << ")->" << GetFieldName(instr.field_index) << ";\n";
+              stream_ << "*>(" << object_var << ".get())->" << GetFieldName(instr.field_index)
+                      << ";\n";
             }
             break;
           }
@@ -1211,12 +1210,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 }
               }
 
-              // stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
-              // << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str()
-              // << "));\n";
-
-              stream_ << dst_var << " = tvm::runtime::vm::Arena::Current()->make<std::tuple<"
-                      << types_str.str() << ">>(" << args_str.str() << ");\n";
+              stream_ << dst_var << " = std::shared_ptr<std::tuple<" << types_str.str()
+                      << ">>(new std::tuple<" << types_str.str() << ">(" << args_str.str()
+                      << "));\n";
+              // stream_ << dst_var << " = new std::tuple<" << types_str.str() << ">(" <<
+              // args_str.str()
+              // << ");\n";
             } else {
               auto constructor = mod_->LookupTag(instr.constructor_tag);
               auto concrete_type_without_shptr =
@@ -1224,12 +1223,10 @@ class VMAOTFunctionCompiler : SourcePrinter {
               auto concrete_constructor_without_shptr = RelayTypeToCppStrString(
                   register_types_.at(instr.dst), true, constructor->name_hint, scalar_taint);
 
-              // stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
-              // << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
+              stream_ << dst_var << " = std::static_pointer_cast<" << concrete_type_without_shptr
+                      << ">(std::make_shared<" << concrete_constructor_without_shptr << ">());\n";
 
-              stream_ << dst_var << " = static_cast<" << concrete_type_without_shptr
-                      << "*>(tvm::runtime::vm::Arena::Current()->make<"
-                      << concrete_constructor_without_shptr << ">());\n";
+              // stream_ << dst_var << " = new " << concrete_constructor_without_shptr << "();\n";
 
               this->PrintIndent(stream_);
               stream_ << dst_var << "->tag = " << instr.constructor_tag << ";\n";
@@ -1237,11 +1234,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
                 ICHECK(register_types_.count(instr.datatype_fields[j])) << instr.datatype_fields[j];
                 auto field_var = GetVarForReg(instr.datatype_fields[j]);
                 this->PrintIndent(stream_);
-                // stream_ << "static_cast<" << concrete_constructor_without_shptr << "*>(" <<
-                // dst_var
-                // << ".get())->" << GetFieldName(j) << " = " << field_var << ";\n";
                 stream_ << "static_cast<" << concrete_constructor_without_shptr << "*>(" << dst_var
-                        << ")->" << GetFieldName(j) << " = " << field_var << ";\n";
+                        << ".get())->" << GetFieldName(j) << " = " << field_var << ";\n";
               }
             }
             break;
@@ -1404,11 +1398,11 @@ class VMAOTFunctionCompiler : SourcePrinter {
   void EmitPMapCPP(bool definition) {
     stream_ << "template <class A, class B>\n";
     if (ConcurrentExecution()) {
-      stream_ << "List<B>* pmap(std::function<B(A, int, int&)> local_0, ";
+      stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int, int&)> local_0, ";
     } else {
-      stream_ << "List<B>* pmap(std::function<B(A, int&)> local_0, ";
+      stream_ << "std::shared_ptr<List<B>> pmap(std::function<B(A, int&)> local_0, ";
     }
-    stream_ << "List<A>* ";
+    stream_ << "std::shared_ptr<List<A>> ";
     if (ConcurrentExecution()) {
       stream_ << "local_1, int fiber_id, int& depth)";
     } else {
@@ -1417,8 +1411,7 @@ class VMAOTFunctionCompiler : SourcePrinter {
     if (definition) {
       auto initializations =
           "  auto current = local_1;\n"
-          "  auto nil_node = "
-          "static_cast<List<B>*>(tvm::runtime::vm::Arena::Current()->make<Nil<B>>());\n"
+          "  auto nil_node = std::static_pointer_cast<List<B>>(std::make_shared<Nil<B>>());\n"
           "  nil_node->tag = LIST_NIL_TAG;\n"
           "  auto new_list_head = nil_node;\n"
           "  auto new_list_tail = nil_node;\n"
@@ -1430,24 +1423,23 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "    break;\n"
           "  }\n"
           "  int tmp_depth = map_depth_value;\n"
-          "  auto new_node = "
-          "static_cast<List<B>*>(tvm::runtime::vm::Arena::Current()->make<Cons<B>>());\n"
+          "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
           "  new_node->tag = LIST_CONS_TAG;\n"
-          "  static_cast<Cons<B>*>(new_node)->field_0 =\n" +
-          std::string(
-              (ConcurrentExecution()
-                   ? "      local_0(static_cast<Cons<A>*>(current)->field_0, fiber_id, "
-                     "tmp_depth);\n"
-                   : "      local_0(static_cast<Cons<A>*>(current)->field_0, tmp_depth);\n")) +
+          "  static_cast<Cons<B>*>(new_node.get())->field_0 =\n" +
+          std::string((
+              ConcurrentExecution()
+                  ? "      local_0(static_cast<Cons<A>*>(current.get())->field_0, fiber_id, "
+                    "tmp_depth);\n"
+                  : "      local_0(static_cast<Cons<A>*>(current.get())->field_0, tmp_depth);\n")) +
           "  depth = std::max(depth, tmp_depth);\n"
           "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
-          "    static_cast<Cons<B>*>(new_list_tail)->field_1 = new_node;\n"
+          "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
           "  } else {\n"
           "    new_list_head = new_node;\n"
           "  }\n"
-          "  static_cast<Cons<B>*>(new_node)->field_1 = nil_node;\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
           "  new_list_tail = new_node;\n"
-          "  current = static_cast<Cons<A>*>(current)->field_1;\n"
+          "  current = static_cast<Cons<A>*>(current.get())->field_1;\n"
           "}\n";
 
       auto concurrent_body =
@@ -1457,13 +1449,12 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "    break;\n"
           "  }\n"
           "  int tmp_depth = map_depth_value;\n"
-          "  auto new_node = "
-          "static_cast<List<B>*>(tvm::runtime::vm::Arena::Current()->make<Cons<B>>());\n"
+          "  auto new_node = std::static_pointer_cast<List<B>>(std::make_shared<Cons<B>>());\n"
           "  new_node->tag = LIST_CONS_TAG;\n"
           "  auto new_id = FiberRuntime::Current().NewFiberID();\n"
           "  auto fn = [new_node, local_0, current, new_id, tmp_depth, &depths]() mutable {\n"
-          "    static_cast<Cons<B>*>(new_node)->field_0 =\n"
-          "        local_0(static_cast<Cons<A>*>(current)->field_0, new_id, tmp_depth);\n"
+          "    static_cast<Cons<B>*>(new_node.get())->field_0 =\n"
+          "        local_0(static_cast<Cons<A>*>(current.get())->field_0, new_id, tmp_depth);\n"
           "    FiberRuntime::Current().WorkerEnd(new_id);\n"
           "    depths.push_back(tmp_depth);\n"
           "  };\n"
@@ -1471,13 +1462,13 @@ class VMAOTFunctionCompiler : SourcePrinter {
           "  FiberRuntime::Current().CreateFiber(fiber_id, fn);\n"
           "\n"
           "  if (new_list_tail->tag != LIST_NIL_TAG) {\n"
-          "    static_cast<Cons<B>*>(new_list_tail)->field_1 = new_node;\n"
+          "    static_cast<Cons<B>*>(new_list_tail.get())->field_1 = new_node;\n"
           "  } else {\n"
           "    new_list_head = new_node;\n"
           "  }\n"
-          "  static_cast<Cons<B>*>(new_node)->field_1 = nil_node;\n"
+          "  static_cast<Cons<B>*>(new_node.get())->field_1 = nil_node;\n"
           "  new_list_tail = new_node;\n"
-          "  current = static_cast<Cons<A>*>(current)->field_1;\n"
+          "  current = static_cast<Cons<A>*>(current.get())->field_1;\n"
           "}\n"
           "FiberRuntime::Current().WorkerChildrenWait(fiber_id);\n"
           "depth = max(depths);\n";

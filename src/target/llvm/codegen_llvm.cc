@@ -166,12 +166,12 @@ void CodeGenLLVM::AddFunctionInternal(const PrimFunc& f, bool ret_void) {
           param_retain[i] = false;
           i += 2;
           break;
-        case tvm::runtime::vm::kContiguous:
-          if (print_param_data) {
-            std::cout << "Contiguous " << f->params[i]->name_hint << std::endl;
-          }
-          i += 1;
-          break;
+        // case tvm::runtime::vm::kContiguous:
+        //   if (print_param_data) {
+        //     std::cout << "Contiguous " << f->params[i]->name_hint << std::endl;
+        //   }
+        //   i += 1;
+        //   break;
         case tvm::runtime::vm::kConcat:
           if (print_param_data) {
             std::cout << "Concating " << f->params[i]->name_hint << std::endl;

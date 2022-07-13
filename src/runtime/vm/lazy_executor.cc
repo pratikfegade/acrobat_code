@@ -206,50 +206,6 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
   ArrayCopyFromBytesAsync(output_ptrs_device, output_raw_ptrs, sizeof(void*) * num_nodes);
   ArrayCopyFromBytesAsync(input_indices_device, input_indices, sizeof(void*) * (num_nodes + 1));
 
-  // DLTensor* input_ptrs_device = Arena::Current()->allocate_<DLTensor>();
-  // {
-  //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-  //   shape_data[0] = num_inputs;
-  //   input_ptrs_device->device = accelerator_device;
-  //   input_ptrs_device->data = allocator->ArenaAlloc(num_inputs * sizeof(void*), 256, dtype).data;
-  //   input_ptrs_device->strides = nullptr;
-  //   input_ptrs_device->ndim = 1;
-  //   input_ptrs_device->dtype = dtype;
-  //   input_ptrs_device->shape = shape_data;
-  //   input_ptrs_device->byte_offset = 0;
-  // }
-
-  // DLTensor* output_ptrs_device = Arena::Current()->allocate_<DLTensor>();
-  // {
-  //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-  //   shape_data[0] = num_nodes;
-  //   output_ptrs_device->device = accelerator_device;
-  //   output_ptrs_device->data = allocator->ArenaAlloc(num_nodes * sizeof(void*), 256, dtype).data;
-  //   output_ptrs_device->strides = nullptr;
-  //   output_ptrs_device->ndim = 1;
-  //   output_ptrs_device->dtype = dtype;
-  //   output_ptrs_device->shape = shape_data;
-  //   output_ptrs_device->byte_offset = 0;
-  // }
-
-  // DLTensor* input_indices_device = Arena::Current()->allocate_<DLTensor>();
-  // {
-  //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-  //   shape_data[0] = (num_nodes + 1);
-  //   input_indices_device->device = accelerator_device;
-  //   input_indices_device->data =
-  //       allocator->ArenaAlloc((num_nodes + 1) * sizeof(void*), 256, dtype).data;
-  //   input_indices_device->strides = nullptr;
-  //   input_indices_device->ndim = 1;
-  //   input_indices_device->dtype = dtype;
-  //   input_indices_device->shape = shape_data;
-  //   input_indices_device->byte_offset = 0;
-  // }
-
-  // ArrayCopyFromBytesAsync(input_ptrs_device, &(input_raw_ptrs[0]), sizeof(void*) * num_inputs);
-  // ArrayCopyFromBytesAsync(output_ptrs_device, output_raw_ptrs, sizeof(void*) * num_nodes);
-  // ArrayCopyFromBytesAsync(input_indices_device, input_indices, sizeof(void*) * (num_nodes + 1));
-
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     VMDBProfiler::ProfileHostStopCall();
@@ -259,9 +215,6 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
   tvm::contrib::reduce_sum_wrapper(
       static_cast<float**>(input_ptrs_device), static_cast<float**>(output_ptrs_device),
       static_cast<int*>(input_indices_device), num_nodes, output_size / sizeof(float));
-  // tvm::contrib::reduce_sum_wrapper(
-  // static_cast<float**>(input_ptrs_device->data), static_cast<float**>(output_ptrs_device->data),
-  // static_cast<int*>(input_indices_device->data), num_nodes, output_size / sizeof(float));
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
     DeviceAPI::Get(accelerator_device)->StreamSync(accelerator_device, nullptr);
@@ -414,45 +367,47 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
           ctr += 1;
           break;
         }
-        case kContiguous: {
-          auto& first_arg = func_nodes[0]->args_[i];
-          auto data_size = GetDataSize(*first_arg);
-          auto start = allocator->ArenaAlloc(batch_size * data_size, 256, first_arg->dtype).data;
+          //         case kContiguous: {
+          //           auto& first_arg = func_nodes[0]->args_[i];
+          //           auto data_size = GetDataSize(*first_arg);
+          //           auto start = allocator->ArenaAlloc(batch_size * data_size, 256,
+          //           first_arg->dtype).data;
 
-#pragma GCC ivdep
-          for (size_t j = 0; j < batch_size; ++j) {
-#ifdef DEBUG_CHECKS
-            ICHECK_EQ(func_nodes[j]->args_[i]->data, nullptr);
-            ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
-#endif
-            auto ptr = static_cast<char*>(start) + j * data_size;
-            func_nodes[j]->args_[i]->data = ptr;
-          }
+          // #pragma GCC ivdep
+          //           for (size_t j = 0; j < batch_size; ++j) {
+          // #ifdef DEBUG_CHECKS
+          //             ICHECK_EQ(func_nodes[j]->args_[i]->data, nullptr);
+          //             ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+          // #endif
+          //             auto ptr = static_cast<char*>(start) + j * data_size;
+          //             func_nodes[j]->args_[i]->data = ptr;
+          //           }
 
-          DLTensor* contiguous_tensor = Arena::Current()->allocate_<DLTensor>();
-          {
-            int64_t* shape_data = Arena::Current()->allocate_<int64_t>(1 + first_arg->ndim);
-            shape_data[0] = batch_size;
-            for (int k = 0; k < first_arg->ndim; ++k) {
-              shape_data[k + 1] = first_arg->shape[k];
-            }
-            contiguous_tensor->device = accelerator_device;
-            contiguous_tensor->data = start;
-            contiguous_tensor->strides = nullptr;
-            contiguous_tensor->ndim = 1;
-            contiguous_tensor->dtype = first_arg->dtype;
-            contiguous_tensor->shape = shape_data;
-            contiguous_tensor->byte_offset = 0;
-          }
+          //           DLTensor* contiguous_tensor = Arena::Current()->allocate_<DLTensor>();
+          //           {
+          //             int64_t* shape_data = Arena::Current()->allocate_<int64_t>(1 +
+          //             first_arg->ndim); shape_data[0] = batch_size; for (int k = 0; k <
+          //             first_arg->ndim; ++k) {
+          //               shape_data[k + 1] = first_arg->shape[k];
+          //             }
+          //             contiguous_tensor->device = accelerator_device;
+          //             contiguous_tensor->data = start;
+          //             contiguous_tensor->strides = nullptr;
+          //             contiguous_tensor->ndim = 1;
+          //             contiguous_tensor->dtype = first_arg->dtype;
+          //             contiguous_tensor->shape = shape_data;
+          //             contiguous_tensor->byte_offset = 0;
+          //           }
 
-          setter(ctr, contiguous_tensor);
+          //           setter(ctr, contiguous_tensor);
 
-          // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
-          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+          //           // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << "
+          //           "
+          //           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
-          ctr += 1;
-          break;
-        }
+          //           ctr += 1;
+          //           break;
+          //         }
         case kConcat: {
           auto tensor = CreateConcatenatedDLTensor(func_nodes, i, allocator);
           setter(ctr, tensor);

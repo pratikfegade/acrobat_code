@@ -461,11 +461,11 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
         ctr += 1;
         break;
       }
-      case kContiguous: {
-        ICHECK(false);
-        ctr += 1;
-        break;
-      }
+      // case kContiguous: {
+      //   ICHECK(false);
+      //   ctr += 1;
+      //   break;
+      // }
       case kConcat: {
         std::vector<NDArray> to_concat(batch_size);
         for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {
