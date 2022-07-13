@@ -156,7 +156,7 @@ void CodeGenC::PrintFinalReturn() {}
 
 std::string CodeGenC::Finish() {
   auto res = decl_stream.str() + stream.str();
-  // std::cout << res << std::endl;
+  std::cout << "RES\n" << res << std::endl;
   return res;
 }
 

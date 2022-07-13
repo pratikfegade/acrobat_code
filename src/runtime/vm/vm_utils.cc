@@ -161,8 +161,9 @@ bool CheckEqualShape(const DLTensor& t1, const DLTensor& t2) {
   return true;
 }
 
-void FillInPointers(void** host_raw_ptrs, size_t size, const std::vector<OpNode<DLTensor*>*>& nodes,
-                    int arg_num, Allocator* allocator) {
+void FillInPointersScatter(void** host_raw_ptrs, size_t size,
+                           const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
+                           Allocator* allocator) {
   auto first_arg = nodes[0]->args_[arg_num];
   auto data_size = GetDataSize(*first_arg);
   if (first_arg->data != nullptr) {
@@ -224,11 +225,11 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<DLTensor*>*>& nodes, int a
                      DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1}, accelerator_device);
   if (accelerator_device.device_type == kDLCUDA) {
     void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
-    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    FillInPointersScatter(raw_data, size, nodes, arg_num, allocator);
     result.CopyFromBytes(raw_data, size * sizeof(void*));
   } else {
     void** raw_data = static_cast<void**>(result->data);
-    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    FillInPointersScatter(raw_data, size, nodes, arg_num, allocator);
 #ifdef DEBUG_CHECKS
     TestPointerNDArray(result, GetDataSize(*(nodes[0]->args_[arg_num])) / sizeof(float), size);
 #endif
@@ -283,11 +284,11 @@ DLTensor* CreatePointerDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, in
 
   if (accelerator_device.device_type == kDLCUDA) {
     void** raw_data = static_cast<void**>(Arena::Current()->allocate_<void*>(size));
-    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    FillInPointersScatter(raw_data, size, nodes, arg_num, allocator);
     ArrayCopyFromBytesAsync(result->data, raw_data, size * sizeof(void*));
   } else {
     void** raw_data = static_cast<void**>(result->data);
-    FillInPointers(raw_data, size, nodes, arg_num, allocator);
+    FillInPointersScatter(raw_data, size, nodes, arg_num, allocator);
 #ifdef DEBUG_CHECKS
     // TestPointerNDArray(result, GetDataSize(*(nodes[0]->args_[arg_num])) / sizeof(float), size);
 #endif
@@ -457,6 +458,11 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
           std::cout << "[VMU]    ArgScatter " << ctr << " "
                     << GetDLTensorInfo(arg_holder.back().operator->()) << std::endl;
         }
+        ctr += 1;
+        break;
+      }
+      case kContiguous: {
+        ICHECK(false);
         ctr += 1;
         break;
       }

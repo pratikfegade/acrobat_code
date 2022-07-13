@@ -403,14 +403,53 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
         case kScatter: {
           auto arg_host_raw_ptrs = reinterpret_cast<char*>(host_scattered_ptrs) +
                                    scattered_ctr * batch_size * sizeof(void*);
-          FillInPointers(reinterpret_cast<void**>(arg_host_raw_ptrs), batch_size, func_nodes, i,
-                         allocator);
+          FillInPointersScatter(reinterpret_cast<void**>(arg_host_raw_ptrs), batch_size, func_nodes,
+                                i, allocator);
           setter(ctr, &(scattered_args[scattered_ctr]));
 
           // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
           scattered_ctr++;
+          ctr += 1;
+          break;
+        }
+        case kContiguous: {
+          auto& first_arg = func_nodes[0]->args_[i];
+          auto data_size = GetDataSize(*first_arg);
+          auto start = allocator->ArenaAlloc(batch_size * data_size, 256, first_arg->dtype).data;
+
+#pragma GCC ivdep
+          for (size_t j = 0; j < batch_size; ++j) {
+#ifdef DEBUG_CHECKS
+            ICHECK_EQ(func_nodes[j]->args_[i]->data, nullptr);
+            ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+#endif
+            auto ptr = static_cast<char*>(start) + j * data_size;
+            func_nodes[j]->args_[i]->data = ptr;
+          }
+
+          DLTensor* contiguous_tensor = Arena::Current()->allocate_<DLTensor>();
+          {
+            int64_t* shape_data = Arena::Current()->allocate_<int64_t>(1 + first_arg->ndim);
+            shape_data[0] = batch_size;
+            for (int k = 0; k < first_arg->ndim; ++k) {
+              shape_data[k + 1] = first_arg->shape[k];
+            }
+            contiguous_tensor->device = accelerator_device;
+            contiguous_tensor->data = start;
+            contiguous_tensor->strides = nullptr;
+            contiguous_tensor->ndim = 1;
+            contiguous_tensor->dtype = first_arg->dtype;
+            contiguous_tensor->shape = shape_data;
+            contiguous_tensor->byte_offset = 0;
+          }
+
+          setter(ctr, contiguous_tensor);
+
+          // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
+          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+
           ctr += 1;
           break;
         }

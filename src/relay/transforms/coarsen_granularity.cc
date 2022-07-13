@@ -235,6 +235,7 @@ struct TIRLowererResult {
   tir::PrimFunc func;
   Array<Integer> arg_modes;
   std::vector<int> param_positions;
+  Map<GlobalVar, tir::PrimFunc> contiguous_functions;
 };
 
 class AbstractTIRLowerer {
@@ -581,13 +582,19 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 using ExprSet = std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual>;
 using PointsToMap = std::unordered_map<Var, ExprSet, ObjectPtrHash, ObjectPtrEqual>;
 
+struct MakeContiguousResult {
+  tir::PrimFunc contiguous_function;
+  Array<Integer> reuse_modes;
+};
+
 class TIRContiguousTensorMutator : public tir::StmtExprMutator {
  public:
   TIRContiguousTensorMutator(const tir::PrimFunc& func,
-                             const std::unordered_set<std::string>& to_make_contiguous)
-      : func_(func), to_make_contiguous_(to_make_contiguous) {}
+                             const std::unordered_set<std::string>& to_make_contiguous,
+                             const Array<Integer>& orig_reuse_modes)
+      : func_(func), to_make_contiguous_(to_make_contiguous), orig_reuse_modes_(orig_reuse_modes) {}
 
-  tir::PrimFunc MakeContiguous() {
+  MakeContiguousResult MakeContiguous() {
     std::cout << "[MAKE CONTIG] " << std::endl;
     for (auto var_name : to_make_contiguous_) {
       std::cout << "[TO MAKE CONTIG]  " << var_name << std::endl;
@@ -611,26 +618,68 @@ class TIRContiguousTensorMutator : public tir::StmtExprMutator {
       }
     }
 
-    auto res = tir::PrimFunc(params, body, func_->ret_type, func_->buffer_map, scatter_buffer_map,
-                             func_->attrs, func_->span);
+    auto orig_io_modes =
+        func_->GetAttr<Array<Integer>>("db.args_access_modes", Array<Integer>()).value();
+
+    Array<Integer> updated_reuse_modes;
+    Array<Integer> updated_io_modes;
+    updated_io_modes.push_back(orig_io_modes[0]);
+    int ctr = 0;
+    for (size_t i = 1; i < func_->params.size();) {
+      switch (orig_reuse_modes_[ctr++]) {
+        case tvm::runtime::vm::kIgnore:
+          updated_reuse_modes.push_back(Integer(static_cast<int>(tvm::runtime::vm::kIgnore)));
+          updated_io_modes.push_back(orig_io_modes[i]);
+          break;
+        case tvm::runtime::vm::kReuse:
+          updated_reuse_modes.push_back(Integer(static_cast<int>(tvm::runtime::vm::kReuse)));
+          updated_io_modes.push_back(orig_io_modes[i]);
+          i += 1;
+          break;
+        case tvm::runtime::vm::kScatter:
+          updated_io_modes.push_back(orig_io_modes[i]);
+          if (to_make_contiguous_.count(func_->params[i]->name_hint)) {
+            updated_reuse_modes.push_back(Integer(static_cast<int>(tvm::runtime::vm::kContiguous)));
+            updated_io_modes.push_back(orig_io_modes[i + 1]);
+          } else {
+            updated_reuse_modes.push_back(Integer(static_cast<int>(tvm::runtime::vm::kScatter)));
+          }
+          i += 2;
+          break;
+        case tvm::runtime::vm::kContiguous:
+          ICHECK(false);
+          i += 1;
+          break;
+        case tvm::runtime::vm::kConcat:
+          updated_reuse_modes.push_back(Integer(static_cast<int>(tvm::runtime::vm::kConcat)));
+          updated_io_modes.push_back(orig_io_modes[i]);
+          i += 1;
+          break;
+      }
+    }
+
+    auto contiguous_function = tir::PrimFunc(params, body, func_->ret_type, func_->buffer_map,
+                                             scatter_buffer_map, func_->attrs, func_->span);
+
+    contiguous_function = WithAttr(contiguous_function, "db.args_access_modes", updated_io_modes);
     std::cout << "[MAKE CONTIG RES] " << std::endl;
-    std::cout << res << std::endl;
-    return res;
+    std::cout << contiguous_function << std::endl;
+    return {contiguous_function, updated_reuse_modes};
   }
 
   PrimExpr VisitExpr_(const tir::LoadNode* op) override {
     auto expr = StmtExprMutator::VisitExpr_(op);
     auto load = expr.as<tir::LoadNode>();
     ICHECK(load) << load << " " << GetRef<PrimExpr>(op);
-    std::cout << "[LOAD] " << GetRef<PrimExpr>(load) << " " << load->buffer_var << " "
-              << load->buffer_var.get() << " " << op->buffer_var.get() << std::endl;
+    // std::cout << "[LOAD] " << GetRef<PrimExpr>(load) << " " << load->buffer_var << " "
+    // << load->buffer_var.get() << " " << op->buffer_var.get() << std::endl;
     if (load->scatter_buffer_var.defined() &&
         to_make_contiguous_.count(load->buffer_var->name_hint)) {
       // auto res = tir::Load(load->dtype, load->buffer_var, load->index, load->predicate,
       // load->scatter_buffer_var, load->scatter_batch_index,
       // load->scatter_elem_index, load->span);
       auto res = tir::Load(load->dtype, load->buffer_var, load->index, load->predicate);
-      std::cout << "[UNSCATTERING] " << res << std::endl;
+      // std::cout << "[UNSCATTERING] " << res << std::endl;
       return res;
     }
     return GetRef<PrimExpr>(load);
@@ -652,6 +701,7 @@ class TIRContiguousTensorMutator : public tir::StmtExprMutator {
 
   const tir::PrimFunc& func_;
   const std::unordered_set<std::string>& to_make_contiguous_;
+  const Array<Integer>& orig_reuse_modes_;
 };
 
 class TIRLowererBatched : public AbstractTIRLowerer {
@@ -768,13 +818,16 @@ class TIRLowererBatched : public AbstractTIRLowerer {
                                                  : runtime::vm::DBBatchedArgMode::kConcat));
 
       if (arg_mode != runtime::vm::DBBatchedArgMode::kIgnore) {
+        prim_func_params.push_back(param);
         std::cout << "[ARG MODE] " << rvar->vid->name_hint << " " << arg_mode << std::endl;
         if (MapSet::Contains(contiguous_tensors, rvar) &&
             arg_mode == runtime::vm::DBBatchedArgMode::kScatter) {
           std::cout << "[ARG MODE]   Can be contiguous" << std::endl;
+          prim_func_arg_modes.push_back(runtime::vm::DBBatchedArgMode::kContiguous);
+        } else {
+          prim_func_arg_modes.push_back(arg_mode);
+          MapSet::Remove(contiguous_tensors, rvar);
         }
-        prim_func_params.push_back(param);
-        prim_func_arg_modes.push_back(arg_mode);
       }
       if (print) {
         std::cout << "[CG]  ArgMode: " << arg_mode << " " << (iit != arg_mode_states_.end())
@@ -783,6 +836,9 @@ class TIRLowererBatched : public AbstractTIRLowerer {
     }
 
     /* Make Contiguous *************************************************************/
+    std::unordered_map<std::string, std::string> contiguous_specification_strings;
+    std::unordered_map<std::string, std::unordered_set<std::string>> contiguous_specifications;
+
     for (auto it = calls.rbegin(); it != calls.rend(); ++it) {
       auto call = it->as<CallNode>();
       ICHECK(call);
@@ -799,6 +855,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
       auto& arg_modes = (*iiit).second;
 
       std::unordered_set<std::string> to_make_contiguous;
+      std::stringstream ss;
       int param_idx = 1;
       int dedup_idx = 0;
       auto handle_arg = [&](const Expr& tuple) {
@@ -807,6 +864,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
           auto arg_var = Downcast<relay::Var>(arg);
           if (MapSet::Contains(contiguous_tensors, arg_var)) {
             to_make_contiguous.insert(batched_callee->params[param_idx]->name_hint);
+            ss << batched_callee->params[param_idx]->name_hint << "***";
           }
           if (arg_modes[dedup_idx++]->value ==
               static_cast<int>(runtime::vm::DBBatchedArgMode::kScatter)) {
@@ -819,8 +877,35 @@ class TIRLowererBatched : public AbstractTIRLowerer {
       handle_arg(call->args[0]);
       handle_arg(call->args[1]);
 
-      auto batched_contiguous_callee =
-          TIRContiguousTensorMutator(batched_callee, to_make_contiguous).MakeContiguous();
+      {
+        auto it = contiguous_specification_strings.find(batched_callee_gv->name_hint);
+        if (it != contiguous_specification_strings.end()) {
+          ICHECK_EQ(ss.str(), it->second);
+        } else {
+          contiguous_specification_strings[batched_callee_gv->name_hint] = ss.str();
+        }
+      }
+      contiguous_specifications[batched_callee_gv->name_hint] = to_make_contiguous;
+    }
+
+    for (auto kv : contiguous_specifications) {
+      auto batched_name = kv.first;
+      auto to_make_contiguous = kv.second;
+      auto batched_callee_gv = mod_->GetGlobalVar(batched_name);
+      auto batched_callee = Downcast<tir::PrimFunc>(mod_->Lookup(batched_callee_gv));
+      auto iiit = mod_->batched_arg_modes.find(batched_callee_gv);
+      ICHECK(iiit != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
+      auto& arg_modes = (*iiit).second;
+
+      auto contiguous_res =
+          TIRContiguousTensorMutator(batched_callee, to_make_contiguous, arg_modes)
+              .MakeContiguous();
+      auto batched_contiguous_callee = contiguous_res.contiguous_function;
+      auto updated_reuse_modes = contiguous_res.reuse_modes;
+      mod_->batched_arg_modes.Set(batched_callee_gv, updated_reuse_modes);
+      ICHECK(!contiguous_functions_.count(batched_callee_gv))
+          << "Function has been made contiguous before";
+      contiguous_functions_.Set(batched_callee_gv, batched_contiguous_callee);
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -836,7 +921,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
     auto func = tir::PrimFunc(prim_func_params, prim_func_body, VoidType());
     func->checked_type_ = FuncType(prim_func_param_types, VoidType(), {}, {});
-    return TIRLowererResult({func, prim_func_arg_modes, {}});
+    return TIRLowererResult({func, prim_func_arg_modes, {}, contiguous_functions_});
   }
 
  private:
@@ -879,6 +964,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
   tir::Var batch_size_var_;
   Map<relay::Var, Integer> arg_mode_states_;
+  Map<GlobalVar, tir::PrimFunc> contiguous_functions_;
 };
 
 class PointerAnalysis
@@ -1373,6 +1459,12 @@ class Coarsener : public ExprMutator {
             prim_funcs_.push_back(std::make_pair(batched_func_var, batched_func));
             batched_func_pairs_.push_back(std::make_pair(prim_func_var, batched_func_var));
             batched_arg_modes_.push_back(std::make_pair(batched_func_var, batched_res.arg_modes));
+
+            for (auto kv : batched_res.contiguous_functions) {
+              ICHECK(!contiguous_functions_.count(kv.first))
+                  << "Function has been made contiguous before";
+              contiguous_functions_.Set(kv.first, kv.second);
+            }
           }
 
           body = Let(Var("dummy", VoidType()), call, body);
@@ -1399,6 +1491,7 @@ class Coarsener : public ExprMutator {
   std::vector<std::pair<GlobalVar, tir::PrimFunc>> prim_funcs_;
   std::vector<std::pair<GlobalVar, GlobalVar>> batched_func_pairs_;
   std::vector<std::pair<GlobalVar, Array<Integer>>> batched_arg_modes_;
+  Map<GlobalVar, tir::PrimFunc> contiguous_functions_;
 };
 int Coarsener::prim_func_ctr = 0;
 
@@ -1433,6 +1526,10 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       updates.Set(it.first, ret);
 
       for (auto it : coarsener.prim_funcs_) {
+        new_prim_funcs.Set(it.first, it.second);
+      }
+
+      for (auto it : coarsener.contiguous_functions_) {
         new_prim_funcs.Set(it.first, it.second);
       }
 
