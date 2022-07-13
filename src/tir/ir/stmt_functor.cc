@@ -294,11 +294,13 @@ Stmt StmtMutator::VisitStmt_(const ForNode* op) {
   if (min.same_as(op->min) && extent.same_as(op->extent) && body.same_as(op->body)) {
     return GetRef<Stmt>(op);
   } else {
-    auto n = CopyOnWrite(op);
-    n->min = std::move(min);
-    n->extent = std::move(extent);
-    n->body = std::move(body);
-    return Stmt(n);
+    return For(op->loop_var, min, extent, op->kind, body, op->thread_binding, op->annotations,
+               op->span);
+    // auto n = CopyOnWrite(op);
+    // n->min = std::move(min);
+    // n->extent = std::move(extent);
+    // n->body = std::move(body);
+    // return Stmt(n);
   }
 }
 

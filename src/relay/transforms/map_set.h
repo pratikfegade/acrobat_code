@@ -50,6 +50,11 @@ class MapSet {
   }
 
   template <typename T>
+  static bool Contains(const Map<T, Bool>& map, T value) {
+    return map.count(value);
+  }
+
+  template <typename T>
   static Map<T, Bool> Intersect(const Map<T, Bool>& map1, const Map<T, Bool>& map2) {
     Map<T, Bool> res;
     for (auto kv : map1) {

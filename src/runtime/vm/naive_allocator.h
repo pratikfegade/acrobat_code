@@ -52,6 +52,8 @@ class NaiveAllocator final : public Allocator {
     DLOG(INFO) << "free " << buffer.size << " B, used memory " << used_memory_ << " B";
   }
 
+  void ReleaseAll() override {}
+
   size_t UsedMemory() const override { return used_memory_.load(std::memory_order_relaxed); }
 
  private:

@@ -228,10 +228,21 @@ void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
 }
 
 template <typename ExecutorType, typename TensorType>
-void DynBatchRuntime<ExecutorType, TensorType>::ResetExecutionState() {
+void DynBatchRuntime<ExecutorType, TensorType>::ResetExecutionState(int seed) {
   shared_state_.lazy_executor_.ResetExecutor();
   RecycleAllArenaMemory();
-  RandomGenerator::Current().Reset();
+  if (seed >= 0) {
+    RandomGenerator::Current().ResetWithSeed(seed);
+  } else {
+    RandomGenerator::Current().ResetWithRandomDevice();
+  }
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::ReleaseAllArenaMemory() {
+  for (auto& allocator : shared_state_.allocators_) {
+    allocator->ReleaseAll();
+  }
 }
 
 template <typename ExecutorType, typename TensorType>
@@ -408,13 +419,13 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;
       }
 
-      if (coarsened_execution_) {
-        std::cout << "  ScMode: [";
-        for (size_t i = 0; i < shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
-          std::cout << shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
-        }
-        std::cout << "]";
+      // if (coarsened_execution_) {
+      std::cout << "  ScMode: [";
+      for (size_t i = 0; i < shared_state_.batched_func_arg_mode_[packed_index].size(); ++i) {
+        std::cout << shared_state_.batched_func_arg_mode_[packed_index][i] << " ";
       }
+      std::cout << "]";
+      // }
       std::cout << "   AccMode: [";
       for (size_t i = 0; i < shared_state_.prim_func_arg_access_mode_[packed_index].size(); ++i) {
         std::cout << shared_state_.prim_func_arg_access_mode_[packed_index][i] << " ";

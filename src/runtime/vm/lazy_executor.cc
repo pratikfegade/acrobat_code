@@ -429,25 +429,12 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 
     if (num_scattered_args > 0) {
       ArrayCopyFromBytesAsync(device_scattered_ptrs, host_scattered_ptrs, nbytes_scattered_ptrs);
-      // DLTensor* device_scattered_ptrs_dltensor = Arena::Current()->allocate_<DLTensor>();
-      // {
-      //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-      //   shape_data[0] = batch_size * num_scattered_args;
-      //   auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-      //   device_scattered_ptrs_dltensor->device = accelerator_device;
-      //   device_scattered_ptrs_dltensor->data = ;
-      //   device_scattered_ptrs_dltensor->strides = nullptr;
-      //   device_scattered_ptrs_dltensor->ndim = 1;
-      //   device_scattered_ptrs_dltensor->dtype = dtype;
-      //   device_scattered_ptrs_dltensor->shape = shape_data;
-      //   device_scattered_ptrs_dltensor->byte_offset = 0;
-      // }
-      // ArrayCopyFromBytesAsync(device_scattered_ptrs_dltensor, host_scattered_ptrs,
-      // nbytes_scattered_ptrs);
     }
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
+      auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
+      DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
       VMDBProfiler::ProfileHostStopCall();
       VMDBProfiler::ProfileDeviceStartCall("bkernel_" + std::to_string(batched_func_idx));
     }

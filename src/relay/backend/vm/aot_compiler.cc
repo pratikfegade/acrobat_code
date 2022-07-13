@@ -1731,6 +1731,14 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
   os << "}\n";
 
   if (ConcurrentExecution()) {
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStartCall(\"graph_construction\");\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
     this->PrintIndent(os);
     os << "while (tvm::runtime::vm::FiberRuntime::Current().ContinueExecution()) {\n";
     this->BeginScope();
@@ -1811,6 +1819,15 @@ void VMAOTCompiler::EmitBatchedMainFunction(std::ostream& os, int start_depth) {
     os << "}\n";
     this->PrintIndent(os);
     os << "tvm::runtime::vm::FiberRuntime::Current().MainResumeWorkers();\n";
+    this->EndScope();
+    this->PrintIndent(os);
+    os << "}\n";
+
+    this->PrintIndent(os);
+    os << "if (VMDBProfiler::DoProfile()) {\n";
+    this->BeginScope();
+    this->PrintIndent(os);
+    os << "VMDBProfiler::ProfileHostStopCall();\n";
     this->EndScope();
     this->PrintIndent(os);
     os << "}\n";

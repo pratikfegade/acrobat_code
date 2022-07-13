@@ -194,13 +194,12 @@ NDArray CreatePointerNDArray(const std::vector<OpNode<NDArray>*>& nodes, int arg
                                   DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1},
                                   nodes[0]->args_[arg_num]->device);
 
-  void** raw_data = static_cast<void**>(result->data);
+  void** raw_data_host = static_cast<void**>(malloc(size * sizeof(void*)));
   for (size_t j = 0; j < size; ++j) {
-    raw_data[j] = nodes[j]->args_[arg_num]->data;
+    raw_data_host[j] = nodes[j]->args_[arg_num]->data;
   }
-
-  // TestPointerNDArray(result, nodes[0]->args_[arg_num], size);
-
+  result.CopyFromBytes(raw_data_host, size * sizeof(void*));
+  delete raw_data_host;
   return result;
 }
 
@@ -366,20 +365,6 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
       input_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
 
-    // DLTensor* input_ptrs_device = Arena::Current()->allocate_<DLTensor>();
-    // {
-    //   int64_t* shape_data = Arena::Current()->allocate_<int64_t>();
-    //   shape_data[0] = size;
-    //   auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-    //   input_ptrs_device->device = accelerator_device;
-    //   input_ptrs_device->data = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
-    //   input_ptrs_device->strides = nullptr;
-    //   input_ptrs_device->ndim = 1;
-    //   input_ptrs_device->dtype = dtype;
-    //   input_ptrs_device->shape = shape_data;
-    //   input_ptrs_device->byte_offset = 0;
-    // }
-
     void* input_ptrs_device = allocator->ArenaAlloc(size * sizeof(void*), 256, dtype).data;
     ArrayCopyFromBytesAsync(input_ptrs_device, input_raw_ptrs, sizeof(void*) * size);
     contrib::db_concat_copy_wrapper(static_cast<float**>(input_ptrs_device),
@@ -482,7 +467,7 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
         }
 
         if (print) {
-          std::cout << "[VMU]    Concating " << to_concat.size() << " arays." << std::endl;
+          std::cout << "[VMU]    Concating " << to_concat.size() << " arrays." << std::endl;
         }
         NDArray concat_array = CreateConcatenatedNDArray(to_concat);
         arg_holder.push_back(concat_array);

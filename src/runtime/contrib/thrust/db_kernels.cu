@@ -1,4 +1,6 @@
 // #ifdef USE_CUDA
+#include <iostream>
+
 #include "db_kernels.h"
 
 #define CEIL(a, b) (((a) + (b)-1) / (b))

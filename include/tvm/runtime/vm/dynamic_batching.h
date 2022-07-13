@@ -40,6 +40,7 @@ enum DBBatchedArgMode {
   kReuse = 1,
   kScatter = 2,
   kConcat = 3,
+  kContiguous = 4,
 };
 
 /*!

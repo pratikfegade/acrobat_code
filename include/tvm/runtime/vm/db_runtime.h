@@ -229,9 +229,15 @@ class DynBatchRuntime : public runtime::ModuleNode {
   void RecycleAllArenaMemory();
 
   /*!
-   * \brief Reset all execution state
+   * \brief Release arena allocated memory
    */
-  void ResetExecutionState();
+  void ReleaseAllArenaMemory();
+
+  /*!
+   * \brief Reset all execution state
+   * \param seed: random seed.
+   */
+  void ResetExecutionState(int seed = -1);
 
   /*!
    * \brief Get the current instance of the runtime.

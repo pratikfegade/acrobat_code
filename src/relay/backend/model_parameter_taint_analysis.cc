@@ -159,7 +159,7 @@ class TransitiveTensorOpCalls : public ExprVisitor {
 
   bool CanTransitivelyCallTensorOps(const FunctionNode* func) {
     on_stack_.clear();
-    CanTransitivelyCallTensorOpsInternal(func);
+    return CanTransitivelyCallTensorOpsInternal(func);
   }
 
   bool CanTransitivelyCallTensorOpsInternal(const FunctionNode* func) {
@@ -1100,6 +1100,15 @@ IRModule ModelParameterTaintAnalysis(IRModule& mod, bool repeat) {
       mod = RepeatMutator(to_repeat, mod).Repeat();
     }
   }
+
+  // std::cout << "After repeat " << std::endl;
+  // for (auto kv : mod->OrderedFunctions()) {
+  //   if (kv.second->HasNonzeroAttr(attr::kPrimitive) || !kv.second.as<FunctionNode>()) {
+  //   } else {
+  //     std::cout << kv.first << ": " << RemoveOnDeviceCalls(kv.second) << std::endl;
+  //   }
+  // }
+
   return TaintAnalysis(mod).PerformAnalysisPhase2();
 }
 

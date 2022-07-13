@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -36,8 +37,11 @@
 
 #include "../../printer/text_printer.h"
 #include "../../support/utils.h"
+#include "../op/memory/memory.h"
 #include "../op/vm/vm.h"
 #include "./expr_subst.h"
+#include "./function_pointer_analysis.h"
+#include "./map_set.h"
 #include "./pass_utils.h"
 #include "./pattern_utils.h"
 
@@ -574,6 +578,82 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
   }
 };
 
+using ExprSet = std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual>;
+using PointsToMap = std::unordered_map<Var, ExprSet, ObjectPtrHash, ObjectPtrEqual>;
+
+class TIRContiguousTensorMutator : public tir::StmtExprMutator {
+ public:
+  TIRContiguousTensorMutator(const tir::PrimFunc& func,
+                             const std::unordered_set<std::string>& to_make_contiguous)
+      : func_(func), to_make_contiguous_(to_make_contiguous) {}
+
+  tir::PrimFunc MakeContiguous() {
+    std::cout << "[MAKE CONTIG] " << std::endl;
+    for (auto var_name : to_make_contiguous_) {
+      std::cout << "[TO MAKE CONTIG]  " << var_name << std::endl;
+    }
+    std::cout << func_ << std::endl;
+    std::cout << func_->scatter_buffer_map << std::endl;
+    auto body = this->VisitStmt(func_->body);
+
+    Array<tir::Var> params;
+    for (size_t i = 0; i < func_->params.size(); ++i) {
+      params.push_back(func_->params[i]);
+      if (to_make_contiguous_.count(func_->params[i]->name_hint)) {
+        ++i;
+      }
+    }
+
+    Map<tir::Var, tir::Buffer> scatter_buffer_map;
+    for (auto kv : func_->scatter_buffer_map) {
+      if (!to_make_contiguous_.count(kv.first->name_hint)) {
+        scatter_buffer_map.Set(kv.first, kv.second);
+      }
+    }
+
+    auto res = tir::PrimFunc(params, body, func_->ret_type, func_->buffer_map, scatter_buffer_map,
+                             func_->attrs, func_->span);
+    std::cout << "[MAKE CONTIG RES] " << std::endl;
+    std::cout << res << std::endl;
+    return res;
+  }
+
+  PrimExpr VisitExpr_(const tir::LoadNode* op) override {
+    auto expr = StmtExprMutator::VisitExpr_(op);
+    auto load = expr.as<tir::LoadNode>();
+    ICHECK(load) << load << " " << GetRef<PrimExpr>(op);
+    std::cout << "[LOAD] " << GetRef<PrimExpr>(load) << " " << load->buffer_var << " "
+              << load->buffer_var.get() << " " << op->buffer_var.get() << std::endl;
+    if (load->scatter_buffer_var.defined() &&
+        to_make_contiguous_.count(load->buffer_var->name_hint)) {
+      // auto res = tir::Load(load->dtype, load->buffer_var, load->index, load->predicate,
+      // load->scatter_buffer_var, load->scatter_batch_index,
+      // load->scatter_elem_index, load->span);
+      auto res = tir::Load(load->dtype, load->buffer_var, load->index, load->predicate);
+      std::cout << "[UNSCATTERING] " << res << std::endl;
+      return res;
+    }
+    return GetRef<PrimExpr>(load);
+  }
+
+  tir::Stmt VisitStmt_(const tir::StoreNode* op) override {
+    auto stmt = StmtExprMutator::VisitStmt_(op);
+    auto store = stmt.as<tir::StoreNode>();
+    ICHECK(store) << stmt << " " << GetRef<tir::Stmt>(op);
+    if (store->scatter_buffer_var.defined() &&
+        to_make_contiguous_.count(store->buffer_var->name_hint)) {
+      // return tir::Store(store->buffer_var, store->value, store->index, store->predicate,
+      // store->scatter_buffer_var, store->scatter_batch_index,
+      // store->scatter_elem_index, store->span);
+      return tir::Store(store->buffer_var, store->value, store->index, store->predicate);
+    }
+    return GetRef<tir::Stmt>(store);
+  }
+
+  const tir::PrimFunc& func_;
+  const std::unordered_set<std::string>& to_make_contiguous_;
+};
+
 class TIRLowererBatched : public AbstractTIRLowerer {
  public:
   TIRLowererBatched(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
@@ -587,18 +667,34 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
   TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
                               const std::vector<Expr>& calls) final {
-    bool print = false;
+    for (auto var : flattened_free_vars) {
+      std::cout << "[FREE_VAR] " << var->vid->name_hint << std::endl;
+    }
 
+    Map<Var, Bool> contiguous_tensors;
+
+    for (auto expr : calls) {
+      std::cout << "[GROUP CALL] " << PrettyPrint(expr) << std::endl;
+
+      auto call = expr.as<CallNode>();
+      for (auto arg : FlattenTuple(call->args[1])) {
+        ICHECK(arg.as<relay::VarNode>());
+        auto arg_var = Downcast<relay::Var>(arg);
+        MapSet::Insert(contiguous_tensors, arg_var);
+      }
+    }
+
+    for (auto kv : contiguous_tensors) {
+      std::cout << "[CONTIGUOUS] " << kv.first->vid->name_hint << std::endl;
+    }
+
+    bool print = false;
     if (print) {
       std::cout << "[CALL] YELLOWYELLOWYELLOWYELLOWYELLOWYELLOWYELLOWYELLOW" << std::endl;
       for (auto call : calls) {
         std::cout << "[CALL] " << PrettyPrint(call) << std::endl;
       }
     }
-
-    /* Prologue: Initialization *************************************************************/
-
-    /* First forward pass *************************************************************/
 
     /* Backward pass *************************************************************/
 
@@ -672,6 +768,11 @@ class TIRLowererBatched : public AbstractTIRLowerer {
                                                  : runtime::vm::DBBatchedArgMode::kConcat));
 
       if (arg_mode != runtime::vm::DBBatchedArgMode::kIgnore) {
+        std::cout << "[ARG MODE] " << rvar->vid->name_hint << " " << arg_mode << std::endl;
+        if (MapSet::Contains(contiguous_tensors, rvar) &&
+            arg_mode == runtime::vm::DBBatchedArgMode::kScatter) {
+          std::cout << "[ARG MODE]   Can be contiguous" << std::endl;
+        }
         prim_func_params.push_back(param);
         prim_func_arg_modes.push_back(arg_mode);
       }
@@ -679,6 +780,47 @@ class TIRLowererBatched : public AbstractTIRLowerer {
         std::cout << "[CG]  ArgMode: " << arg_mode << " " << (iit != arg_mode_states_.end())
                   << std::endl;
       }
+    }
+
+    /* Make Contiguous *************************************************************/
+    for (auto it = calls.rbegin(); it != calls.rend(); ++it) {
+      auto call = it->as<CallNode>();
+      ICHECK(call);
+      if (print) {
+        std::cout << "[CG]  Visiting: " << *it << " " << FlattenTuple(call->args[1]) << std::endl;
+      }
+      auto callee_gv = Downcast<GlobalVar>(call->op);
+      auto iit = mod_->batched_prim_funcs.find(callee_gv);
+      ICHECK(iit != mod_->batched_prim_funcs.end()) << callee_gv->name_hint;
+      auto batched_callee_gv = (*iit).second;
+      auto batched_callee = Downcast<tir::PrimFunc>(mod_->Lookup(batched_callee_gv));
+      auto iiit = mod_->batched_arg_modes.find(batched_callee_gv);
+      ICHECK(iiit != mod_->batched_arg_modes.end()) << batched_callee_gv->name_hint;
+      auto& arg_modes = (*iiit).second;
+
+      std::unordered_set<std::string> to_make_contiguous;
+      int param_idx = 1;
+      int dedup_idx = 0;
+      auto handle_arg = [&](const Expr& tuple) {
+        for (auto arg : FlattenTuple(tuple)) {
+          ICHECK(arg.as<relay::VarNode>());
+          auto arg_var = Downcast<relay::Var>(arg);
+          if (MapSet::Contains(contiguous_tensors, arg_var)) {
+            to_make_contiguous.insert(batched_callee->params[param_idx]->name_hint);
+          }
+          if (arg_modes[dedup_idx++]->value ==
+              static_cast<int>(runtime::vm::DBBatchedArgMode::kScatter)) {
+            param_idx += 2;
+          } else {
+            param_idx++;
+          }
+        }
+      };
+      handle_arg(call->args[0]);
+      handle_arg(call->args[1]);
+
+      auto batched_contiguous_callee =
+          TIRContiguousTensorMutator(batched_callee, to_make_contiguous).MakeContiguous();
     }
 
     Array<tir::Stmt> tir_stmts;
@@ -739,6 +881,108 @@ class TIRLowererBatched : public AbstractTIRLowerer {
   Map<relay::Var, Integer> arg_mode_states_;
 };
 
+class PointerAnalysis
+    : public ExprFunctor<std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual>(const Expr&)> {
+ public:
+  PointerAnalysis() {}
+
+  PointsToMap RunPointerAnalysis(const Function& func) {
+    this->VisitExpr(func->body);
+    return points_to;
+  }
+
+ private:
+  ExprSet VisitExpr_(const ConstantNode* op) { return ExprSet(); };
+
+  ExprSet VisitExpr_(const TupleNode* op) {
+    ExprSet res;
+    for (auto field : op->fields) {
+      auto field_res = this->VisitExpr(field);
+      res.insert(field_res.begin(), field_res.end());
+    }
+    return res;
+  };
+
+  ExprSet VisitExpr_(const VarNode* op) { return points_to[GetRef<Var>(op)]; };
+
+  ExprSet VisitExpr_(const GlobalVarNode* op) { return ExprSet(); };
+
+  ExprSet VisitExpr_(const FunctionNode* op) { return ExprSet(); };
+
+  ExprSet VisitExpr_(const CallNode* op) {
+    auto on_device_props = GetOnDeviceProps(op);
+    if (on_device_props.body.defined()) {
+      return VisitExpr(on_device_props.body);
+    }
+
+    if (op->op == MemoryAllocTensorOp()) {
+      return {GetRef<Expr>(op)};
+    }
+    return ExprSet();
+  };
+
+  ExprSet VisitExpr_(const LetNode* op) {
+    auto value_res = this->VisitExpr(op->value);
+    points_to[op->var].insert(value_res.begin(), value_res.end());
+    // std::cout << "PA " << op->var->vid->name_hint << std::endl;
+    for (auto e : value_res) {
+      // std::cout << "  VAL " << PrettyPrint(e) << std::endl;
+    }
+    return VisitExpr(op->body);
+  };
+
+  ExprSet VisitExpr_(const IfNode* op) {
+    ExprSet res;
+    this->VisitExpr(op->cond);
+    auto then_res = this->VisitExpr(op->true_branch);
+    auto else_res = this->VisitExpr(op->false_branch);
+    res.insert(then_res.begin(), then_res.end());
+    res.insert(else_res.begin(), else_res.end());
+    return res;
+  };
+
+  ExprSet VisitExpr_(const OpNode* op) { return ExprSet(); };
+
+  ExprSet VisitExpr_(const TupleGetItemNode* op) { return VisitExpr(op->tuple); };
+
+  ExprSet VisitExpr_(const RefCreateNode* op) {
+    ICHECK(false);
+    return ExprSet();
+  };
+
+  ExprSet VisitExpr_(const RefReadNode* op) {
+    ICHECK(false);
+    return ExprSet();
+  };
+
+  ExprSet VisitExpr_(const RefWriteNode* op) {
+    ICHECK(false);
+    return ExprSet();
+  };
+
+  ExprSet VisitExpr_(const ConstructorNode* op) {
+    ICHECK(false);
+    return ExprSet();
+  };
+
+  ExprSet VisitExpr_(const MatchNode* op) {
+    auto value_res = this->VisitExpr(op->data);
+
+    ExprSet res;
+    for (auto clause : op->clauses) {
+      auto pattern_vars = CollectPatternVars(clause->lhs);
+      for (auto& var : pattern_vars) {
+        points_to[var].insert(value_res.begin(), value_res.end());
+      }
+      auto clause_res = this->VisitExpr(clause->rhs);
+      res.insert(clause_res.begin(), clause_res.end());
+    }
+    return res;
+  };
+
+  PointsToMap points_to;
+};
+
 class Coarsener : public ExprMutator {
  public:
   Coarsener(const IRModule& mod, const FunctionsAccessModesMap& prim_funcs_access_modes,
@@ -753,6 +997,7 @@ class Coarsener : public ExprMutator {
     auto expr = func->body;
     // expr = transform::ToANormalForm(expr);
     expr = LiftLetsOutOfValues(expr);
+    // points_to_map_ = PointerAnalysis().RunPointerAnalysis(func);
     expr = this->VisitExpr(expr);
     return Function(func->params, expr, func->ret_type, func->type_params, func->attrs, func->span);
   }
@@ -823,9 +1068,41 @@ class Coarsener : public ExprMutator {
     }
   }
 
+  std::vector<std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>> EscapeAnalysis(
+      const std::vector<std::pair<Var, Expr>>& flattened, const Expr& body) {
+    std::vector<std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual>> live_vars(flattened.size());
+    live_vars[flattened.size() - 1] = FreeVarsDedup(body);
+    for (int i = flattened.size() - 1; i >= 1; --i) {
+      auto& after_live = live_vars[i];
+      std::unordered_set<Var, ObjectPtrHash, ObjectPtrEqual> before_live(after_live.begin(),
+                                                                         after_live.end());
+      auto& p = flattened[i];
+      auto& value = p.second;
+      Expr cleaned_value = value;
+      if (auto vn = value.as<CallNode>()) {
+        auto on_device_props = GetOnDeviceProps(vn);
+        if (on_device_props.body.defined()) {
+          cleaned_value = on_device_props.body;
+        }
+      }
+      before_live.erase(p.first);
+      auto free_vars = FreeVarsDedup(cleaned_value);
+      before_live.insert(free_vars.begin(), free_vars.end());
+
+      live_vars[i - 1] = before_live;
+      // std::cout << "Live after " << p.first->vid->name_hint << std::endl;
+      for (auto var : after_live) {
+        // std::cout << "  AFTER " << var->vid->name_hint << std::endl;
+      }
+    }
+    return live_vars;
+  }
+
   Expr VisitExpr_(const LetNode* op) final {
     std::vector<std::pair<Var, Expr>> flattened;
     auto body = FlattenLets(GetRef<Expr>(op), &flattened);
+
+    // auto live_vars_after = EscapeAnalysis(flattened, body);
 
     size_t start = -1;
     bool in_group = false;
@@ -983,10 +1260,10 @@ class Coarsener : public ExprMutator {
         std::vector<Expr> call_args_unsorted;
         Map<relay::Var, Array<Expr>> tuple_var_values;
 
-        std::cout << "[CG] New Group" << std::endl;
-        for (auto pair : bindings) {
-          std::cout << "[GROUP] " << pair.first->vid->name_hint << std::endl;
-        }
+        // std::cout << "[CG] New Group" << std::endl;
+        // for (auto pair : bindings) {
+        //   std::cout << "[GROUP] " << pair.first->vid->name_hint << std::endl;
+        // }
 
         auto free_vars_set = GetFreeVarsInGroup(bindings);
         for (auto var : free_vars_set) {
@@ -1116,6 +1393,8 @@ class Coarsener : public ExprMutator {
   const bool scattered_kernels_;
   static int prim_func_ctr;
 
+  PointsToMap points_to_map_;
+
  public:
   std::vector<std::pair<GlobalVar, tir::PrimFunc>> prim_funcs_;
   std::vector<std::pair<GlobalVar, GlobalVar>> batched_func_pairs_;
@@ -1146,7 +1425,7 @@ IRModule CoarsenGranularity(IRModule& mod, bool batched_execution, bool scattere
       if (n->GetAttr<String>(attr::kCompiler).defined()) continue;
       Function func = GetRef<Function>(n);
 
-      bool print = (support::StartsWith(it.first->name_hint, "lifted_name"));
+      bool print = false;  // (support::StartsWith(it.first->name_hint, "lifted_name"));
       // std::cout << "[CG] Func " << it.first->name_hint << std::endl;
       Coarsener coarsener(mod, prim_funcs_access_modes, batched_execution, scattered_kernels);
       Function ret = coarsener.Coarsen(func, print);

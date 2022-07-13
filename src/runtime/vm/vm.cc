@@ -594,7 +594,7 @@ void VirtualMachine::RunLoop() {
   RandomGenerator::Init();
   Index frame_start = frames_.size();
   if (!concurrent_execution_) {
-    RandomGenerator::Current().Reset();
+    RandomGenerator::Current().ResetWithSeed(0);
   }
   while (true) {
     if (RunOneIteration(frame_start)) {
@@ -1042,7 +1042,7 @@ void ConcurrentVirtualMachine::RunLoop() {
   int frame_start = GetVMFromModule(vms_[0])->frames_.size();
 
   RandomGenerator::Init();
-  RandomGenerator::Current().Reset();
+  RandomGenerator::Current().ResetWithSeed(0);
   std::cout << "[CVM] Concurrent loop" << std::endl;
   int want_program_phase = 0;
   while (alive > 0) {

@@ -89,6 +89,9 @@ class Allocator {
    *  \param buffer The buffer to free.
    */
   virtual void Free(const Buffer& buffer) = 0;
+  /*! \brief Release all allocated memory
+   */
+  virtual void ReleaseAll() = 0;
   /*! \brief Free all the buffers allocated by the allocator using the
    *  ArenaAlloc API.
    */

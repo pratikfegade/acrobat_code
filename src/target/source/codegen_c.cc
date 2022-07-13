@@ -104,7 +104,15 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
         PrintStorageScope(it->second, stream);
       }
 
-      PrintType(GetType(v), stream);
+      std::stringstream ss;
+      PrintType(GetType(v), ss);
+      // std::cout << "TYPE " << ss.str() << std::endl;
+      if (ss.str() == "float**") {
+        stream << "float * const * const";
+      } else {
+        stream << ss.str();
+      }
+
       // Register handle data type
       // TODO(tvm-team): consider simply keep type info in the
       // type annotation(via a normalizing rewriting).

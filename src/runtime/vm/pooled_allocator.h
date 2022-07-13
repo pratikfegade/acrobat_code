@@ -59,6 +59,7 @@ class PooledAllocator final : public Allocator {
     buf.size = size;
     try {
       buf.data = DeviceAPI::Get(device_)->AllocDataSpace(device_, size, alignment, type_hint);
+      // std::cout << "Alloc " << nbytes << " " << buf.data << std::endl;
     } catch (InternalError& err) {
       LOG(WARNING) << "PooledAllocator got InternalError during allocation: " << err.message();
       LOG(WARNING) << "Trying to release all unused memory and reallocate...";
@@ -82,8 +83,8 @@ class PooledAllocator final : public Allocator {
 
   size_t UsedMemory() const override { return used_memory_.load(std::memory_order_relaxed); }
 
- private:
-  void ReleaseAll() {
+  void ReleaseAll() override {
+    // std::cout << "RELEASING MEMORY " << std::endl;
     std::lock_guard<std::recursive_mutex> lock(mu_);
     for (auto const& it : memory_pool_) {
       auto const& pool = it.second;

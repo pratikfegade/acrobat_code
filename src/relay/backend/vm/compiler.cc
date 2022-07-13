@@ -1587,16 +1587,16 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(MemoryOpt(config_->host_se_scope));
 
-  if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
-    pass_seqs.push_back(transform::InferType());
-    pass_seqs.push_back(transform::HoistNonSequentialOps());
-  }
+  // if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value()) {
+  pass_seqs.push_back(transform::InferType());
+  pass_seqs.push_back(transform::HoistNonSequentialOps());
+  // }
 
   pass_seqs.push_back(transform::MarkScalarVars());
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, true));
+    pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, false));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
     // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
