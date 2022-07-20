@@ -1363,8 +1363,9 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
         }
         exec_->prim_func_arg_access_mode[index] = std::move(access_modes_vec);
 
-        if (false) {
-          std::cout << "[COMP]   ArgAccessModes: [";
+        if (true) {
+          std::cout << "[COMP]   " << index << " " << pair.first->name_hint
+                    << "  ArgAccessModes: [";
           for (size_t i = 0; i < exec_->prim_func_arg_access_mode[index].size(); ++i) {
             std::cout << exec_->prim_func_arg_access_mode[index][i] << " ";
           }
@@ -1596,7 +1597,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   if (pass_ctx->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false)).value()) {
     pass_seqs.push_back(transform::InferType());
-    pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, false));
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before Coarsen", true, false));
     pass_seqs.push_back(
         transform::CoarsenPrimitiveFuncGranularity(batched_execution, scattered_kernels));
     // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
@@ -1611,7 +1612,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

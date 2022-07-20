@@ -151,7 +151,7 @@ TVM_DLL Pass StorageRewrite();
  *
  * \return The pass.
  */
-TVM_DLL Pass UnrollLoop();
+TVM_DLL Pass UnrollLoop(bool hoist_only = false);
 
 /*!
  * \brief Remove No Op from the Stmt.
@@ -172,7 +172,7 @@ TVM_DLL Pass RewriteUnsafeSelect();
  *
  * \return The pass.
  */
-TVM_DLL Pass Simplify();
+TVM_DLL Pass Simplify(bool extra_simplify = false);
 
 /*!
  * \brief Instruments bound checkers.

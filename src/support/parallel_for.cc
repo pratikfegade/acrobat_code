@@ -48,11 +48,9 @@ std::vector<std::vector<int>> rr_partitioner(int begin, int end, int step, int n
 }
 
 void parallel_for(int begin, int end, const std::function<void(int)>& f, int step,
-                  const PartitionerFuncType partitioner)
-
-{
+                  const PartitionerFuncType partitioner) {
   // for (int i = begin; i < end; i += step) {
-  // f(i);
+  //   f(i);
   // }
   // return;
 

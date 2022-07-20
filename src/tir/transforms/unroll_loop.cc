@@ -24,6 +24,7 @@
 // Unrolls the loop as in Halide pipeline.
 #include <tvm/arith/analyzer.h>
 #include <tvm/runtime/registry.h>
+#include <tvm/tir/analysis.h>
 #include <tvm/tir/expr.h>
 #include <tvm/tir/op.h>
 #include <tvm/tir/stmt_functor.h>
@@ -53,6 +54,7 @@ struct UnrollLoopConfigNode : public tvm::AttrsNode<UnrollLoopConfigNode> {
         .set_default(8);
     TVM_ATTR_FIELD(auto_max_extent)
         .describe("The maximum extent of loop that will be unrolled.")
+
         .set_default(0);
     TVM_ATTR_FIELD(explicit_unroll)
         .describe("Whether to explicitly unroll the loop instead of setting a pragma")
@@ -67,6 +69,77 @@ class UnrollLoopConfig : public Attrs {
 
 TVM_REGISTER_NODE_TYPE(UnrollLoopConfigNode);
 TVM_REGISTER_PASS_CONFIG_OPTION("tir.UnrollLoop", UnrollLoopConfig);
+
+class UnrollIfHoister : public StmtExprMutator {
+  Stmt VisitStmt_(const ForNode* op) override {
+    Stmt stmt = StmtExprMutator::VisitStmt_(op);
+    op = stmt.as<ForNode>();
+    return Hoist(op);
+  }
+
+  Stmt WrapAttrStmtsBack(const std::vector<const AttrStmtNode*>& attr_stmts, Stmt to_wrap) {
+    for (int i = attr_stmts.size() - 1; i >= 0; --i) {
+      auto op = attr_stmts[i];
+      to_wrap = AttrStmt(op->node, op->attr_key, op->value, to_wrap, op->span);
+    }
+    return to_wrap;
+  }
+
+  Stmt Hoist(const ForNode* op) {
+    bool print = false;  //(op->loop_var->name_hint == "ax0.ax1.fused.ax2.fused.outer.outer");
+    if (print) {
+      std::cout << "HOISTING\n" << GetRef<Stmt>(op) << std::endl;
+    }
+    Stmt body = op->body;
+
+    std::vector<const AttrStmtNode*> wrapper_thread_extent_attrs;
+    while (true) {
+      auto asn = body.as<AttrStmtNode>();
+      if (asn && asn->attr_key == attr::thread_extent) {
+        wrapper_thread_extent_attrs.push_back(asn);
+        body = asn->body;
+      } else {
+        break;
+      }
+    }
+
+    if (auto ifn = body.as<IfThenElseNode>()) {
+      auto condition = ifn->condition;
+      if (UsesVar(condition, [&](const VarNode* var) { return var == op->loop_var.get(); })) {
+        if (print) {
+          std::cout << "   BODY A DEPENDENT IF" << std::endl;
+        }
+        return GetRef<Stmt>(op);
+      } else {
+        auto then_case = ifn->then_case;
+        auto else_case = ifn->else_case;
+        if (StructuralEqual()(then_case, else_case)) {
+          else_case = NullValue<Stmt>();
+          condition = make_const(condition.dtype(), 1);
+        }
+
+        auto unrolled_then_case = Hoist(For(op->loop_var, op->min, op->extent, op->kind, then_case,
+                                            op->thread_binding, op->annotations, op->span)
+                                            .get());
+        Stmt unrolled_else_case = NullValue<Stmt>();
+        if (else_case.defined()) {
+          unrolled_else_case = Hoist(For(op->loop_var, op->min, op->extent, op->kind, else_case,
+                                         op->thread_binding, op->annotations, op->span)
+                                         .get());
+        }
+
+        return WrapAttrStmtsBack(
+            wrapper_thread_extent_attrs,
+            IfThenElse(condition, unrolled_then_case, unrolled_else_case, ifn->span));
+      }
+    } else {
+      if (print) {
+        std::cout << "   BODY NOT AN IF" << std::endl;
+      }
+      return GetRef<Stmt>(op);
+    }
+  }
+};
 
 class LoopUnroller : public StmtExprMutator {
  public:
@@ -160,7 +233,75 @@ class LoopUnroller : public StmtExprMutator {
     return StmtMutator::VisitSeqStmt_(op, false, fmutate);
   }
 
-  Stmt Unroll(const ForNode* op) {
+  Stmt WrapAttrStmtsBack(const std::vector<const AttrStmtNode*>& attr_stmts, Stmt to_wrap) {
+    for (int i = attr_stmts.size() - 1; i >= 0; --i) {
+      auto op = attr_stmts[i];
+      to_wrap = AttrStmt(op->node, op->attr_key, op->value, to_wrap, op->span);
+    }
+    return to_wrap;
+  }
+
+  Stmt Unroll(const ForNode* op, bool unroll = true) {
+    // std::cout << "UNROLLING\n" << GetRef<Stmt>(op) << std::endl;
+    int value = GetExtent(op);
+    // For loop must have a constant integer extent
+    ICHECK_NE(value, -1) << "loop doesn't have a constant integer extent";
+    if (value == 0) return Evaluate(0);
+    Stmt body = op->body;
+
+    std::vector<const AttrStmtNode*> wrapper_thread_extent_attrs;
+    while (true) {
+      auto asn = body.as<AttrStmtNode>();
+      if (asn && asn->attr_key == attr::thread_extent) {
+        wrapper_thread_extent_attrs.push_back(asn);
+        body = asn->body;
+      } else {
+        break;
+      }
+    }
+
+    if (auto ifn = body.as<IfThenElseNode>()) {
+      auto condition = ifn->condition;
+      if (UsesVar(condition, [&](const VarNode* var) { return var == op->loop_var.get(); })) {
+        // std::cout << "   BODY A DEPENDENT IF" << std::endl;
+        if (unroll) {
+          return UnrollWithoutHoisting(op);
+        } else {
+          return GetRef<Stmt>(op);
+        }
+      } else {
+        auto then_case = ifn->then_case;
+        auto else_case = ifn->else_case;
+        if (StructuralEqual()(then_case, else_case)) {
+          else_case = NullValue<Stmt>();
+          condition = make_const(condition.dtype(), 1);
+        }
+
+        auto unrolled_then_case = Unroll(For(op->loop_var, op->min, op->extent, op->kind, then_case,
+                                             op->thread_binding, op->annotations, op->span)
+                                             .get());
+        Stmt unrolled_else_case = NullValue<Stmt>();
+        if (else_case.defined()) {
+          unrolled_else_case = Unroll(For(op->loop_var, op->min, op->extent, op->kind, else_case,
+                                          op->thread_binding, op->annotations, op->span)
+                                          .get());
+        }
+
+        return WrapAttrStmtsBack(
+            wrapper_thread_extent_attrs,
+            IfThenElse(condition, unrolled_then_case, unrolled_else_case, ifn->span));
+      }
+    } else {
+      // std::cout << "   BODY NOT AN IF" << std::endl;
+      if (unroll) {
+        return UnrollWithoutHoisting(op);
+      } else {
+        return GetRef<Stmt>(op);
+      }
+    }
+  }
+
+  Stmt UnrollWithoutHoisting(const ForNode* op) {
     int value = GetExtent(op);
     // For loop must have a constant integer extent
     ICHECK_NE(value, -1) << "loop doesn't have a constant integer extent";
@@ -208,9 +349,12 @@ class LoopUnroller : public StmtExprMutator {
   arith::Analyzer analyzer_;
 };
 
-Stmt UnrollLoop(Stmt stmt, UnrollLoopConfig cfg) {
-  Stmt ret = LoopUnroller(cfg->auto_max_step, cfg->auto_max_depth, cfg->auto_max_extent,
-                          cfg->explicit_unroll)(stmt);
+Stmt UnrollLoop(Stmt stmt, UnrollLoopConfig cfg, bool hoist_only) {
+  Stmt ret = UnrollIfHoister()(stmt);
+  if (!hoist_only) {
+    ret = LoopUnroller(cfg->auto_max_step, cfg->auto_max_depth, cfg->auto_max_extent,
+                       cfg->explicit_unroll)(ret);
+  }
   if (!ret.same_as(stmt)) {
     return ConvertSSA(ret);
   } else {
@@ -220,14 +364,14 @@ Stmt UnrollLoop(Stmt stmt, UnrollLoopConfig cfg) {
 
 namespace transform {
 
-Pass UnrollLoop() {
+Pass UnrollLoop(bool hoist_only) {
   auto pass_func = [=](PrimFunc f, IRModule m, PassContext ctx) {
     auto* n = f.CopyOnWrite();
     auto cfg = ctx->GetConfig<UnrollLoopConfig>("tir.UnrollLoop");
     if (!cfg.defined()) {
       cfg = AttrsWithDefaultValues<UnrollLoopConfig>();
     }
-    n->body = UnrollLoop(std::move(f->body), cfg.value());
+    n->body = UnrollLoop(std::move(f->body), cfg.value(), hoist_only);
     return f;
   };
   return CreatePrimFuncPass(pass_func, 0, "tir.UnrollLoop", {});

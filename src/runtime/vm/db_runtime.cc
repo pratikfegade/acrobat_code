@@ -22,6 +22,7 @@
  * \brief The Relay virtual machine runtime.
  */
 
+#include <cuda_runtime.h>
 #include <dmlc/memory_io.h>
 #include <tvm/runtime/container/adt.h>
 #include <tvm/runtime/logging.h>
@@ -228,9 +229,20 @@ void DynBatchRuntime<ExecutorType, TensorType>::ResetProgramPhase() {
 }
 
 template <typename ExecutorType, typename TensorType>
-void DynBatchRuntime<ExecutorType, TensorType>::ResetExecutionState(int seed) {
+bool DynBatchRuntime<ExecutorType, TensorType>::MightOOMSoon() {
+  size_t total = 0;
+  size_t free = 0;
+  cudaMemGetInfo(&free, &total);
+  return static_cast<double>(free) < 0.3 * static_cast<double>(total);
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::ResetExecutionState(int seed, bool release_memory) {
   shared_state_.lazy_executor_.ResetExecutor();
   RecycleAllArenaMemory();
+  if (release_memory) {
+    ReleaseAllArenaMemory();
+  }
   if (seed >= 0) {
     RandomGenerator::Current().ResetWithSeed(seed);
   } else {
@@ -242,6 +254,14 @@ template <typename ExecutorType, typename TensorType>
 void DynBatchRuntime<ExecutorType, TensorType>::ReleaseAllArenaMemory() {
   for (auto& allocator : shared_state_.allocators_) {
     allocator->ReleaseAll();
+  }
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::RecycleAllArenaMemory() {
+  Arena::Current()->RecycleAll();
+  for (auto& allocator : shared_state_.allocators_) {
+    allocator->ArenaFree();
   }
 }
 
@@ -408,7 +428,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
       }
     }
 
-    bool print = false;
+    bool print = true;
     if (print) {
       if (batched_execution_) {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;
@@ -480,14 +500,6 @@ void DynBatchRuntime<ExecutorType, TensorType>::Init(
   //   perror("mlockall");
   //   exit(-1);
   // }
-}
-
-template <typename ExecutorType, typename TensorType>
-void DynBatchRuntime<ExecutorType, TensorType>::RecycleAllArenaMemory() {
-  Arena::Current()->RecycleAll();
-  for (auto& allocator : shared_state_.allocators_) {
-    allocator->ArenaFree();
-  }
 }
 
 runtime::Module CreateEagerAllocationDynBatchRuntime(Executable* exec) {

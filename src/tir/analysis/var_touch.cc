@@ -76,5 +76,49 @@ bool UsesVar(const PrimExpr& expr, std::function<bool(const VarNode*)> var_set) 
   return visitor.use_var_;
 }
 
+class VarCollector : public StmtExprVisitor {
+ public:
+  void VisitStmt(const Stmt& stmt) final { StmtExprVisitor::VisitStmt(stmt); }
+
+  void VisitExpr(const PrimExpr& e) final { StmtExprVisitor::VisitExpr(e); }
+
+  void VisitExpr_(const VarNode* op) final { Handle(op); }
+
+  void VisitStmt_(const StoreNode* op) final {
+    Handle(op->buffer_var.get());
+    StmtVisitor::VisitStmt_(op);
+  }
+
+  void VisitExpr_(const LoadNode* op) final {
+    Handle(op->buffer_var.get());
+    ExprVisitor::VisitExpr_(op);
+  }
+
+  void VisitStmt_(const ScatterStoreNode* op) final {
+    Handle(op->buffer_var.get());
+    StmtVisitor::VisitStmt_(op);
+  }
+
+  void VisitExpr_(const ScatterLoadNode* op) final {
+    Handle(op->buffer_var.get());
+    ExprVisitor::VisitExpr_(op);
+  }
+
+  void Handle(const VarNode* var) { collected.insert(var); }
+
+  std::unordered_set<const VarNode*> collected;
+};
+
+std::unordered_set<const VarNode*> CollectVars(const PrimExpr& e) {
+  VarCollector v;
+  v(e);
+  return v.collected;
+}
+
+std::unordered_set<const VarNode*> CollectVars(const Stmt& s) {
+  VarCollector v;
+  v(s);
+  return v.collected;
+}
 }  // namespace tir
 }  // namespace tvm

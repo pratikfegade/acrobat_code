@@ -112,6 +112,22 @@ TVM_DLL bool UsesVar(const Stmt& stmt, std::function<bool(const VarNode*)> vset_
 TVM_DLL bool UsesVar(const PrimExpr& expr, std::function<bool(const VarNode*)> vset_contains);
 
 /*!
+ * \brief Whether the given Stmt uses any var in the given variable set.
+ * \param stmt The Stmt to be checked.
+ * \param vset_contains The check function to see if a var is in the variable set.
+ * \return Whether `stmt` uses any var in the given variable set.
+ */
+TVM_DLL std::unordered_set<const VarNode*> CollectVars(const Stmt& stmt);
+
+/*!
+ * \brief Whether the given PrimExpr uses any var in the given variable set.
+ * \param expr The PrimExpr to be checked.
+ * \param vset_contains The check function to see if var is in the variable set.
+ * \return Whether `expr` uses any var in the given variable set.
+ */
+TVM_DLL std::unordered_set<const VarNode*> CollectVars(const PrimExpr& expr);
+
+/*!
  * \brief Verifies whether the IR stmt or Expr is in SSA form.
  *  That is: each Var is defined and assigned once(in Let/For)
  *

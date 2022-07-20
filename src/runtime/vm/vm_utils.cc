@@ -148,19 +148,6 @@ void TestPointerNDArray(const NDArray& ptr_array, const NDArray& sample, int64_t
   TestPointerNDArray(ptr_array, total_nums, batch_size);
 }
 
-bool CheckEqualShape(const DLTensor& t1, const DLTensor& t2) {
-  if (t1.ndim != t2.ndim) {
-    return false;
-  }
-
-  for (int i = 0; i < t1.ndim; ++i) {
-    if (t1.shape[i] != t2.shape[i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 void FillInPointersScatter(void** host_raw_ptrs, size_t size,
                            const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                            Allocator* allocator) {
@@ -171,7 +158,8 @@ void FillInPointersScatter(void** host_raw_ptrs, size_t size,
     for (size_t j = 0; j < size; ++j) {
 #ifdef DEBUG_CHECKS
       ICHECK(nodes[j]->args_[arg_num]->data != nullptr) << arg_num << " " << j;
-      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])))
+          << GetDLTensorInfo(first_arg) << " " << GetDLTensorInfo(nodes[j]->args_[arg_num]);
 #endif
       host_raw_ptrs[j] = nodes[j]->args_[arg_num]->data;
     }
@@ -183,7 +171,8 @@ void FillInPointersScatter(void** host_raw_ptrs, size_t size,
       host_raw_ptrs[j] = ptr;
       nodes[j]->args_[arg_num]->data = ptr;
 #ifdef DEBUG_CHECKS
-      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
+      ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])))
+          << GetDLTensorInfo(first_arg) << " " << GetDLTensorInfo(nodes[j]->args_[arg_num]);
 #endif
     }
   }
@@ -324,15 +313,17 @@ NDArray CreateConcatenatedNDArray(std::vector<NDArray>& arrays) {
 
 DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& nodes, int arg_num,
                                      Allocator* allocator) {
+  // Check if existing tensors are already contiguous
   auto& first_arg = nodes[0]->args_[arg_num];
-  auto ub_ndim = first_arg->ndim;
+  auto& dtype = first_arg->dtype;
+  auto dtype_bytes = (dtype.lanes * dtype.bits + 7) / 8;
   int64_t size = nodes.size();
+
+  auto ub_ndim = first_arg->ndim;
   auto& accelerator_device = first_arg->device;
 
   DLTensor* result = Arena::Current()->allocate_<DLTensor>();
   int64_t ub_flat_size = 1;
-  auto& dtype = first_arg->dtype;
-  auto dtype_bytes = (dtype.lanes * dtype.bits + 7) / 8;
   {
     int64_t* shape_data = Arena::Current()->allocate_<int64_t>(ub_ndim + 1);
     shape_data[0] = size;
@@ -341,15 +332,38 @@ DLTensor* CreateConcatenatedDLTensor(const std::vector<OpNode<DLTensor*>*>& node
       shape_data[i + 1] = dim_ext;
       ub_flat_size *= dim_ext;
     }
-    int64_t b_flat_bytes = ub_flat_size * dtype_bytes * size;
 
     result->device = accelerator_device;
-    result->data = allocator->ArenaAlloc(b_flat_bytes, 256, dtype).data;
     result->strides = nullptr;
     result->ndim = ub_ndim + 1;
     result->dtype = dtype;
     result->shape = shape_data;
     result->byte_offset = 0;
+  }
+
+  if (first_arg->data != nullptr) {
+    // std::cout << "CHECKING IF ALREADY CONTIGUOUS " << size << std::endl;
+    size_t data_bytes = GetDataSize(*first_arg);
+    bool already_contiguous = true;
+    for (size_t i = 1; i < size; ++i) {
+      auto expected_address =
+          static_cast<void*>(static_cast<char*>(first_arg->data) + i * data_bytes);
+      if (nodes[i]->args_[arg_num]->data != expected_address) {
+        already_contiguous = false;
+        break;
+      }
+    }
+    if (already_contiguous) {
+      // std::cout << "ALREADY CONTIGUOUS" << std::endl;
+      result->data = first_arg->data;
+      return result;
+    }
+  }
+
+  {
+    // Allocate memory
+    int64_t b_flat_bytes = ub_flat_size * dtype_bytes * size;
+    result->data = allocator->ArenaAlloc(b_flat_bytes, 256, dtype).data;
   }
   int64_t ub_flat_bytes = ub_flat_size * dtype_bytes;
 
@@ -461,11 +475,11 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
         ctr += 1;
         break;
       }
-      // case kContiguous: {
-      //   ICHECK(false);
-      //   ctr += 1;
-      //   break;
-      // }
+      case kContiguous: {
+        ICHECK(false);
+        ctr += 1;
+        break;
+      }
       case kConcat: {
         std::vector<NDArray> to_concat(batch_size);
         for (size_t j = 0; j < static_cast<size_t>(batch_size); ++j) {

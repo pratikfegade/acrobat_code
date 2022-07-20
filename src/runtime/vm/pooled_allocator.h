@@ -84,7 +84,6 @@ class PooledAllocator final : public Allocator {
   size_t UsedMemory() const override { return used_memory_.load(std::memory_order_relaxed); }
 
   void ReleaseAll() override {
-    // std::cout << "RELEASING MEMORY " << std::endl;
     std::lock_guard<std::recursive_mutex> lock(mu_);
     for (auto const& it : memory_pool_) {
       auto const& pool = it.second;

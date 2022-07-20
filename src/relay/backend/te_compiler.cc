@@ -519,13 +519,13 @@ class TECompilerImpl : public TECompilerNode {
         ICHECK(cached_func->funcs->Lookup(cached_func->prim_fn_var).as<tir::PrimFuncNode>());
       };
 
-      lower_scheduled_function(value->cached_func, false);
       if (value->batched_cached_func.defined()) {
         // std::cout << "[TEC] Creating args for "
         // << value->batched_cached_func->prim_fn_var->name_hint << " "
         // << value->batched_cached_func->batched_arg_mode << std::endl;
         lower_scheduled_function(value->batched_cached_func, true);
       }
+      lower_scheduled_function(value->cached_func, false);
     }
     VLOG(1) << "lowered to name:" << std::endl
             << PrettyPrint(value->cached_func->prim_fn_var) << std::endl
@@ -1293,10 +1293,10 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
   phase1(RemoveOnDeviceCalls(func));
   // std::cout << "[TPGN] Found Groups" << std::endl;
   for (auto group : phase1.hfuse_groups_) {
-    std::cout << "[TPGN]  New Group" << std::endl;
-    for (auto var : group.vars) {
-      std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
-    }
+    // std::cout << "[TPGN]  New Group" << std::endl;
+    // for (auto var : group.vars) {
+    //   std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+    // }
   }
 
   Phase2 phase2(module, process_fn, module_name, compiler, host_se_scope, phase1.hfuse_groups_);
@@ -1348,6 +1348,7 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
         }
         auto func3 =
             PerformStaticBatching(module, process_fn, module_name, compiler, host_se_scope, func2);
+        // auto func3 = func2;
         auto func4 = Downcast<Function>(lower_te.Mutate(func3));
         if (print) {
           std::cout << "[TEC] Lowered\n" << PrettyPrint(func4) << std::endl;

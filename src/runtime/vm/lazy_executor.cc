@@ -227,7 +227,7 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
 template <typename ConcreteExecutorType>
 void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,
                                       const std::vector<LazyOpNode*>& func_nodes) {
-  // std::cout << "[LZ]   Executing " << func_idx << " " << func_nodes.size() << std::endl;
+  // std::cout << "[LZ]  Executing " << func_idx << " " << func_nodes.size() << std::endl;
 
   const VMSharedState<ConcreteExecutorType>& vm_shared_state = *(executor.vm_shared_state_);
   int32_t batch_size = func_nodes.size();
@@ -278,9 +278,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     setter(0, batch_size);
     int ctr = 1;
 
-    // std::cout << "[LZ]  ExecutingB " << batched_func_idx << " " << arity << " " <<
-    // func_nodes.size()
-    // << std::endl;
+    // std::cout << "[LZ]   ExecutingB " << batched_func_idx << " " << arity << " "
+    // << func_nodes.size() << std::endl;
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
@@ -291,7 +290,7 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 
     auto& allocator = vm_shared_state.allocators_[executor.accelerator_device_];
     auto& accelerator_device = vm_shared_state.devices_[executor.accelerator_device_];
-    DLDataType dtype{kDLFloat, 32, 1};
+    constexpr DLDataType dtype{kDLFloat, 32, 1};
     int scattered_ctr = 0;
 
     int num_scattered_args = 0;
@@ -349,6 +348,9 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
             }
 #endif
           }
+
+          // std::cout << "[LZ]    Arg1 " << ctr << " " << GetDLTensorInfo(arg) << std::endl;
+
           setter(ctr, arg);
           ctr += 1;
           break;
@@ -360,59 +362,58 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
                                 i, allocator);
           setter(ctr, &(scattered_args[scattered_ctr]));
 
-          // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << " "
+          // std::cout << "[LZ]    Arg2 " << ctr << " "
+          // << GetDLTensorInfo(&scattered_args[scattered_ctr]) << " "
           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
           scattered_ctr++;
           ctr += 1;
           break;
         }
-          //         case kContiguous: {
-          //           auto& first_arg = func_nodes[0]->args_[i];
-          //           auto data_size = GetDataSize(*first_arg);
-          //           auto start = allocator->ArenaAlloc(batch_size * data_size, 256,
-          //           first_arg->dtype).data;
+        case kContiguous: {
+          auto& first_arg = func_nodes[0]->args_[i];
+          auto data_size = GetDataSize(*first_arg);
+          auto start = allocator->ArenaAlloc(batch_size * data_size, 256, first_arg->dtype).data;
 
-          // #pragma GCC ivdep
-          //           for (size_t j = 0; j < batch_size; ++j) {
-          // #ifdef DEBUG_CHECKS
-          //             ICHECK_EQ(func_nodes[j]->args_[i]->data, nullptr);
-          //             ICHECK(CheckEqualShape(*first_arg, *(nodes[j]->args_[arg_num])));
-          // #endif
-          //             auto ptr = static_cast<char*>(start) + j * data_size;
-          //             func_nodes[j]->args_[i]->data = ptr;
-          //           }
+#pragma GCC ivdep
+          for (int j = 0; j < batch_size; ++j) {
+#ifdef DEBUG_CHECKS
+            ICHECK(func_nodes[j]->args_[i]->data == nullptr);
+            ICHECK(CheckEqualShape(*first_arg, *(func_nodes[j]->args_[i])));
+#endif
+            auto ptr = static_cast<char*>(start) + j * data_size;
+            func_nodes[j]->args_[i]->data = ptr;
+          }
 
-          //           DLTensor* contiguous_tensor = Arena::Current()->allocate_<DLTensor>();
-          //           {
-          //             int64_t* shape_data = Arena::Current()->allocate_<int64_t>(1 +
-          //             first_arg->ndim); shape_data[0] = batch_size; for (int k = 0; k <
-          //             first_arg->ndim; ++k) {
-          //               shape_data[k + 1] = first_arg->shape[k];
-          //             }
-          //             contiguous_tensor->device = accelerator_device;
-          //             contiguous_tensor->data = start;
-          //             contiguous_tensor->strides = nullptr;
-          //             contiguous_tensor->ndim = 1;
-          //             contiguous_tensor->dtype = first_arg->dtype;
-          //             contiguous_tensor->shape = shape_data;
-          //             contiguous_tensor->byte_offset = 0;
-          //           }
+          DLTensor* contiguous_tensor = Arena::Current()->allocate_<DLTensor>();
+          {
+            int64_t* shape_data = Arena::Current()->allocate_<int64_t>(1 + first_arg->ndim);
+            shape_data[0] = batch_size;
+            for (int k = 0; k < first_arg->ndim; ++k) {
+              shape_data[k + 1] = first_arg->shape[k];
+            }
+            contiguous_tensor->device = accelerator_device;
+            contiguous_tensor->data = start;
+            contiguous_tensor->strides = nullptr;
+            contiguous_tensor->ndim = 1;
+            contiguous_tensor->dtype = first_arg->dtype;
+            contiguous_tensor->shape = shape_data;
+            contiguous_tensor->byte_offset = 0;
+          }
 
-          //           setter(ctr, contiguous_tensor);
+          setter(ctr, contiguous_tensor);
 
-          //           // std::cout << "[LZ]   Arg2 " << ctr << " " << GetDLTensorInfo(result) << "
-          //           "
-          //           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
+          // std::cout << "[LZ]    Arg3 " << ctr << " " << GetDLTensorInfo(contiguous_tensor) << " "
+          // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
-          //           ctr += 1;
-          //           break;
-          //         }
+          ctr += 1;
+          break;
+        }
         case kConcat: {
           auto tensor = CreateConcatenatedDLTensor(func_nodes, i, allocator);
           setter(ctr, tensor);
 
-          // std::cout << "[LZ]   Arg3 " << ctr << " " << GetDLTensorInfo(tensor) << " "
+          // std::cout << "[LZ]    Arg4 " << ctr << " " << GetDLTensorInfo(tensor) << " "
           // << GetDLTensorInfo(func_nodes[0]->args_[i]) << std::endl;
 
           ctr += 1;
@@ -534,7 +535,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
 
     static phmap::flat_hash_map<int, std::vector<OpNode<TensorType>*>> func_to_node;
 
-    for (size_t phase_ctr = 0; phase_ctr < executor->nodes_.size(); ++phase_ctr) {
+    for (int phase_ctr = 0; phase_ctr < static_cast<int>(executor->nodes_.size()); ++phase_ctr) {
       auto& phase_nodes = executor->nodes_[phase_ctr];
       size_t phase_num_nodes = phase_nodes.size();
       if (phase_num_nodes == 0) {
@@ -582,12 +583,12 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
         graph_depth = std::max(graph_depth, node_depth);
       }
 
-      int nodes_executed = 0;
+      // int nodes_executed = 0;
       for (int j = 0; j <= graph_depth; ++j) {
         auto& depth_nodes = depth_to_node[j];
         // std::cout << "[LZ]  Depth " << j << " " << depth_nodes.size() << std::endl;
         func_to_node.clear();
-        nodes_executed += depth_nodes.size();
+        // nodes_executed += depth_nodes.size();
         for (auto& node : depth_nodes) {
           func_to_node[node->func_idx_].push_back(node);
         }
@@ -596,7 +597,7 @@ void BatchedExecuteImpl(LazyExecutor<TensorType>* executor, bool coarsened_execu
           executor->ExecuteOpNodeBatch(kv.first, kv.second);
         }
       }
-      ICHECK_EQ(nodes_executed, phase_num_nodes);
+      // ICHECK_EQ(nodes_executed, phase_num_nodes);
     }
   } else {
     for (auto& phase_nodes : executor->nodes_) {
@@ -783,7 +784,7 @@ void DepthTrackingExecutor::AddPackedCallUnrolledWithDepth(const Index func_idx,
                                                            DLTensor** args, int num_args) {
   // std::cout << "[LZ] Node " << phase_ << " " << depth << " " << func_idx << std::endl;
   auto& phase_nodes = nodes_[phase_];
-  auto size = phase_nodes.size();
+  int size = phase_nodes.size();
   auto depthp1 = depth + 1;
   if (size < depthp1) {
     phase_nodes.resize(depthp1);
@@ -808,7 +809,7 @@ void DepthTrackingExecutor::BatchedExecute(bool coarsened_execution, bool all_no
   }
 #endif
   static phmap::flat_hash_map<int, std::vector<LazyOpNode*>> func_to_node;
-  for (size_t k = 0; k <= phase_; ++k) {
+  for (int k = 0; k <= phase_; ++k) {
     auto& phase_nodes = nodes_[k];
     // std::cout << "[LZ] Phase " << k << " " << phase_nodes.size() << std::endl;
     for (size_t j = 0; j < phase_nodes.size(); ++j) {

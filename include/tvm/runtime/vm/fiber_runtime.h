@@ -36,7 +36,7 @@ typedef boost::fibers::fiber fiber_t;
 typedef boost::fibers::barrier barrier_t;
 typedef boost::fibers::fiber::id fiber_id_t;
 
-#define MAX_FIBER_COUNT 256
+#define MAX_FIBER_COUNT 1024
 
 enum FiberMainFiberTask {
   kDoNothing = 0,

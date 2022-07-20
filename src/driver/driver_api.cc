@@ -251,12 +251,16 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.push_back(tir::transform::FlattenBuffer());
   pass_list.push_back(tir::transform::BF16Legalize());
   pass_list.push_back(tir::transform::NarrowDataType(32));
-  pass_list.push_back(tir::transform::Simplify());
+  pass_list.push_back(tir::transform::Simplify(true));
 
   // Add user-defined phase-1 passes
   pass_list.insert(pass_list.end(), user_lower_phase1.begin(), user_lower_phase1.end());
 
   // PHASE 2
+
+  // pass_list.push_back(tir::transform::PrintCurrentIR("Before hoisting"));
+  pass_list.push_back(tir::transform::UnrollLoop(true));
+  // pass_list.push_back(tir::transform::PrintCurrentIR("after hoisting"));
 
   // <DietCode>
   //
@@ -280,11 +284,15 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   //
   // Therefore, we should let the vectorizer to run first before the partitioner
   // to check various constraints such as alignment.
+
   if (dmlc::GetEnv("DIETCODE_DO_LOOP_PARTITIONING", 0)) {
+    // pass_list.push_back(tir::transform::PrintCurrentIR("Before vectorization"));
     pass_list.push_back(tir::transform::VectorizeLoop(!disable_vectorize));
+    // pass_list.push_back(tir::transform::PrintCurrentIR("After vectorization"));
     if (!disable_loop_partition) {
       pass_list.push_back(tir::transform::LoopPartition());
     }
+    // pass_list.push_back(tir::transform::PrintCurrentIR("After partitioning"));
   } else {
     if (!disable_loop_partition) {
       pass_list.push_back(tir::transform::LoopPartition());

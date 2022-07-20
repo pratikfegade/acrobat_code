@@ -237,7 +237,12 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \brief Reset all execution state
    * \param seed: random seed.
    */
-  void ResetExecutionState(int seed = -1);
+  void ResetExecutionState(int seed = -1, bool release_memory = false);
+
+  /*!
+   * \brief Check if the GPu might be running out of memory
+   */
+  bool MightOOMSoon();
 
   /*!
    * \brief Get the current instance of the runtime.

@@ -582,10 +582,10 @@ class TIRLowererUnbatched : public AbstractTIRLowerer {
 using ExprSet = std::unordered_set<Expr, ObjectPtrHash, ObjectPtrEqual>;
 using PointsToMap = std::unordered_map<Var, ExprSet, ObjectPtrHash, ObjectPtrEqual>;
 
-struct MakeContiguousResult {
-  tir::PrimFunc contiguous_function;
-  Array<Integer> reuse_modes;
-};
+// struct MakeContiguousResult {
+//   tir::PrimFunc contiguous_function;
+//   Array<Integer> reuse_modes;
+// };
 
 // class TIRContiguousTensorMutator : public tir::StmtExprMutator {
 //  public:
@@ -717,9 +717,9 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
   TIRLowererResult LowerToTIR(const std::vector<Var>& flattened_free_vars,
                               const std::vector<Expr>& calls) final {
-    for (auto var : flattened_free_vars) {
-      std::cout << "[FREE_VAR] " << var->vid->name_hint << std::endl;
-    }
+    // for (auto var : flattened_free_vars) {
+    // std::cout << "[FREE_VAR] " << var->vid->name_hint << std::endl;
+    // }
 
     Map<Var, Bool> contiguous_tensors;
 
@@ -823,7 +823,7 @@ class TIRLowererBatched : public AbstractTIRLowerer {
         if (MapSet::Contains(contiguous_tensors, rvar) &&
             arg_mode == runtime::vm::DBBatchedArgMode::kScatter) {
           std::cout << "[ARG MODE]   Can be contiguous" << std::endl;
-          // prim_func_arg_modes.push_back(runtime::vm::DBBatchedArgMode::kContiguous);
+          prim_func_arg_modes.push_back(runtime::vm::DBBatchedArgMode::kContiguous);
         } else {
           prim_func_arg_modes.push_back(arg_mode);
           MapSet::Remove(contiguous_tensors, rvar);

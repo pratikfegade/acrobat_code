@@ -104,15 +104,15 @@ void CodeGenC::AddFunction(const PrimFunc& f) {
         PrintStorageScope(it->second, stream);
       }
 
-      PrintType(GetType(v), stream);
-      // std::stringstream ss;
-      // PrintType(GetType(v), ss);
-      // // std::cout << "TYPE " << ss.str() << std::endl;
-      // if (ss.str() == "float**") {
-      //   stream << "float * const * const";
-      // } else {
-      //   stream << ss.str();
-      // }
+      // PrintType(GetType(v), stream);
+      std::stringstream ss;
+      PrintType(GetType(v), ss);
+      // std::cout << "TYPE " << ss.str() << std::endl;
+      if (ss.str() == "float**") {
+        stream << "float * __restrict__ * ";
+      } else {
+        stream << ss.str();
+      }
 
       // Register handle data type
       // TODO(tvm-team): consider simply keep type info in the
@@ -154,6 +154,8 @@ void CodeGenC::PrintFuncPrefix() { stream << "void"; }
 void CodeGenC::PrintExtraAttrs(const PrimFunc& f) {}
 
 void CodeGenC::PrintFinalReturn() {}
+
+// vm_mod_fused_nn_dense_add_tanh_batched_kernel0
 
 std::string CodeGenC::Finish() {
   auto res = decl_stream.str() + stream.str();

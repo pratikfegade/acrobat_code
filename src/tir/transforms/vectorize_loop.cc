@@ -200,10 +200,12 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   }
 
   Stmt VisitStmt(const Stmt& stmt) final {
+    // std::cout << "Vectorizing " << var_->name_hint << std::endl;
     ICHECK(!need_scalarize_);
     Stmt ret = StmtMutator::VisitStmt(stmt);
     if (need_scalarize_) {
       need_scalarize_ = false;
+      // std::cout << "  Scalarizing because need scalarizing" << std::endl;
       return Scalarize(stmt);
     } else {
       return ret;
@@ -288,6 +290,7 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   PrimExpr VisitExpr_(const BroadcastNode* op) final {
     PrimExpr value = this->VisitExpr(op->value);
     if (value.dtype().lanes() != 1) {
+      // std::cout << "  Broadcast scalarize" << std::endl;
       need_scalarize_ = true;
       return GetRef<PrimExpr>(op);
     }
@@ -343,6 +346,7 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
   PrimExpr MutateIfThenElseExpr_(const CallNode* op) {
     PrimExpr cond = this->VisitExpr(op->args[0]);
     if (cond.dtype().is_vector()) {
+      // std::cout << "  ITE scalarize" << std::endl;
       need_scalarize_ = true;
       return GetRef<PrimExpr>(op);
     }
@@ -385,6 +389,7 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
       for (auto arg : op->args) {
         auto new_arg = this->VisitExpr(arg);
         if (new_arg.dtype().is_vector()) {
+          // std::cout << "  Call scalarize" << std::endl;
           need_scalarize_ = true;
           return GetRef<PrimExpr>(op);
         }
@@ -532,11 +537,12 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
     //
     // Therefore, upon seeing an IfThenElseNode, we directly scalarize its body
     // (i.e., transform the vectorized loop into the equivalent serial version).
-    LocalPadder local_padder;
-    if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) && dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1) &&
-        CanLocalPad(condition)) {
-      return local_padder(Scalarize(GetRef<Stmt>(op)));
-    }
+
+    // if (dmlc::GetEnv("DIETCODE_CODEGEN_OPT", 0) && dmlc::GetEnv("DIETCODE_DO_LOCAL_PADDING", 1)
+    // && CanLocalPad(condition)) {
+    // LocalPadder local_padder;
+    // return local_padder(Scalarize(GetRef<Stmt>(op)));
+    // }
 
     if (condition.dtype().is_vector()) {
       return Scalarize(GetRef<Stmt>(op));

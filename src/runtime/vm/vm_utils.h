@@ -202,6 +202,19 @@ inline std::string GetDLTensorInfo(const DLTensor* tensor) {
   return ss.str();
 }
 
+inline bool CheckEqualShape(const DLTensor& t1, const DLTensor& t2) {
+  if (t1.ndim != t2.ndim) {
+    return false;
+  }
+
+  for (int i = 0; i < t1.ndim; ++i) {
+    if (t1.shape[i] != t2.shape[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace vm
 }  // namespace runtime
 }  // namespace tvm

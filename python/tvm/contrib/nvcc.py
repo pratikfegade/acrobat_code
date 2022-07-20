@@ -180,7 +180,7 @@ def get_cuda_version(cuda_path):
 @tvm._ffi.register_func
 def tvm_callback_cuda_compile(code):
     """use nvcc to generate fatbin code for better optimization"""
-    ptx = compile_cuda(code, target_format="fatbin")
+    ptx = compile_cuda(code, target_format="fatbin", options=['--use_fast_math'])
     return ptx
 
 

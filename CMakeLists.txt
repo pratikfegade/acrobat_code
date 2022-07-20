@@ -564,6 +564,9 @@ if(USE_THREADS AND NOT BUILD_FOR_HEXAGON)
   target_link_libraries(tvm_runtime PUBLIC Threads::Threads)
 endif()
 
+find_library(Z3_LIBRARY z3 HINTS /usr/lib/x86_64-linux-gnu/)
+target_link_libraries(tvm PRIVATE ${Z3_LIBRARY})
+
 target_link_libraries(tvm PRIVATE ${TVM_LINKER_LIBS} ${TVM_RUNTIME_LINKER_LIBS})
 target_link_libraries(tvm_runtime PRIVATE ${TVM_RUNTIME_LINKER_LIBS})
 
