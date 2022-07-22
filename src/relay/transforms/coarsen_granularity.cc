@@ -819,10 +819,10 @@ class TIRLowererBatched : public AbstractTIRLowerer {
 
       if (arg_mode != runtime::vm::DBBatchedArgMode::kIgnore) {
         prim_func_params.push_back(param);
-        std::cout << "[ARG MODE] " << rvar->vid->name_hint << " " << arg_mode << std::endl;
+        // std::cout << "[ARG MODE] " << rvar->vid->name_hint << " " << arg_mode << std::endl;
         if (MapSet::Contains(contiguous_tensors, rvar) &&
             arg_mode == runtime::vm::DBBatchedArgMode::kScatter) {
-          std::cout << "[ARG MODE]   Can be contiguous" << std::endl;
+          // std::cout << "[ARG MODE]   Can be contiguous" << std::endl;
           prim_func_arg_modes.push_back(runtime::vm::DBBatchedArgMode::kContiguous);
         } else {
           prim_func_arg_modes.push_back(arg_mode);

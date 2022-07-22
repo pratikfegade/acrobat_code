@@ -1363,7 +1363,7 @@ void VMCompiler::Lower(IRModule mod, TargetMap targets, tvm::Target target_host)
         }
         exec_->prim_func_arg_access_mode[index] = std::move(access_modes_vec);
 
-        if (true) {
+        if (false) {
           std::cout << "[COMP]   " << index << " " << pair.first->name_hint
                     << "  ArgAccessModes: [";
           for (size_t i = 0; i < exec_->prim_func_arg_access_mode[index].size(); ++i) {
@@ -1534,6 +1534,8 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::FuseOps());
 
+  pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
+
   // Do layout rewrite for auto-scheduler.
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
   // if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
@@ -1612,7 +1614,7 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

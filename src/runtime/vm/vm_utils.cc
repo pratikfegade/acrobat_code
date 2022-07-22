@@ -446,7 +446,7 @@ void InvokePackedFnBatchedUnrolled(const size_t func_idx, const PackedFunc& func
   runtime::TVMArgsSetter setter(values.data(), codes.data());
   setter(0, batch_size);
   if (print) {
-    std::cout << "[VMU]    BatchSize 0 " << batch_size << std::endl;
+    std::cout << "[VMU]    BatchSize 0 " << batch_size << " " << func_idx << std::endl;
   }
   int ctr = 1;
   for (Index i = 0; i < arity; ++i) {

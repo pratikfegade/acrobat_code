@@ -261,8 +261,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     vm_shared_state.packed_funcs_[func_idx].CallPacked(TVMArgs(values, codes, arity), &rv);
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
-      auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
-      DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+      // auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
+      // DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
       VMDBProfiler::ProfileDeviceStopCall();
       VMDBProfiler::ProfileHostStartCall("scheduling");
     }
@@ -428,8 +428,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
 
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
-      auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
-      DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+      // auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
+      // DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
       VMDBProfiler::ProfileHostStopCall();
       VMDBProfiler::ProfileDeviceStartCall("bkernel_" + std::to_string(batched_func_idx));
     }
@@ -438,8 +438,8 @@ void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, cons
     vm_shared_state.packed_funcs_[batched_func_idx].CallPacked(TVMArgs(values, codes, ctr), &rv);
 #ifdef DB_PROFILING
     if (VMDBProfiler::DoProfile()) {
-      auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
-      DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
+      // auto& gpu_device = executor.vm_shared_state_->devices_[executor.accelerator_device_];
+      // DeviceAPI::Get(gpu_device)->StreamSync(gpu_device, nullptr);
       VMDBProfiler::ProfileDeviceStopCall();
       VMDBProfiler::ProfileHostStartCall("scheduling");
     }

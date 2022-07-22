@@ -428,7 +428,7 @@ void DynBatchRuntime<ExecutorType, TensorType>::LoadExecutable(Executable* exec)
       }
     }
 
-    bool print = true;
+    bool print = false;
     if (print) {
       if (batched_execution_) {
         std::cout << "[VM] Fun " << packed_index << " " << packed_name;

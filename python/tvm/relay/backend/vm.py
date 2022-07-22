@@ -47,6 +47,7 @@ def create_workflow_configs(lazy_execution=False,
                             model_name="model",
                             generate_aot_code=False,
                             consider_program_phases=False,
+                            fuse_ops=True,
                             opt_level=3):
     config = {
         "relay.db_coarsen_granularity": coarsened_execution,
@@ -61,8 +62,12 @@ def create_workflow_configs(lazy_execution=False,
         "relay.db_perform_static_scheduling": perform_static_scheduling,
         "relay.db_generate_aot_code": generate_aot_code,
         "relay.db_model_name": model_name,
-        "relay.db_consider_program_phase": consider_program_phases
-   }
+        "relay.db_consider_program_phase": consider_program_phases,
+    }
+
+    if not fuse_ops:
+        config["relay.FuseOps.max_depth"] = 1
+
     execution_options = tvm.runtime.vm.create_vm_execution_options(
         coarsened_execution=coarsened_execution,
         lazy_execution=lazy_execution,
