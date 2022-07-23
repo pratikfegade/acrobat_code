@@ -93,6 +93,9 @@ def create_pgo_workflow_configs(pass_context, execution_options):
         "relay.db_generate_aot_code": False,
         "relay.db_model_name": pass_context.config["relay.db_model_name"],
     }
+    if "relay.FuseOps.max_depth" in pass_context.config:
+        config["relay.FuseOps.max_depth"] = pass_context.config["relay.FuseOps.max_depth"]
+
     pass_context = tvm.transform.PassContext(opt_level=pass_context.opt_level, config=config)
     return pass_context, execution_options.create_pgo_execution_options()
 
