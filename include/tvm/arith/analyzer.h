@@ -33,7 +33,11 @@
 #include <unordered_map>
 #include <vector>
 
+// #define USE_Z3_ANALYZER
+
+#ifdef USE_Z3_ANALYZER
 #include "z3_analyzer.h"
+#endif
 
 namespace tvm {
 /*! \brief namespace of arithmetic analysis. */
@@ -403,8 +407,10 @@ class TVM_DLL Analyzer {
   CanonicalSimplifier canonical_simplify;
   /*! \brief sub-analyzer: int set */
   IntSetAnalyzer int_set;
+#ifdef USE_Z3_ANALYZER
   /*! \brief sub-analyzer: Z3 */
   Z3Analyzer z3_analyzer;
+#endif
   /*! \brief constructor */
   Analyzer();
   /*!

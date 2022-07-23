@@ -22,6 +22,7 @@
  * \file driver_api.cc
  */
 #include <dmlc/thread_local.h>
+#include <tvm/arith/analyzer.h>
 #include <tvm/driver/driver_api.h>
 #include <tvm/ir/transform.h>
 #include <tvm/relay/executor.h>
@@ -251,7 +252,12 @@ Array<tvm::transform::Pass> CreatePassList(bool disable_loop_partition) {
   pass_list.push_back(tir::transform::FlattenBuffer());
   pass_list.push_back(tir::transform::BF16Legalize());
   pass_list.push_back(tir::transform::NarrowDataType(32));
+
+#ifdef USE_Z3_ANALYZER
   pass_list.push_back(tir::transform::Simplify(true));
+#else
+  pass_list.push_back(tir::transform::Simplify());
+#endif
 
   // Add user-defined phase-1 passes
   pass_list.insert(pass_list.end(), user_lower_phase1.begin(), user_lower_phase1.end());

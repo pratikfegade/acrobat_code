@@ -44,9 +44,9 @@ void Analyzer::Bind(const Var& var, const PrimExpr& expr, bool allow_override) {
   this->modular_set.Update(var, this->modular_set(new_expr), allow_override);
   this->rewrite_simplify.Update(var, new_expr, allow_override);
   this->canonical_simplify.Update(var, new_expr, allow_override);
-  if (!dmlc::GetEnv("TVM_NO_Z3", 0)) {
-    this->z3_analyzer.Update(var, new_expr, false);
-  }
+#ifdef USE_Z3_ANALYZER
+  this->z3_analyzer.Update(var, new_expr, false);
+#endif
 }
 
 void Analyzer::Bind(const Var& var, const Range& range, bool allow_override) {
@@ -56,9 +56,9 @@ void Analyzer::Bind(const Var& var, const Range& range, bool allow_override) {
   } else {
     this->const_int_bound.Bind(var, range, allow_override);
   }
-  if (!dmlc::GetEnv("TVM_NO_Z3", 0)) {
-    this->z3_analyzer.Update(var, range, false);
-  }
+#ifdef USE_Z3_ANALYZER
+  this->z3_analyzer.Update(var, range, false);
+#endif
   // skip modular_set
   // skip rewrite simplify
 }
@@ -94,11 +94,11 @@ bool Analyzer::CanProveGreaterEqual(const PrimExpr& expr, int64_t lower_bound) {
   }
   auto bd = this->const_int_bound(this->rewrite_simplify(expr));
   if (bd->min_value >= lower_bound) return true;
-  if (!dmlc::GetEnv("TVM_NO_Z3", 0)) {
-    return z3_analyzer.CanProve(expr >= IntImm(DataType::Int(64), lower_bound));
-  } else {
-    return false;
-  }
+#ifdef USE_Z3_ANALYZER
+  return z3_analyzer.CanProve(expr >= IntImm(DataType::Int(64), lower_bound));
+#else
+  return false;
+#endif
 }
 
 bool Analyzer::CanProveLess(const PrimExpr& expr, int64_t upper_bound) {
@@ -107,11 +107,11 @@ bool Analyzer::CanProveLess(const PrimExpr& expr, int64_t upper_bound) {
   }
   auto bd = this->const_int_bound(this->rewrite_simplify(expr));
   if (bd->max_value < upper_bound) return true;
-  if (!dmlc::GetEnv("TVM_NO_Z3", 0)) {
-    return z3_analyzer.CanProve(expr < IntImm(DataType::Int(64), upper_bound));
-  } else {
-    return false;
-  }
+#ifdef USE_Z3_ANALYZER
+  return z3_analyzer.CanProve(expr < IntImm(DataType::Int(64), upper_bound));
+#else
+  return false;
+#endif
 }
 
 bool Analyzer::CanProveEqual(const PrimExpr& lhs, const PrimExpr& rhs) {
@@ -133,11 +133,11 @@ bool Analyzer::CanProve(const PrimExpr& expr) {
   if (const auto* ptr = res.as<IntImmNode>()) {
     return ptr->value != 0;
   }
-  if (!dmlc::GetEnv("TVM_NO_Z3", 0)) {
-    return z3_analyzer.CanProve(expr);
-  } else {
-    return false;
-  }
+#ifdef USE_Z3_ANALYZER
+  return z3_analyzer.CanProve(expr);
+#else
+  return false;
+#endif
 }
 
 PrimExpr Analyzer::Simplify(const PrimExpr& expr, int steps) {
