@@ -334,6 +334,15 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
       bool print = false;
       // bool print = (unique_name == "vm_mod_fused_zeros");
 
+      if (fn_inputs.size() == 0) {
+        Array<Bool> true_taints;
+        for (size_t i = 0; i < tensor_outs.size(); ++i) {
+          true_taints.push_back(Bool(true));
+        }
+        model_parameter_taints = true_taints;
+        std::cout << "[TCC] TOTOTOTOTOTOTOTO " << unique_name << std::endl;
+      }
+
       if (print) {
         std::cout << "[TCC] ParamTaint " << unique_name << " " << model_parameter_taints
                   << std::endl;
