@@ -592,7 +592,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
         continue;
       }
       if (instr.op == Opcode::Invoke && (instr.packed_index == DB_SET_PHASE_INDEX ||
-                                         instr.packed_index == DB_RANDOM_UNIFORM_INDEX)) {
+                                         instr.packed_index == DB_RANDOM_UNIFORM_INDEX ||
+                                         instr.packed_index == DB_GHOST_OP_INDEX)) {
         used_regs[instr.dst] = true;
       }
       for (auto reg : Instruction::ReadRegisters(instr)) {
@@ -764,6 +765,14 @@ class VMAOTFunctionCompiler : SourcePrinter {
                   stream_ << "depth = 0;\n";
                 }
                 first_phase_change = false;
+              }
+            } else if (instr.packed_index == DB_GHOST_OP_INDEX) {
+              if (UseDepthTrackingExecutor()) {
+                this->PrintIndent(stream_);
+                stream_ << "++depth;\n";
+              } else {
+                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << DB_GHOST_OP_INDEX
+                        << ", nullptr, 0);\n";
               }
             } else {
               auto fold_reduction_op = GetFoldReductionOp(i);
@@ -953,13 +962,8 @@ class VMAOTFunctionCompiler : SourcePrinter {
                         << instr.packed_index << depth_str << ", " << args_vec << ".data(), "
                         << flattened_args.size() << ");\n";
               } else {
-                if (LazyExecution()) {
-                  stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                          << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
-                } else {
-                  stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
-                          << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
-                }
+                stream_ << GetRuntimeType() << "::Current()->InvokePacked(" << instr.packed_index
+                        << ", " << args_vec << ".data(), " << flattened_args.size() << ");\n";
               }
 
               // if (IsOpOutputScalar(i) && GetScalarOp(i) == nullptr) {
@@ -1598,11 +1602,11 @@ void VMAOTCompiler::EmitUtilFunctions(
   if (invoke_reduce_sum_types.size() > 0) {
     auto list_append_func =
         "template <class A>\n"
-        "std::shared_ptr<List<A>> append(std::shared_ptr<List<A>> list, A value) {\n"
-        "  auto new_node = std::static_pointer_cast<List<A>>(std::make_shared<Cons<A>>());\n"
+        "List<A>* append(List<A>* list, A value) {\n"
+        "  auto new_node = static_cast<List<A>*>(new Cons<A>());\n"
         "  new_node->tag = LIST_CONS_TAG;\n"
-        "  static_cast<Cons<A>*>(new_node.get())->field_0 = value;\n"
-        "  static_cast<Cons<A>*>(new_node.get())->field_1 = list;\n"
+        "  static_cast<Cons<A>*>(new_node)->field_0 = value;\n"
+        "  static_cast<Cons<A>*>(new_node)->field_1 = list;\n"
         "  return new_node;\n"
         "}\n";
     os << list_append_func << "\n" << std::endl;
@@ -1612,9 +1616,9 @@ void VMAOTCompiler::EmitUtilFunctions(
     std::stringstream ss;
     bool use_depth = UseDepthTrackingExecutor();
     if (use_depth) {
-      ss << "__TT__ invoke_reduce_sum(std::shared_ptr<List<__TT__>> list, int& depth) {\n";
+      ss << "__TT__ invoke_reduce_sum(List<__TT__>* list, int& depth) {\n";
     } else {
-      ss << "__TT__ invoke_reduce_sum(std::shared_ptr<List<__TT__>> list) {\n";
+      ss << "__TT__ invoke_reduce_sum(List<__TT__>* list) {\n";
     }
     ss << "  auto current = list;\n";
     ss << "  std::vector<__TT__> args;\n";
@@ -1622,8 +1626,8 @@ void VMAOTCompiler::EmitUtilFunctions(
     ss << "    if (current->tag == LIST_NIL_TAG) {\n";
     ss << "      break;\n";
     ss << "    }\n";
-    ss << "    args.push_back(static_cast<Cons<__TT__>*>(current.get())->field_0);\n";
-    ss << "    current = static_cast<Cons<__TT__>*>(current.get())->field_1;\n";
+    ss << "    args.push_back(static_cast<Cons<__TT__>*>(current)->field_0);\n";
+    ss << "    current = static_cast<Cons<__TT__>*>(current)->field_1;\n";
     ss << "  }\n";
     ss << "\n";
     ss << "  auto shape_data0 = Arena::Current()->allocate_<int64_t>(__ND__);\n";
@@ -1893,12 +1897,17 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
         "runner, bool profiling) {\n";
   os << "  int w_iters = dmlc::GetEnv(\"DB_WARM_UP_ITERATIONS\", 1);\n";
   os << "  int a_iters = dmlc::GetEnv(\"DB_MEASURE_ITERATIONS\", 1);\n";
+  os << "  int cuda_profiling = dmlc::GetEnv(\"DB_CUDA_PROFILE\", 0);\n";
   os << "  for (int i = 0; i < w_iters; ++i) {\n";
   os << "    runner();\n";
   os << "  }\n";
 
   os << "  if (profiling) {\n";
   os << "    VMDBProfiler::ProfileStart();\n";
+  os << "  }\n";
+
+  os << "  if (cuda_profiling) {\n";
+  os << "    DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->StartCUDAProfiler();\n";
   os << "  }\n";
 
   os << "  float cg_gen_time = 0.0;\n";
@@ -1908,6 +1917,10 @@ void VMAOTCompiler::EmitHarnessFunctions(std::ostream& os) {
   os << "    cg_gen_time += p.first;\n";
   os << "    cg_exe_time += p.second;\n";
   os << "  }\n\n";
+
+  os << "  if (cuda_profiling) {\n";
+  os << "    DynBatchRuntime<DepthTrackingExecutor, DLTensor*>::Current()->StopCUDAProfiler();\n";
+  os << "  }\n";
 
   os << "  if (profiling) {\n";
   os << "    VMDBProfiler::ProfileStop();\n";

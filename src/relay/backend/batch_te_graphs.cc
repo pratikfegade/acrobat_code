@@ -198,7 +198,7 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     }
 
     Array<te::Tensor> this_new_inputs;
-    for (size_t j = 0; j < static_batch_size; ++j) {
+    for (int j = 0; j < static_batch_size; ++j) {
       this_new_inputs.push_back(te::placeholder(input_op->shape, input_op->dtype,
                                                 input_op->name + "_sb" + std::to_string(j)));
     }
@@ -242,16 +242,24 @@ std::pair<Array<te::Tensor>, Array<te::Tensor>> StaticBatchifyTEGraph(
     } else if (auto cop = op.as<te::ComputeOpNode>()) {
       te::IterVar batch_iv = te::IterVar(Range(0, static_batch_size),
                                          tir::Var("sb_iv", DataType::Int(32)), tir::kDataPar);
-      Array<te::IterVar> new_axis;
-      new_axis.push_back(batch_iv);
-      new_axis.push_back_all(cop->axis);
-
       BatchifyRewriter rewriter(rewritten, batch_iv);
       Array<PrimExpr> new_body;
+      bool body_changed = false;
       for (auto e : cop->body) {
-        new_body.push_back(rewriter(e));
+        auto new_e = rewriter(e);
+        if (!e.same_as(new_e)) {
+          body_changed = true;
+        }
+        new_body.push_back(new_e);
       }
-      batchified_op = te::ComputeOp(cop->name, cop->tag, cop->attrs, new_axis, new_body);
+      if (!body_changed) {
+        batchified_op = op;
+      } else {
+        Array<te::IterVar> new_axis;
+        new_axis.push_back(batch_iv);
+        new_axis.push_back_all(cop->axis);
+        batchified_op = te::ComputeOp(cop->name, cop->tag, cop->attrs, new_axis, new_body);
+      }
     } else {
       ICHECK(false) << "Op " << op << " not supported for batchifying";
     }

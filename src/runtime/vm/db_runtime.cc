@@ -22,6 +22,7 @@
  * \brief The Relay virtual machine runtime.
  */
 
+#include <cuda_profiler_api.h>
 #include <cuda_runtime.h>
 #include <dmlc/memory_io.h>
 #include <tvm/runtime/container/adt.h>
@@ -203,6 +204,28 @@ NDArray DynBatchRuntime<ExecutorType, TensorType>::ReshapeTensor(NDArray& tensor
 }
 
 template <typename ExecutorType, typename TensorType>
+DLTensor* DynBatchRuntime<ExecutorType, TensorType>::ReshapeTensor(DLTensor* tensor_arr,
+                                                                   const DLTensor* shape_tensor) {
+  // Read the shape from shape tensor
+  ICHECK_EQ(shape_tensor->dtype.code, 0u);
+  ICHECK_EQ(shape_tensor->dtype.bits, 64u);
+  int64_t* dims = reinterpret_cast<int64_t*>(shape_tensor->data);
+  int64_t ndim = shape_tensor->shape[0];
+
+  DLTensor* result = Arena::Current()->allocate_<DLTensor>();
+  {
+    result->device = tensor_arr->device;
+    result->strides = nullptr;
+    result->ndim = ndim;
+    result->data = tensor_arr->data;
+    result->dtype = tensor_arr->dtype;
+    result->shape = dims;
+    result->byte_offset = tensor_arr->byte_offset;
+  }
+  return result;
+}
+
+template <typename ExecutorType, typename TensorType>
 NDArray DynBatchRuntime<ExecutorType, TensorType>::ShapeOf(const NDArray& input_array) {
   int ndim = input_array->ndim;
   auto out_tensor =
@@ -234,6 +257,16 @@ bool DynBatchRuntime<ExecutorType, TensorType>::MightOOMSoon() {
   size_t free = 0;
   cudaMemGetInfo(&free, &total);
   return static_cast<double>(free) < 0.3 * static_cast<double>(total);
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::StartCUDAProfiler() {
+  cudaProfilerStart();
+}
+
+template <typename ExecutorType, typename TensorType>
+void DynBatchRuntime<ExecutorType, TensorType>::StopCUDAProfiler() {
+  cudaProfilerStop();
 }
 
 template <typename ExecutorType, typename TensorType>

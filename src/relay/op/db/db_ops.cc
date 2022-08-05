@@ -26,7 +26,7 @@
 namespace tvm {
 namespace relay {
 
-////////////////////////////// Dynamic batching
+////////////////////////////// Dynamic batching set phase
 bool DBSetPhaseRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
                    const TypeReporter& reporter) {
   reporter->Assign(types[0], TensorType({}, DataType::Int(32), true));
@@ -52,6 +52,35 @@ RELAY_REGISTER_OP("db.set_phase")
 
 const Op& GetDBSetPhaseOp() {
   static auto op = Op::Get("db.set_phase");
+  return op;
+}
+
+////////////////////////////// Dynamic batching ghost op
+bool DBGhostOpRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
+                  const TypeReporter& reporter) {
+  reporter->Assign(types[0], VoidType());
+  return true;
+}
+
+Expr MakeDBGhostOp() {
+  static const Op& op = Op::Get("db.ghost_op");
+  auto res = Call(op, {}, Attrs(), {});
+  res->checked_type_ = VoidType();
+  return res;
+}
+
+TVM_REGISTER_GLOBAL("relay.op.db._make.ghost_op").set_body_typed(MakeDBGhostOp);
+
+RELAY_REGISTER_OP("db.ghost_op")
+    .describe(
+        R"doc(Inform compiler/runtime of a ghost op for dynamic batching.)doc" TVM_ADD_FILELINE)
+    .set_num_inputs(0)
+    .set_attr<TOpPattern>("TOpPattern", kOpaque)
+    .set_attr<TOpIsStateful>("TOpIsStateful", true)
+    .add_type_rel("DBGhostOp", DBGhostOpRel);
+
+const Op& GetDBGhostOpOp() {
+  static auto op = Op::Get("db.ghost_op");
   return op;
 }
 

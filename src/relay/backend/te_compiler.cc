@@ -1292,12 +1292,12 @@ Function PerformStaticBatching(const IRModule& module, ProcessFn process_fn, Str
   Phase1 phase1(module);
   phase1(RemoveOnDeviceCalls(func));
   // std::cout << "[TPGN] Found Groups" << std::endl;
-  for (auto group : phase1.hfuse_groups_) {
-    // std::cout << "[TPGN]  New Group" << std::endl;
-    // for (auto var : group.vars) {
-    //   std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
-    // }
-  }
+  // for (auto group : phase1.hfuse_groups_) {
+  //   std::cout << "[TPGN]  New Group" << std::endl;
+  //   for (auto var : group.vars) {
+  //     std::cout << "[TPGN]   " << var->vid->name_hint << std::endl;
+  //   }
+  // }
 
   Phase2 phase2(module, process_fn, module_name, compiler, host_se_scope, phase1.hfuse_groups_);
   func = Downcast<Function>(phase2(func));
@@ -1341,7 +1341,7 @@ Pass LowerTensorExpr(const String& module_name, TECompiler compiler, ProcessFn p
                                                           PassContext ctx) {
         LowerTensorExprMutator lower_te(module, process_fn, module_name, compiler, host_se_scope);
         auto func_name = func1->GetAttr<String>(tvm::tir::attr::kDBFunctionName);
-        bool print = false;  //(func_name == "mvrnn");
+        bool print = false;  //(func_name == "gru_cell");
         auto func2 = Downcast<Function>(LiftLetsOutOfValues(func1));
         if (print) {
           std::cout << "[TEC] Lowering\n" << PrettyPrint(func2) << std::endl;

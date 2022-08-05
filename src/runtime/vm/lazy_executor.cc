@@ -155,25 +155,55 @@ void LazyAllocationLazyExecutor::Execute() {
   nodes_.resize(MAX_PROGRAM_PHASES);
 }
 
+#define CEILMULT(a, b) (((a + b - 1) / (b)) * (b))
+
 template <typename ConcreteExecutorType>
 void ExecuteReduceSum(const ConcreteExecutorType& executor,
                       const std::vector<LazyOpNode*>& func_nodes) {
-  static std::vector<NDArray> arg_holder;
-
   int num_nodes = func_nodes.size();
-  void** output_raw_ptrs = static_cast<void**>(Arena::Current()->allocate_<void*>(num_nodes));
-  int* input_indices = static_cast<int*>(Arena::Current()->allocate_<int>(num_nodes + 1));
-  std::vector<void*> input_raw_ptrs;
-  input_raw_ptrs.reserve(num_nodes * 2);
 
-  auto allocator = executor.vm_shared_state_->allocators_[executor.accelerator_device_];
+  int num_inputs = 0;
+#pragma GCC ivdep
+  for (int i = 0; i < num_nodes; ++i) {
+    num_inputs += func_nodes[i]->args_.size() - 1;
+  }
+
   auto& first_output = *(func_nodes[0]->args_.back());
   size_t output_size = GetDataSize(first_output);
-  void* output_start = allocator->ArenaAlloc(num_nodes * output_size, 256, first_output.dtype).data;
-  auto& accelerator_device = first_output.device;
 
-  int ctr = 0;
+  int input_ptrs_bytes = CEILMULT(num_inputs * sizeof(void*), 256);
+  int input_indices_bytes = CEILMULT((num_nodes + 1) * sizeof(void*), 256);
+  int output_ptrs_bytes = CEILMULT(num_nodes * sizeof(void*), 256);
+  int output_starts_bytes = CEILMULT(num_nodes * output_size, 256);
+
+  int host_memory_bytes = input_ptrs_bytes + input_indices_bytes + output_ptrs_bytes;
+  char* raw_host_memory = Arena::Current()->allocate_<char>(host_memory_bytes);
+
+  void** input_raw_ptrs = reinterpret_cast<void**>(raw_host_memory);
+  int* input_indices =
+      reinterpret_cast<int*>(reinterpret_cast<char*>(input_raw_ptrs) + input_ptrs_bytes);
+  void** output_raw_ptrs =
+      reinterpret_cast<void**>(reinterpret_cast<char*>(input_indices) + input_indices_bytes);
+
+  auto& allocator = executor.vm_shared_state_->allocators_[executor.accelerator_device_];
+
+  int device_memory_bytes =
+      input_ptrs_bytes + input_indices_bytes + output_ptrs_bytes + output_starts_bytes;
+  auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
+  char* raw_device_memory =
+      reinterpret_cast<char*>(allocator->ArenaAlloc(device_memory_bytes, 256, dtype).data);
+
+  void* input_ptrs_device = reinterpret_cast<void*>(raw_device_memory);
+  void* input_indices_device =
+      reinterpret_cast<void*>(reinterpret_cast<char*>(input_ptrs_device) + input_ptrs_bytes);
+  void* output_ptrs_device =
+      reinterpret_cast<void*>(reinterpret_cast<char*>(input_indices_device) + input_indices_bytes);
+  void* output_start =
+      reinterpret_cast<void*>(reinterpret_cast<char*>(output_ptrs_device) + output_ptrs_bytes);
+
   input_indices[0] = 0;
+  int ctr = 0;
+#pragma GCC ivdep
   for (int i = 0; i < num_nodes; ++i) {
     auto& node = *(func_nodes[i]);
     int num_reduce_tensors = node.args_.size() - 1;
@@ -181,9 +211,8 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
 #ifdef DEBUG_CHECKS
       ICHECK(node.args_[j]->data != nullptr);
 #endif
-      input_raw_ptrs.push_back(node.args_[j]->data);
+      input_raw_ptrs[ctr++] = node.args_[j]->data;
     }
-    ctr += num_reduce_tensors;
 
     auto output_data_ptr = static_cast<char*>(output_start) + output_size;
     output_raw_ptrs[i] = output_data_ptr;
@@ -191,20 +220,12 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
     input_indices[i + 1] = input_indices[i] + num_reduce_tensors;
   }
 
-  auto num_inputs = input_raw_ptrs.size();
 #ifdef DEBUG_CHECKS
-  ICHECK_EQ(num_inputs, ctr);
+  ICHECK_EQ(input_raw_ptrs.size(), num_inputs);
 #endif
 
-  auto dtype = DLDataType{kDLOpaqueHandle, 8 * sizeof(void*), 1};
-  void* input_ptrs_device = allocator->ArenaAlloc(num_inputs * sizeof(void*), 256, dtype).data;
-  void* output_ptrs_device = allocator->ArenaAlloc(num_nodes * sizeof(void*), 256, dtype).data;
-  void* input_indices_device =
-      allocator->ArenaAlloc((num_nodes + 1) * sizeof(void*), 256, dtype).data;
-
-  ArrayCopyFromBytesAsync(input_ptrs_device, &(input_raw_ptrs[0]), sizeof(void*) * num_inputs);
-  ArrayCopyFromBytesAsync(output_ptrs_device, output_raw_ptrs, sizeof(void*) * num_nodes);
-  ArrayCopyFromBytesAsync(input_indices_device, input_indices, sizeof(void*) * (num_nodes + 1));
+  ArrayCopyFromBytesAsync(input_ptrs_device, input_raw_ptrs,
+                          input_ptrs_bytes + input_indices_bytes + output_ptrs_bytes);
 
 #ifdef DB_PROFILING
   if (VMDBProfiler::DoProfile()) {
@@ -223,6 +244,8 @@ void ExecuteReduceSum(const ConcreteExecutorType& executor,
   }
 #endif
 }
+
+#undef CEILMULT
 
 template <typename ConcreteExecutorType>
 void LazyAllocationExecuteOpNodeBatch(const ConcreteExecutorType& executor, const Index func_idx,

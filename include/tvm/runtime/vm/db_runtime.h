@@ -186,6 +186,7 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \return The reshaped tensor object
    */
   NDArray ReshapeTensor(NDArray& tensor_arr, const NDArray& shape_tensor);
+  DLTensor* ReshapeTensor(DLTensor* tensor_arr, const DLTensor* shape_tensor);
 
   /*!
    * \brief Obtain the shape of a tensor.
@@ -243,6 +244,16 @@ class DynBatchRuntime : public runtime::ModuleNode {
    * \brief Check if the GPu might be running out of memory
    */
   bool MightOOMSoon();
+
+  /*!
+   * \brief Start CUDA profiler
+   */
+  void StartCUDAProfiler();
+
+  /*!
+   * \brief Stop CUDA profiler
+   */
+  void StopCUDAProfiler();
 
   /*!
    * \brief Get the current instance of the runtime.

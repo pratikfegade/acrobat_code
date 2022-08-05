@@ -808,6 +808,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       ICHECK_EQ(call_node->args.size(), 1);
       emit_db_inbuilt_op(DB_SET_PHASE_INDEX, call_node, 1);
       return;
+    } else if (call_node->op == GetDBGhostOpOp()) {
+      ICHECK_EQ(call_node->args.size(), 0);
+      emit_db_inbuilt_op(DB_GHOST_OP_INDEX, call_node, 0);
+      return;
     }
 
     // Now we handle the case in which we are using an opaque operator used to define a
@@ -1534,8 +1538,6 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
 
   pass_seqs.push_back(transform::FuseOps());
 
-  pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, true));
-
   // Do layout rewrite for auto-scheduler.
   // pass_seqs.push_back(transform::PrintCurrentIR("FuseOps", true, false));
   // if (backend::IsAutoSchedulerEnabled() && config_->optional_homogeneous_target.defined()) {
@@ -1609,12 +1611,19 @@ IRModule VMCompiler::OptimizeModuleImpl(IRModule mod) {
     pass_seqs.push_back(transform::ComputePrimFuncAccessModes());
   }
 
+  if (pass_ctx->GetConfig<Bool>("relay.db_use_depth_tracking", Bool(false)).value() &&
+      pass_ctx->GetConfig<Bool>("relay.db_consider_program_phase", Bool(false)).value()) {
+    // pass_seqs.push_back(transform::PrintCurrentIR("Before Ghost", true, false));
+    pass_seqs.push_back(transform::AddGhostOpsInIfElse());
+    // pass_seqs.push_back(transform::PrintCurrentIR("After Ghost", true, false));
+  }
+
   if (true) {
     // pass_seqs.push_back(transform::InferType());
     // pass_seqs.push_back(transform::TensorDependentControlIdentifierPass());
   }
 
-  // pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, true));
+  pass_seqs.push_back(transform::PrintCurrentIR("Coarsen", true, false));
   transform::Sequential seq(pass_seqs);
   tvm::With<relay::transform::PassContext> ctx(pass_ctx);
   if (config_->optional_homogeneous_target.defined()) {

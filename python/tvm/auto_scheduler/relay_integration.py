@@ -358,7 +358,7 @@ def auto_schedule_topi(func_name, outs, weight = 1, vmap={}):
         None in the tracing mode so that the fallback topi schedule will be used.
     """
 
-    # print("Auto schedule TOPI")
+    # print("Auto schedule TOPI", weight)
     # pylint: disable=import-outside-toplevel
     from tvm.auto_scheduler.measure import (
         prepare_input_map,

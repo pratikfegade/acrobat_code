@@ -159,6 +159,14 @@ TVM_DLL Pass LowerMapToTIR(bool batched_exection, bool scattered_kernels);
 TVM_DLL Pass CoarsenPrimitiveFuncGranularity(bool batched_exection, bool scattered_kernels);
 
 /*!
+ * \brief Add ghost ops to increment depth to better schedule when
+ * using depth tracking
+ *
+ * \return The pass.
+ */
+TVM_DLL Pass AddGhostOpsInIfElse();
+
+/*!
  * \brief Compute prim func access modes for all prim funcs
  *
  * \return The pass.

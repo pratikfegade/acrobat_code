@@ -40,6 +40,12 @@ const Op& GetDBSetPhaseOp();
 /*! \brief Create a call to the phase change op. */
 Expr MakeDBSetPhase(const Expr& phase);
 
+/*! \brief Returns the "phase change" operator. */
+const Op& GetDBGhostOpOp();
+
+/*! \brief Create a call to the phase change op. */
+Expr MakeDBGhostOp();
+
 }  // namespace relay
 }  // namespace tvm
 

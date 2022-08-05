@@ -5,7 +5,7 @@
 
 #define CEIL(a, b) (((a) + (b)-1) / (b))
 #define FLOOR(a, b) ((a) / (b))
-#define REDUCE_SUM_THREAD_COUNT 256
+#define REDUCE_SUM_THREAD_COUNT 512
 #define CONCAT_COPY_THREAD_COUNT 1024
 
 __global__ void reduce_sum(float** input, float** output, int* input_indices, int batch_size,
@@ -15,20 +15,21 @@ __global__ void reduce_sum(float** input, float** output, int* input_indices, in
 
   int input_start = input_indices[b];
   int input_end = input_indices[b + 1];
+  float* output_b = output[b];
   for (int io = 0; io < FLOOR(hidden_size, REDUCE_SUM_THREAD_COUNT); ++io) {
     int i = io * REDUCE_SUM_THREAD_COUNT + ii;
-    output[b][i] = 0;
+    output_b[i] = 0;
     for (int input_index = input_start; input_index < input_end; ++input_index) {
-      output[b][i] += input[input_index][i];
+      output_b[i] += input[input_index][i];
     }
   }
 
   int io = CEIL(hidden_size, REDUCE_SUM_THREAD_COUNT) - 1;
   int i = io * REDUCE_SUM_THREAD_COUNT + ii;
   if (i < hidden_size) {
-    output[b][i] = 0;
+    output_b[i] = 0;
     for (int input_index = input_start; input_index < input_end; ++input_index) {
-      output[b][i] += input[input_index][i];
+      output_b[i] += input[input_index][i];
     }
   }
 }

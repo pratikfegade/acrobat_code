@@ -199,7 +199,8 @@ void CallGraphNode::AddToCallGraph(const GlobalVar& gv, const Function& func) {
 const CallGraphEntry* CallGraphNode::operator[](const GlobalVar& gv) const {
   const_iterator cit = call_graph_.find(gv);
   ICHECK(cit != call_graph_.end())
-      << "GlobalVar " << gv->name_hint << " not found in the call graph!";
+      << "GlobalVar " << gv->name_hint << " not found in the call graph!"
+      << " " << gv.get();
   return cit->second.get();
 }
 
@@ -285,15 +286,18 @@ std::vector<CallGraphEntry*> CallGraphNode::TopologicalOrder() const {
   }
 
   // Find out the missing global functions if there are any to help debugging.
-  if (ret.size() != module->functions.size()) {
+  if (ret.size() != module->functions.size() &&
+      !transform::PassContext::Current()
+           ->GetConfig<Bool>("relay.db_coarsen_granularity", Bool(false))
+           .value()) {
     std::cout << "[CG] Functions in the module" << std::endl;
     for (auto it : module->functions) {
-      std::cout << "[CG]  " << it.first << std::endl;
+      std::cout << "[CG]  " << it.first << " " << it.first.get() << std::endl;
     }
 
     std::cout << "[CG] Functions in the CG" << std::endl;
     for (auto it : ret) {
-      std::cout << "[CG]  " << it->GetGlobalVar() << std::endl;
+      std::cout << "[CG]  " << it->GetGlobalVar() << " " << it->GetGlobalVar().get() << std::endl;
     }
 
     for (auto it : module->functions) {

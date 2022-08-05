@@ -33,7 +33,7 @@
 #include <unordered_map>
 #include <vector>
 
-// #define USE_Z3_ANALYZER
+#define USE_Z3_ANALYZER
 
 #ifdef USE_Z3_ANALYZER
 #include "z3_analyzer.h"
